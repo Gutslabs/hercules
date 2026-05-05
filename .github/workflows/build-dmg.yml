@@ -1,0 +1,49 @@
+name: Build DMG
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Build Hercules
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project BodyTrack.xcodeproj \
+            -scheme BodyTrack \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Create DMG
+        run: |
+          set -euo pipefail
+          APP="build/DerivedData/Build/Products/Release/Hercules.app"
+          test -d "$APP"
+          mkdir -p build/dmg-root
+          ditto "$APP" "build/dmg-root/Hercules.app"
+          ln -s /Applications "build/dmg-root/Applications"
+          hdiutil create \
+            -volname "Hercules" \
+            -srcfolder build/dmg-root \
+            -ov \
+            -format UDZO \
+            build/Hercules.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hercules.dmg
+          path: build/Hercules.dmg
