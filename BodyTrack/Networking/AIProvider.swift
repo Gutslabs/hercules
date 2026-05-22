@@ -86,6 +86,8 @@ protocol AIClient {
     func send(
         history: [ChatTurn],
         newUserText: String,
-        onSearchStart: @MainActor @escaping (String) -> Void
+        userContext: String?,
+        onSearchStart: @MainActor @escaping (String) -> Void,
+        onMessageUpdate: @MainActor @escaping (String) -> Void
     ) async throws -> (AIFoodResult, String?)
 }

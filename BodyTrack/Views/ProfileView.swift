@@ -14,9 +14,12 @@ struct ProfileView: View {
     @State private var goal: Goal = .maintain
     @State private var targetWeight: Double? = nil
     @State private var manualBodyFat: Double? = nil
+    @State private var about: String = ""
+    @State private var manualCalorieOffset: Double = 0
 
     @State private var saved = false
     @State private var hasInitialized = false
+    @State private var autosaveTask: Task<Void, Never>? = nil
 
     private var latest: Measurement? { measurements.first }
     private var ageYears: Int {
@@ -31,20 +34,438 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
+                profileActions
                 hero
-                inputsRow
-                goalsSection
-                WorkoutScheduleCard()
+                identityCard
+                aboutCard
+                activityGoalCards
+                calorieGoalCard
                 HealthKitCard()
                 AIProviderCard()
                 BackupCard()
-                saveBar
                 Spacer(minLength: 24)
             }
             .padding(Spacing.xxl)
         }
         .background(Palette.background.ignoresSafeArea())
         .onAppear { initializeFromProfile() }
+        .onChange(of: about) { _, _ in
+            scheduleAutosave()
+        }
+        .onDisappear {
+            autosaveTask?.cancel()
+            save()
+        }
+    }
+
+    private var profileActions: some View {
+        HStack {
+            Spacer()
+            Button { save() } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: saved ? "checkmark.circle.fill" : "checkmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .symbolEffect(.bounce, value: saved)
+                    Text(saved ? "Kaydedildi" : "Kaydet")
+                        .font(Typography.bodyBold)
+                }
+                .foregroundStyle(saved ? Palette.positive : Palette.textPrimary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(Palette.surfaceElevated)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .strokeBorder(saved ? Palette.positive.opacity(0.45) : Palette.border, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("s", modifiers: .command)
+            .help("Profili kaydet (⌘S)")
+        }
+    }
+
+    /// Kimlik kartı — hero ile tutarlı görünüm, custom Card.
+    private var identityCard: some View {
+        Card(padding: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                Text("Kimlik").eyebrow()
+                profileRow(label: "Doğum tarihi") {
+                    DatePicker("", selection: $birthDate, in: ...Date(), displayedComponents: .date)
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .controlSize(.small)
+                }
+                Hairline()
+                profileRow(label: "Boy") {
+                    HStack(spacing: 4) {
+                        TextField("", value: $height, format: .number)
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                            .font(Typography.mono)
+                            .foregroundStyle(Palette.textPrimary)
+                            .frame(width: 60)
+                        Text("cm")
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+                Hairline()
+                profileRow(label: "Hedef ağırlık") {
+                    HStack(spacing: 4) {
+                        TextField("opsiyonel", value: $targetWeight, format: .number)
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                            .font(Typography.mono)
+                            .foregroundStyle(Palette.textPrimary)
+                            .frame(width: 60)
+                        Text("kg")
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+                Hairline()
+                profileRow(label: "Manuel yağ %") {
+                    HStack(spacing: 4) {
+                        TextField(
+                            latest?.bodyFat.map { "ölçüm: \(Fmt.num($0, digits: 1))" } ?? "opsiyonel",
+                            value: $manualBodyFat,
+                            format: .number
+                        )
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.trailing)
+                        .font(Typography.mono)
+                        .foregroundStyle(Palette.textPrimary)
+                        .frame(width: 60)
+                        Text("%")
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func profileRow<Trailing: View>(label: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack {
+            Text(label)
+                .font(Typography.body)
+                .foregroundStyle(Palette.textSecondary)
+            Spacer()
+            trailing()
+        }
+        .frame(minHeight: 28)
+    }
+
+    /// Aktivite + Hedef seçim kartları — yan yana.
+    private var activityGoalCards: some View {
+        HStack(alignment: .top, spacing: Spacing.md) {
+            Card(padding: Spacing.lg) {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("Aktivite").eyebrow()
+                    Picker("", selection: $activity) {
+                        ForEach(ActivityLevel.allCases) {
+                            Text("\($0.label) · ×\(Fmt.num($0.multiplier, digits: 2))").tag($0)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    Text(activity.detail)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Card(padding: Spacing.lg) {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("Hedef").eyebrow()
+                    Picker("", selection: $goal) {
+                        ForEach(Goal.allCases) {
+                            Text("\($0.label) · \($0.detail)").tag($0)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    Text(goal.detail)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// Hakkında — kullanıcının kendi geçmişini özetlediği, AI'ya her sohbette
+    /// kalıcı context olarak verilen serbest metin.
+    private var aboutCard: some View {
+        Card(padding: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack {
+                    HStack(spacing: 5) {
+                        Image(systemName: "person.text.rectangle")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                        Text("Hakkında").eyebrow()
+                    }
+                    Spacer()
+                    Text(aboutCharCount)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textQuaternary)
+                        .contentTransition(.numericText())
+                }
+                Text("Burada kendinden bahset — kimsin, geçmişin ne, hedefin ne. AI bu metni HER sohbette görür ve sana göre cevap verir. Metin içinde `@Ölçümler`, `@Antrenman` gibi etiket yazarsan o veri de her sohbette inject olur.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextEditor(text: $about)
+                    .scrollContentBackground(.hidden)
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textPrimary)
+                    .frame(minHeight: 140)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(Palette.surfaceElevated)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: 0.5)
+                    )
+                    .overlay(alignment: .topLeading) {
+                        if about.isEmpty {
+                            Text("ör: 28 yaşındayım, 13 yaşımdan beri kilo problemim var. 16'da 120 kg'dan spora başladım. 22'de 82 kg'a düştüm ama skinny fat'tım. Şimdi 25 yaşında, 88 kg, kas kütlemi koruyarak yağdan kilo vermeye odaklanıyorum.")
+                                .font(Typography.body)
+                                .foregroundStyle(Palette.textQuaternary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 16)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                if !about.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9))
+                        Text("AI bu bilgiyi her sohbette görüyor")
+                            .font(Typography.caption)
+                    }
+                    .foregroundStyle(Palette.accent)
+                }
+            }
+        }
+    }
+
+    private var aboutCharCount: String {
+        let chars = about.count
+        if chars == 0 { return "boş" }
+        return "\(chars) karakter"
+    }
+
+    // MARK: - Calorie goal card (eski Kalori sayfasından merge)
+
+    /// Profil + son ölçüm + manuel offset'ten CalorieCalculator ile günlük hedef.
+    private var calorieResult: CalorieResult? {
+        guard let weight = latest?.weight ?? targetWeight else { return nil }
+        let bf = latest?.bodyFat ?? manualBodyFat
+        let ageInt = Calendar.current.dateComponents([.year], from: birthDate, to: .now).year ?? 28
+        return CalorieCalculator.compute(
+            weight: weight,
+            height: height,
+            age: ageInt,
+            sex: sex,
+            bodyFat: bf,
+            activity: activity,
+            goal: goal,
+            manualOffset: manualCalorieOffset
+        )
+    }
+
+    private var calorieGoalCard: some View {
+        Card(padding: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                HStack(alignment: .firstTextBaseline) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                        Text("Günlük Kalori Hedefi").eyebrow()
+                    }
+                    Spacer()
+                    if let r = calorieResult {
+                        Text(r.formula)
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textQuaternary)
+                    }
+                }
+
+                if let r = calorieResult {
+                    // Büyük hedef rakamı
+                    HStack(alignment: .lastTextBaseline, spacing: 6) {
+                        Text("\(Fmt.int(r.goalCalories))")
+                            .font(Typography.display(48))
+                            .foregroundStyle(Palette.textPrimary)
+                            .contentTransition(.numericText(value: r.goalCalories))
+                            .animation(.snappy, value: r.goalCalories)
+                        Text("kcal/gün")
+                            .font(Typography.body)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+
+                    Hairline()
+
+                    // Breakdown row: BMR, TDEE, Hedef adj, Manual offset
+                    HStack(spacing: Spacing.lg) {
+                        breakdownStat("BMR", "\(Fmt.int(r.bmr)) kcal", tint: Palette.textSecondary)
+                        Divider().frame(height: 30).background(Palette.border)
+                        breakdownStat("TDEE", "\(Fmt.int(r.tdee)) kcal", tint: Palette.textSecondary)
+                        Divider().frame(height: 30).background(Palette.border)
+                        breakdownStat("Hedef adj", goalAdjString, tint: goalAdjTint)
+                        if manualCalorieOffset != 0 {
+                            Divider().frame(height: 30).background(Palette.border)
+                            breakdownStat("Manuel", manualOffsetDisplay, tint: manualOffsetTint)
+                        }
+                        Spacer()
+                    }
+
+                    Hairline()
+
+                    // Macro split
+                    macroRow(r)
+
+                    // Manual offset control
+                    HStack {
+                        Text("Manuel offset")
+                            .font(Typography.body)
+                            .foregroundStyle(Palette.textSecondary)
+                        Spacer()
+                        Text(manualOffsetDisplay)
+                            .font(Typography.mono)
+                            .foregroundStyle(manualOffsetTint)
+                        Stepper(
+                            "",
+                            value: $manualCalorieOffset,
+                            in: -500...500,
+                            step: 50
+                        )
+                        .labelsHidden()
+                        if manualCalorieOffset != 0 {
+                            Button("Sıfırla") { manualCalorieOffset = 0 }
+                                .buttonStyle(.borderless)
+                                .controlSize(.small)
+                        }
+                    }
+
+                    // Extras
+                    HStack(spacing: Spacing.md) {
+                        extraTile(label: "Su", value: "\(Fmt.num(r.water, digits: 1)) L", icon: "drop.fill", tint: Color(red: 0.50, green: 0.74, blue: 0.92))
+                        extraTile(label: "Lif", value: "\(Fmt.int(r.fiber)) g", icon: "leaf.fill", tint: Palette.macroCarbs)
+                        extraTile(label: "Yağsız", value: "\(Fmt.num(r.leanMass, digits: 1)) kg", icon: "figure.strengthtraining.traditional", tint: Palette.accent)
+                    }
+                } else {
+                    // Eksik veri durumu
+                    Text("Hesap için en az ağırlık verisi gerekli. Yeni ölçüm ekle veya hedef ağırlık gir.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+        }
+    }
+
+    private func breakdownStat(_ label: String, _ value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).eyebrow()
+            Text(value)
+                .font(Typography.mono)
+                .foregroundStyle(tint)
+        }
+    }
+
+    private func macroRow(_ r: CalorieResult) -> some View {
+        HStack(spacing: Spacing.md) {
+            macroTile(label: "Protein", grams: r.protein.grams, percent: r.protein.percent, tint: Palette.macroProtein)
+            macroTile(label: "Karbonhidrat", grams: r.carbs.grams, percent: r.carbs.percent, tint: Palette.macroCarbs)
+            macroTile(label: "Yağ", grams: r.fat.grams, percent: r.fat.percent, tint: Palette.macroFat)
+        }
+    }
+
+    private func macroTile(label: String, grams: Double, percent: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Circle().fill(tint).frame(width: 5, height: 5)
+                Text(label).eyebrow()
+            }
+            HStack(alignment: .lastTextBaseline, spacing: 3) {
+                Text("\(Fmt.int(grams))")
+                    .font(Typography.hero(22))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("g")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                Spacer()
+                Text("%\(Fmt.int(percent * 100))")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+
+    private func extraTile(label: String, value: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).eyebrow()
+                Text(value)
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+
+    private var goalAdjString: String {
+        let v = goal.calorieAdjustment
+        if v == 0 { return "0 kcal" }
+        return "\(v > 0 ? "+" : "")\(Fmt.int(v)) kcal"
+    }
+
+    private var goalAdjTint: Color {
+        let v = goal.calorieAdjustment
+        if v == 0 { return Palette.textSecondary }
+        return v < 0 ? Palette.positive : Palette.warning
+    }
+
+    private var manualOffsetDisplay: String {
+        if manualCalorieOffset == 0 { return "0 kcal" }
+        return "\(manualCalorieOffset > 0 ? "+" : "")\(Fmt.int(manualCalorieOffset)) kcal"
+    }
+
+    private var manualOffsetTint: Color {
+        if manualCalorieOffset == 0 { return Palette.textTertiary }
+        return manualCalorieOffset < 0 ? Palette.positive : Palette.warning
     }
 
     // MARK: - Hero (büyük üst kart)
@@ -55,18 +476,14 @@ struct ProfileView: View {
                 // Avatar
                 ZStack {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Palette.accent, Palette.accent.opacity(0.5)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 72, height: 72)
-                        .shadow(color: Palette.accent.opacity(0.4), radius: 12, y: 4)
+                        .fill(Palette.surfaceElevated)
+                        .frame(width: 64, height: 64)
+                    Circle()
+                        .strokeBorder(Palette.border, lineWidth: 0.5)
+                        .frame(width: 64, height: 64)
                     Text(initial)
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(.black.opacity(0.85))
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(Palette.textPrimary)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -113,32 +530,13 @@ struct ProfileView: View {
         }
         .padding(Spacing.xl)
         .background(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Palette.surface,
-                            Palette.surface.opacity(0.7)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
-        .overlay(alignment: .topTrailing) {
-            // Subtle accent decoration
-            Circle()
-                .fill(Palette.accent.opacity(0.08))
-                .frame(width: 200, height: 200)
-                .blur(radius: 60)
-                .offset(x: 60, y: -60)
-                .allowsHitTesting(false)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous))
     }
 
     private var initial: String {
@@ -247,25 +645,6 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Save
-
-    private var saveBar: some View {
-        HStack {
-            if saved {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Palette.positive)
-                    Text("Kaydedildi")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                }
-            }
-            Spacer()
-            PrimaryButton(title: "Profili Kaydet", systemImage: "checkmark") { save() }
-                .frame(width: 200)
-        }
-    }
-
     private func initializeFromProfile() {
         guard !hasInitialized else { return }
         hasInitialized = true
@@ -278,6 +657,8 @@ struct ProfileView: View {
         goal = p.goal
         targetWeight = p.targetWeight
         manualBodyFat = p.manualBodyFat
+        about = p.about
+        manualCalorieOffset = p.manualCalorieOffset
     }
 
     private func save() {
@@ -294,10 +675,26 @@ struct ProfileView: View {
         profile.goal = goal
         profile.targetWeight = targetWeight
         profile.manualBodyFat = manualBodyFat
+        profile.about = about
+        profile.manualCalorieOffset = manualCalorieOffset
         try? ctx.save()
         saved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             saved = false
+        }
+    }
+
+    private func scheduleAutosave() {
+        guard hasInitialized else { return }
+        autosaveTask?.cancel()
+        autosaveTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 700_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            save()
         }
     }
 }
@@ -317,11 +714,7 @@ private struct SexSwitch: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(sex == s ? Palette.accent.opacity(0.18) : Color.clear)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .strokeBorder(sex == s ? Palette.accent.opacity(0.4) : Color.clear, lineWidth: 0.5)
+                                .fill(sex == s ? Color.white.opacity(0.08) : Color.clear)
                         )
                 }
                 .buttonStyle(.plain)
@@ -377,10 +770,10 @@ private struct ActivityPicker: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "figure.run")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.accent)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.textSecondary)
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(Palette.accent.opacity(0.15)))
+                    .background(Circle().fill(Palette.surfaceElevated))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Aktivite").eyebrow()
                     Text(selection.label)
@@ -430,10 +823,10 @@ private struct GoalPicker: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "target")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.accent)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.textSecondary)
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(Palette.accent.opacity(0.15)))
+                    .background(Circle().fill(Palette.surfaceElevated))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Hedef").eyebrow()
                     Text(selection.label)
@@ -542,11 +935,16 @@ private struct WorkoutRow: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(isToday ? Palette.accent.opacity(0.2) : (workout != nil ? Palette.surfaceElevated : Color.white.opacity(0.03)))
+                    .fill(workout != nil ? Palette.surfaceElevated : Color.white.opacity(0.03))
                     .frame(width: 28, height: 28)
+                if isToday {
+                    Circle()
+                        .strokeBorder(Palette.borderStrong, lineWidth: 1)
+                        .frame(width: 28, height: 28)
+                }
                 Text(WorkoutSession.weekdayShort[weekday])
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(isToday ? Palette.accent : (workout != nil ? Palette.textPrimary : Palette.textTertiary))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(workout != nil || isToday ? Palette.textPrimary : Palette.textTertiary)
             }
 
             Text(WorkoutSession.weekdayNames[weekday])
@@ -601,53 +999,36 @@ private struct WorkoutEditor: View {
     @State private var caloriesEdit: Double = 300
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text(WorkoutSession.weekdayNames[workout.weekday])
-                .font(Typography.title)
-                .foregroundStyle(Palette.textPrimary)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Antrenman").eyebrow()
-                TextField("ör: Sırt + Göğüs", text: $nameEdit)
-                    .textFieldStyle(.plain)
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Tahmini Kalori").eyebrow()
-                HStack(spacing: 8) {
-                    TextField("300", value: $caloriesEdit, format: .number)
-                        .textFieldStyle(.plain)
-                        .font(Typography.monoLarge)
-                        .foregroundStyle(Palette.textPrimary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
-                    Text("kcal")
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.textTertiary)
+        NavigationStack {
+            Form {
+                Section(WorkoutSession.weekdayNames[workout.weekday]) {
+                    TextField("Antrenman", text: $nameEdit, prompt: Text("ör: Sırt + Göğüs"))
+                    LabeledContent("Tahmini kcal") {
+                        TextField("", value: $caloriesEdit, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
                 }
             }
-
-            HStack {
-                GhostButton(title: "İptal", action: { dismiss() })
-                PrimaryButton(title: "Kaydet", systemImage: "checkmark") {
-                    workout.name = nameEdit.trimmingCharacters(in: .whitespaces)
-                    workout.estimatedCalories = caloriesEdit
-                    onDone()
-                    dismiss()
+            .formStyle(.grouped)
+            .navigationTitle("Antrenman")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("İptal") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Kaydet") {
+                        workout.name = nameEdit.trimmingCharacters(in: .whitespaces)
+                        workout.estimatedCalories = caloriesEdit
+                        onDone()
+                        dismiss()
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
             }
         }
-        .padding(Spacing.xxl)
-        .frame(width: 420)
-        .background(Palette.background.ignoresSafeArea())
+        .frame(width: 420, height: 260)
         .onAppear {
             nameEdit = workout.name
             caloriesEdit = workout.estimatedCalories
@@ -655,16 +1036,15 @@ private struct WorkoutEditor: View {
     }
 }
 
-// MARK: - HealthKit card
+// MARK: - Activity sync card
 
 struct HealthKitCard: View {
     @Environment(\.modelContext) private var ctx
-    @StateObject private var health = HealthService.shared
+    private var sync = ShortcutHealthSyncService.shared
     @Query(sort: \StepEntry.date, order: .reverse) private var allSteps: [StepEntry]
     @Query(sort: \Measurement.date, order: .reverse) private var measurements: [Measurement]
-    @State private var requesting = false
     @State private var stepInput: Int = 0
-    @State private var inputFocused: Bool = false
+    @FocusState private var inputFocused: Bool
 
     private var todaysEntry: StepEntry? {
         let cal = Calendar.current
@@ -676,33 +1056,86 @@ struct HealthKitCard: View {
     }
 
     private var todaysCalorieBurn: Double {
-        guard let s = todaysEntry?.steps else { return 0 }
-        return StepEntry.calorieBurn(steps: s, weightKg: weight)
+        guard let entry = todaysEntry else { return 0 }
+        return StepEntry.calorieBurn(for: entry, weightKg: weight)
+    }
+
+    private var weekEntries: [StepEntry] { entries(days: 7) }
+    private var monthEntries: [StepEntry] { entries(days: 30) }
+
+    private var weekSteps: Int { weekEntries.reduce(0) { $0 + $1.steps } }
+    private var monthSteps: Int { monthEntries.reduce(0) { $0 + $1.steps } }
+    private var weekDistance: Double { weekEntries.compactMap(\.distanceMeters).reduce(0, +) }
+    private var monthDistance: Double { monthEntries.compactMap(\.distanceMeters).reduce(0, +) }
+    private var weekCalories: Double { weekEntries.reduce(0) { $0 + StepEntry.calorieBurn(for: $1, weightKg: weight) } }
+    private var monthCalories: Double { monthEntries.reduce(0) { $0 + StepEntry.calorieBurn(for: $1, weightKg: weight) } }
+
+    private var weeklyAverageSteps: Int {
+        Int((Double(weekSteps) / 7.0).rounded())
+    }
+
+    private var monthlyAverageSteps: Int {
+        Int((Double(monthSteps) / 30.0).rounded())
+    }
+
+    private var syncBadgeText: String {
+        sync.syncFileExists ? "Shortcuts sync aktif" : "Dosya bekleniyor"
+    }
+
+    private var syncBadgeIcon: String {
+        sync.syncFileExists ? "checkmark.icloud" : "icloud.and.arrow.down"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             HStack {
                 HStack(spacing: 6) {
                     Image(systemName: "figure.walk")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Palette.accent)
-                    Text("Adım Sayısı").eyebrow()
+                    Text("Adım & Aktivite").eyebrow()
                 }
                 Spacer()
-                if case .authorized = health.status {
-                    Text("HealthKit · senkron")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.positive)
+                HStack(spacing: 5) {
+                    Image(systemName: syncBadgeIcon)
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(syncBadgeText)
+                        .font(Typography.captionBold)
                 }
+                .foregroundStyle(sync.syncFileExists ? Palette.positive : Palette.textTertiary)
             }
 
-            // Auto (HealthKit) öncelikli, yoksa manuel input
-            if case .authorized = health.status {
-                healthKitView
-            } else {
-                manualEntryView
+            LazyVGrid(columns: [
+                GridItem(.adaptive(minimum: 150), spacing: Spacing.lg, alignment: .leading)
+            ], alignment: .leading, spacing: Spacing.md) {
+                activityMetric(
+                    label: "Bugün",
+                    value: Fmt.int(Double(todaysEntry?.steps ?? 0)),
+                    unit: "adım",
+                    detail: "\(Fmt.int(todaysCalorieBurn)) kcal · \(formatDistance(todaysEntry?.distanceMeters ?? 0))"
+                )
+                activityMetric(
+                    label: "7 gün",
+                    value: Fmt.int(Double(weekSteps)),
+                    unit: "adım",
+                    detail: "\(Fmt.int(Double(weeklyAverageSteps))) / gün · \(formatDistance(weekDistance))"
+                )
+                activityMetric(
+                    label: "30 gün",
+                    value: Fmt.int(Double(monthSteps)),
+                    unit: "adım",
+                    detail: "\(Fmt.int(Double(monthlyAverageSteps))) / gün · \(formatDistance(monthDistance))"
+                )
+                activityMetric(
+                    label: "Yakım",
+                    value: Fmt.int(monthCalories),
+                    unit: "kcal",
+                    detail: "30 gün · 7 gün \(Fmt.int(weekCalories)) kcal"
+                )
             }
+
+            syncStatusRow
+            manualEntryView
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -715,7 +1148,7 @@ struct HealthKitCard: View {
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
         .task {
-            if case .authorized = health.status { await health.refresh() }
+            sync.importIfAvailable(into: ctx)
             stepInput = todaysEntry?.steps ?? 0
         }
         .onChange(of: todaysEntry?.steps) { _, new in
@@ -723,13 +1156,26 @@ struct HealthKitCard: View {
         }
     }
 
-    private var healthKitView: some View {
-        HStack(spacing: Spacing.lg) {
-            metric(label: "Adım", value: Fmt.int(Double(health.stepsToday)), unit: "")
-            metric(label: "Aktif Kalori", value: Fmt.int(health.activeCaloriesToday), unit: "kcal")
+    private var syncStatusRow: some View {
+        HStack(spacing: Spacing.md) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.textTertiary)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(sync.displayPath)
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(sync.lastMessage)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(2)
+            }
             Spacer()
             Button {
-                Task { await health.refresh() }
+                sync.importIfAvailable(into: ctx)
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 11, weight: .semibold))
@@ -739,6 +1185,7 @@ struct HealthKitCard: View {
                     .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
             }
             .buttonStyle(.plain)
+            .help("Shortcut sync dosyasını şimdi oku")
         }
     }
 
@@ -753,6 +1200,7 @@ struct HealthKitCard: View {
                             .font(Typography.hero(28))
                             .foregroundStyle(Palette.textPrimary)
                             .frame(maxWidth: 140)
+                            .focused($inputFocused)
                             .onSubmit { saveSteps() }
                         Text("adım")
                             .font(Typography.body)
@@ -788,7 +1236,7 @@ struct HealthKitCard: View {
                 .disabled(stepInput == (todaysEntry?.steps ?? 0))
                 .opacity(stepInput == (todaysEntry?.steps ?? 0) ? 0.5 : 1)
             }
-            Text("iPhone Health'inden bak ya da pedometre uygulamandan kopyala. Kalori bütçene eklenir.")
+            Text("iPhone Shortcuts her gün \(sync.displayPath) dosyasını günceller. Mac app açıkken dosyayı otomatik içeri alır; burası acil durum manuel giriş.")
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textTertiary)
         }
@@ -798,6 +1246,9 @@ struct HealthKitCard: View {
         if let entry = todaysEntry {
             entry.steps = stepInput
             entry.source = "manual"
+            entry.distanceMeters = nil
+            entry.activeEnergyKcal = nil
+            entry.syncedAt = nil
         } else {
             let new = StepEntry(date: .now, steps: stepInput, source: "manual")
             ctx.insert(new)
@@ -805,7 +1256,7 @@ struct HealthKitCard: View {
         try? ctx.save()
     }
 
-    private func metric(label: String, value: String, unit: String) -> some View {
+    private func activityMetric(label: String, value: String, unit: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).eyebrow()
             HStack(alignment: .lastTextBaseline, spacing: 3) {
@@ -818,7 +1269,37 @@ struct HealthKitCard: View {
                         .foregroundStyle(Palette.textTertiary)
                 }
             }
+            Text(detail)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
+    }
+
+    private func entries(days: Int) -> [StepEntry] {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: .now)
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
+        let end = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? .now
+
+        var byDay: [Date: StepEntry] = [:]
+        for entry in allSteps where entry.date >= start && entry.date < end {
+            let day = calendar.startOfDay(for: entry.date)
+            if let existing = byDay[day] {
+                if entry.date > existing.date {
+                    byDay[day] = entry
+                }
+            } else {
+                byDay[day] = entry
+            }
+        }
+        return byDay.values.sorted { $0.date < $1.date }
+    }
+
+    private func formatDistance(_ meters: Double) -> String {
+        if meters <= 0 { return "0 km" }
+        return "\(Fmt.num(meters / 1000, digits: 1)) km"
     }
 }
 
@@ -830,6 +1311,9 @@ struct AIProviderCard: View {
     @State private var apiKey: String = ""
     @State private var codexStatus: CodexAuth.Status = .noCodexCLI
     @State private var importing = false
+    @State private var importResult: String? = nil       // başarı/hata mesajı
+    @State private var importSuccess: Bool = false       // ikon rengi için
+    @State private var showLoginHelp: Bool = false       // yardım panelini aç/kapat
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
@@ -864,11 +1348,11 @@ struct AIProviderCard: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: Radius.sm - 2)
-                                .fill(provider == p ? Palette.accent.opacity(0.18) : Palette.surfaceElevated)
+                                .fill(provider == p ? Color.white.opacity(0.08) : Palette.surfaceElevated)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: Radius.sm - 2)
-                                .strokeBorder(provider == p ? Palette.accent.opacity(0.4) : Palette.border, lineWidth: 0.5)
+                                .strokeBorder(provider == p ? Palette.borderStrong : Palette.border, lineWidth: 0.5)
                         )
                     }
                     .buttonStyle(.plain)
@@ -916,31 +1400,134 @@ struct AIProviderCard: View {
 
     @ViewBuilder
     private var codexSection: some View {
-        switch codexStatus {
-        case .noCodexCLI:
-            statusRow(icon: "exclamationmark.triangle", color: Palette.warning,
-                      title: "Codex CLI bulunamadı",
-                      detail: "Terminal: codex login")
-        case .ready(let acct):
-            HStack(spacing: 10) {
-                statusRow(icon: "checkmark.circle.fill", color: Palette.positive,
-                          title: "Bağlandı",
-                          detail: acct.map { "Hesap: \($0.prefix(8))…" } ?? "Token hazır")
-                Button {
-                    Task { await reimport() }
-                } label: {
-                    Image(systemName: importing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Palette.textSecondary)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(Palette.surfaceElevated))
-                        .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
+        VStack(alignment: .leading, spacing: 8) {
+            switch codexStatus {
+            case .noCodexCLI:
+                statusRow(icon: "exclamationmark.triangle", color: Palette.warning,
+                          title: "Codex CLI bulunamadı",
+                          detail: "Terminal'de: codex login")
+            case .ready(let acct):
+                HStack(spacing: 10) {
+                    statusRow(icon: "checkmark.circle.fill", color: Palette.positive,
+                              title: "Bağlandı",
+                              detail: acct.map { "Hesap: \($0.prefix(8))…" } ?? "Token hazır")
+                    Button {
+                        Task { await reimport() }
+                    } label: {
+                        Image(systemName: importing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Palette.textSecondary)
+                            .frame(width: 26, height: 26)
+                            .background(Circle().fill(Palette.surfaceElevated))
+                            .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
+                            .symbolEffect(.rotate, value: importing)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(importing)
+                    .help("auth.json'dan token'ı yeniden yükle")
                 }
-                .buttonStyle(.plain)
-                .disabled(importing)
+            case .error(let m):
+                statusRow(icon: "xmark.circle.fill", color: Palette.negative, title: "Hata", detail: m)
             }
-        case .error(let m):
-            statusRow(icon: "xmark.circle.fill", color: Palette.negative, title: "Hata", detail: m)
+
+            // Import sonucu (başarı/hata mesajı)
+            if let msg = importResult {
+                HStack(spacing: 5) {
+                    Image(systemName: importSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text(msg)
+                        .font(Typography.caption)
+                        .lineLimit(2)
+                }
+                .foregroundStyle(importSuccess ? Palette.positive : Palette.warning)
+            }
+
+            // Yardım butonu (toggle)
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { showLoginHelp.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: showLoginHelp ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Token expire oldu / 401 hatası alıyorsan")
+                        .font(Typography.caption)
+                }
+                .foregroundStyle(Palette.textTertiary)
+            }
+            .buttonStyle(.plain)
+
+            if showLoginHelp {
+                loginHelpPanel
+            }
+        }
+    }
+
+    /// Codex login yardım paneli — token süresi dolduğunda yapılacaklar.
+    private var loginHelpPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Token expire olunca üç adım:")
+                .font(Typography.captionBold)
+                .foregroundStyle(Palette.textSecondary)
+
+            helpStep(num: "1", text: "Terminal'i aç ve şu komutu çalıştır:")
+            HStack(spacing: 6) {
+                Text("codex login")
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Palette.background))
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString("codex login", forType: .string)
+                    importResult = "✓ Komut panoya kopyalandı"
+                    importSuccess = true
+                } label: {
+                    Label("Kopyala", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    openTerminal()
+                } label: {
+                    Label("Terminal'i Aç", systemImage: "terminal")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            helpStep(num: "2", text: "Browser açılacak — ChatGPT hesabınla giriş yap.")
+
+            helpStep(num: "3", text: "Buraya dön, üstteki ↻ butonuna bas — yeni token yüklenir.")
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
+    }
+
+    private func helpStep(num: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(num)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 14, height: 14)
+                .background(Circle().fill(Palette.accent.opacity(0.15)))
+            Text(text)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func openTerminal() {
+        // Terminal.app'i aç
+        if let url = URL(string: "file:///System/Applications/Utilities/Terminal.app") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -973,14 +1560,45 @@ struct AIProviderCard: View {
     @MainActor
     private func reimport() async {
         importing = true
+        importResult = nil
         defer { importing = false }
+
+        // 1) auth.json'dan token yükle
+        let tokens: CodexTokens
         do {
-            _ = try CodexAuth.shared.importFromCodexCLI()
+            tokens = try CodexAuth.shared.importFromCodexCLI()
+        } catch {
+            importResult = "Token dosyası okunamadı: \(error.localizedDescription). Terminal'de 'codex login' çalıştır."
+            importSuccess = false
+            showLoginHelp = true
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            importResult = nil
+            return
+        }
+
+        // 2) Gerçek test — refresh endpoint'ine post et. Bu sunucunun token'ı
+        //    hala kabul edip etmediğini canlı doğrular.
+        do {
+            _ = try await CodexAuth.shared.refresh(tokens)
             refreshCodexStatus()
             NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+            importResult = "✓ Token doğrulandı — chat hazır"
+            importSuccess = true
+            showLoginHelp = false
         } catch {
-            // sessizce yut
+            // Refresh API'den hata geldi — token sunucuda invalidated, yeniden login gerek
+            let msg = error.localizedDescription
+            if msg.contains("401") || msg.lowercased().contains("invalid") || msg.lowercased().contains("reused") {
+                importResult = "Token sunucuda geçersiz — 'codex login' çalıştırman gerekiyor."
+            } else {
+                importResult = "Doğrulama başarısız: \(msg)"
+            }
+            importSuccess = false
+            showLoginHelp = true
         }
+
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+        importResult = nil
     }
 }
 
@@ -1024,7 +1642,7 @@ struct BackupCard: View {
                     Image(systemName: "folder")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.textTertiary)
-                    Text("~/Documents/Hercules/hercules-backup.json")
+                    Text(backupLocationText)
                         .font(Typography.mono)
                         .foregroundStyle(Palette.textSecondary)
                         .lineLimit(1)
@@ -1037,7 +1655,19 @@ struct BackupCard: View {
                     Spacer(minLength: 0)
                 }
 
-                Text("App silinse bile bu dosya kalır. iCloud Drive / Dropbox'a kopyala, dilediğin Mac'te geri yükle.")
+                HStack(spacing: 6) {
+                    Image(systemName: BackupService.shared.iCloudMirrorAvailable ? "icloud" : "icloud.slash")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(BackupService.shared.iCloudMirrorAvailable ? "iCloud Drive mirror aktif" : "iCloud Drive klasörü bulunamadı")
+                        .font(Typography.captionBold)
+                    if BackupService.shared.iCloudBackupExists {
+                        Text("· yedek var")
+                            .font(Typography.caption)
+                    }
+                }
+                .foregroundStyle(BackupService.shared.iCloudMirrorAvailable ? Palette.positive : Palette.textTertiary)
+
+                Text("Ölçümler, antrenmanlar, takvim, tarifler, profil, Hakkında, chat geçmişi, memory ve research cache bu yedeğe girer. Restore öncesi otomatik safety backup alınır.")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(nil)
@@ -1046,54 +1676,31 @@ struct BackupCard: View {
 
             HStack(spacing: 8) {
                 Button(action: backupNow) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.up.doc")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Şimdi Yedekle").font(Typography.caption)
-                    }
-                    .foregroundStyle(Palette.textPrimary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: Radius.sm - 2).fill(Palette.surfaceElevated))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.sm - 2).strokeBorder(Palette.border, lineWidth: 0.5))
+                    Label("Şimdi Yedekle", systemImage: "arrow.up.doc")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .help("⌘⇧B")
 
                 Button(action: revealInFinder) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Finder'da Göster").font(Typography.caption)
-                    }
-                    .foregroundStyle(Palette.textSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: Radius.sm - 2).fill(Palette.surfaceElevated))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.sm - 2).strokeBorder(Palette.border, lineWidth: 0.5))
+                    Label("Finder'da Göster", systemImage: "magnifyingglass")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .disabled(!BackupService.shared.backupExists)
-                .opacity(BackupService.shared.backupExists ? 1 : 0.4)
 
                 Spacer()
 
-                Button {
+                Button(role: .destructive) {
                     showRestoreConfirm = true
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.down.doc")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Geri Yükle").font(Typography.caption)
-                    }
-                    .foregroundStyle(Palette.warning)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: Radius.sm - 2).fill(Palette.warning.opacity(0.1)))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.sm - 2).strokeBorder(Palette.warning.opacity(0.3), lineWidth: 0.5))
+                    Label("Geri Yükle", systemImage: "arrow.down.doc")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(Palette.warning)
                 .disabled(!BackupService.shared.backupExists || importing)
-                .opacity(BackupService.shared.backupExists ? 1 : 0.4)
             }
 
             if let msg = statusMessage {
@@ -1134,7 +1741,7 @@ struct BackupCard: View {
         importing = true
         defer { importing = false }
         do {
-            try BackupService.shared.restore(from: BackupService.shared.backupURL, into: ctx, mode: .replaceAll)
+            try BackupService.shared.restore(from: BackupService.shared.latestBackupURL, into: ctx, mode: .replaceAll)
             statusMessage = "✓ Geri yüklendi"
         } catch {
             statusMessage = "Hata: \(error.localizedDescription)"
@@ -1143,7 +1750,7 @@ struct BackupCard: View {
     }
 
     private func revealInFinder() {
-        NSWorkspace.shared.activateFileViewerSelecting([BackupService.shared.backupURL])
+        NSWorkspace.shared.activateFileViewerSelecting([BackupService.shared.latestBackupURL])
     }
 
     private func refreshInfo() {
@@ -1155,5 +1762,12 @@ struct BackupCard: View {
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
         return String(format: "%.1f MB", Double(bytes) / 1024 / 1024)
+    }
+
+    private var backupLocationText: String {
+        if BackupService.shared.iCloudMirrorAvailable {
+            return "~/Documents/Hercules + iCloud Drive/Hercules"
+        }
+        return "~/Documents/Hercules/hercules-backup.json"
     }
 }

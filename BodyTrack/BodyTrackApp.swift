@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AppKit
 
 @main
 struct BodyTrackApp: App {
@@ -17,7 +18,7 @@ struct BodyTrackApp: App {
             let storeURL = dir.appendingPathComponent("Hercules.store")
             let config = ModelConfiguration(url: storeURL)
             container = try ModelContainer(
-                for: Measurement.self, UserProfile.self, Recipe.self, FoodEntry.self, WorkoutSession.self, StepEntry.self,
+                for: Measurement.self, UserProfile.self, Recipe.self, FoodEntry.self, WorkoutSession.self, WorkoutPlanOverride.self, StepEntry.self, MonthlyGoal.self, MealPlanOverride.self, WorkoutLog.self, WorkoutExerciseEntry.self, ExerciseSet.self,
                 configurations: config
             )
             // 1) Önce default profil/workout seed (boşsa)
@@ -26,6 +27,8 @@ struct BodyTrackApp: App {
             let ctx = container.mainContext
             Task { @MainActor in
                 BackupService.shared.importIfStoreEmpty(into: ctx)
+                BackupService.shared.restoreFromICloudIfNewer(into: ctx)
+                ShortcutHealthSyncService.shared.startAutoImport(into: ctx)
             }
             // 3) AppDelegate'e container'ı paylaş — quit'te yedek alacak
             AppDelegate.sharedContainer = container
@@ -43,6 +46,39 @@ struct BodyTrackApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(width: 1280, height: 820)
+        .commands {
+            // App menüsünde Hercules-specific actions
+            CommandMenu("Hercules") {
+                Button("Şimdi Yedekle") {
+                    _ = BackupService.shared.export(from: container.mainContext)
+                }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+
+                Button("Health Sync Dosyasını İçe Aktar") {
+                    ShortcutHealthSyncService.shared.importIfAvailable(into: container.mainContext)
+                }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+
+                Button("Yedek Klasörünü Aç") {
+                    NSWorkspace.shared.activateFileViewerSelecting([BackupService.shared.backupURL])
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Yedek Konumunu Kopyala") {
+                    let path = BackupService.shared.backupURL.path
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
+                }
+            }
+
+            // "New" komutu — aktif view'deki ⌘N'yi zaten kullanıyoruz,
+            // burası genel bir kategori başlığı.
+            CommandGroup(replacing: .newItem) {
+                // Boş — her view kendi ⌘N'sini ToolbarItem üzerinden veriyor.
+            }
+        }
     }
 }
 
@@ -59,9 +95,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidResignActive(_ notification: Notification) {
+        // UI'ı dondurmamak için async export — fetch main'de, encode/write background'da.
         Task { @MainActor in
             if let ctx = Self.sharedContainer?.mainContext {
-                _ = BackupService.shared.export(from: ctx)
+                BackupService.shared.exportAsync(from: ctx)
+            }
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { @MainActor in
+            if let ctx = Self.sharedContainer?.mainContext {
+                ShortcutHealthSyncService.shared.importIfAvailable(into: ctx)
             }
         }
     }

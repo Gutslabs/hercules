@@ -65,15 +65,11 @@ struct PillTag: View {
     var body: some View {
         Text(text)
             .font(Typography.captionBold)
-            .tracking(0.4)
             .foregroundStyle(tint)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(
-                Capsule().fill(tint.opacity(0.10))
-            )
-            .overlay(
-                Capsule().strokeBorder(tint.opacity(0.18), lineWidth: 0.5)
+                Capsule().fill(tint.opacity(0.12))
             )
     }
 }

@@ -98,6 +98,9 @@ final class UserProfile {
     var targetWeight: Double?
     var manualBodyFat: Double?
     var manualCalorieOffset: Double = 0
+    /// Kullanıcının kendisi hakkında yazdığı kalıcı bilgi — her AI sohbetinde
+    /// "kullanıcı kim" olarak system context'e enjekte edilir.
+    var about: String = ""
 
     init(
         name: String = "",
@@ -108,7 +111,8 @@ final class UserProfile {
         goal: Goal = .maintain,
         targetWeight: Double? = nil,
         manualBodyFat: Double? = nil,
-        manualCalorieOffset: Double = 0
+        manualCalorieOffset: Double = 0,
+        about: String = ""
     ) {
         self.name = name
         self.sex = sex
@@ -119,6 +123,7 @@ final class UserProfile {
         self.targetWeight = targetWeight
         self.manualBodyFat = manualBodyFat
         self.manualCalorieOffset = manualCalorieOffset
+        self.about = about
     }
 
     var age: Int {

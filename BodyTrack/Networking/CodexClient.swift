@@ -5,8 +5,18 @@ final class CodexClient: AIClient {
     private let endpoint = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    /// Dedicated session — default URLSession sonsuz timeout'a yakın değerlerle
+    /// gelir; biz açık 60s request / 600s resource (streaming uzun cevaplar) belirliyoruz.
+    private static let defaultSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 600
+        config.waitsForConnectivity = true
+        return URLSession(configuration: config)
+    }()
+
+    init(session: URLSession? = nil) {
+        self.session = session ?? Self.defaultSession
     }
 
     /// OpenAI Responses API'nın server-side web search tool'u.
@@ -19,7 +29,9 @@ final class CodexClient: AIClient {
     func send(
         history: [ChatTurn],
         newUserText: String,
-        onSearchStart: @MainActor @escaping (String) -> Void
+        userContext: String?,
+        onSearchStart: @MainActor @escaping (String) -> Void,
+        onMessageUpdate: @MainActor @escaping (String) -> Void
     ) async throws -> (AIFoodResult, String?) {
         let tokens = try await CodexAuth.shared.ensureFreshToken()
         guard let accountId = tokens.chatGPTAccountId else {
@@ -32,7 +44,22 @@ final class CodexClient: AIClient {
         for t in recent {
             input.append(["role": t.role.rawValue, "content": t.text])
         }
-        input.append(["role": "user", "content": newUserText])
+        // Inject app data + agent skill context inline before the user's actual question.
+        // Codex/Responses API uses a single `instructions` field for the system
+        // prompt, so per-turn extra context goes here as a developer/user role.
+        let finalUserText: String = {
+            guard let userContext, !userContext.isEmpty else { return newUserText }
+            return """
+            Aşağıda Hercules'in canlı kullanıcı verisi, kişisel hafızası ve agent skill sonuçları olabilir.
+            Sorumu cevaplarken sadece alakalı kısımları kullan; kaynaklı araştırma varsa tarih/kaynak hassasiyetini koru.
+
+            \(userContext)
+
+            ---
+            \(newUserText)
+            """
+        }()
+        input.append(["role": "user", "content": finalUserText])
 
         var body: [String: Any] = [
             "model": model,
@@ -51,7 +78,8 @@ final class CodexClient: AIClient {
             body: body,
             token: tokens.access_token,
             accountId: accountId,
-            onSearchStart: onSearchStart
+            onSearchStart: onSearchStart,
+            onMessageUpdate: onMessageUpdate
         )
 
         // Output'ta web_search_call varsa search query'sini al
@@ -101,7 +129,8 @@ final class CodexClient: AIClient {
         body: [String: Any],
         token: String,
         accountId: String,
-        onSearchStart: @MainActor @escaping (String) -> Void = { _ in }
+        onSearchStart: @MainActor @escaping (String) -> Void = { _ in },
+        onMessageUpdate: @MainActor @escaping (String) -> Void = { _ in }
     ) async throws -> StreamResult {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
@@ -129,6 +158,10 @@ final class CodexClient: AIClient {
         var collectedOutput: [[String: Any]] = []
         var accumulatedText = ""
         var searchQuery: String? = nil
+        // Incremental extractor — accumulatedText'i her seferinde baştan
+        // taramak yerine son scan offset'ten devam eder. Stream uzadıkça
+        // performans sabit kalır (O(n²) → O(n)).
+        var extractor = MessageStreamExtractor()
 
         for try await line in bytes.lines {
             guard line.hasPrefix("data: ") else { continue }
@@ -143,6 +176,10 @@ final class CodexClient: AIClient {
             case "response.output_text.delta":
                 if let delta = obj["delta"] as? String {
                     accumulatedText += delta
+                    // Typewriter: çıkartılan partial message'ı UI'a yolla
+                    if let partial = extractor.feed(accumulated: accumulatedText) {
+                        await onMessageUpdate(partial)
+                    }
                 }
             case "response.output_item.added":
                 // Web search aramasının başladığı moment
@@ -186,6 +223,70 @@ final class CodexClient: AIClient {
             return StreamResult(output: collectedOutput, accumulatedText: accumulatedText, searchQuery: searchQuery)
         }
         throw OpenRouterError.decoding("Stream ended without response.completed")
+    }
+
+    /// Streaming sırasında biriken raw JSON'dan `"message"` alanının değerini
+    /// canlı olarak çıkar. State tutar — accumulatedText'i her seferinde
+    /// baştan değil, kalan kısımdan tarar.
+    fileprivate struct MessageStreamExtractor {
+        /// `"message":"` sonrasında value-start offset (raw içinde).
+        private var valueStartOffset: Int?
+        /// Bir sonraki tarama hangi offset'ten devam edecek (raw içinde).
+        private var scanOffset: Int = 0
+        /// Şimdiye kadar çıkartılan unescaped string.
+        private var output: String = ""
+        /// String içinde kapanış " görüldü mü.
+        private var closed: Bool = false
+
+        mutating func feed(accumulated raw: String) -> String? {
+            // 1) Start offset'i bul (sadece bir kez)
+            if valueStartOffset == nil {
+                guard let r = raw.range(of: "\"message\"") else { return nil }
+                var i = r.upperBound
+                while i < raw.endIndex, raw[i] == ":" || raw[i].isWhitespace {
+                    i = raw.index(after: i)
+                }
+                guard i < raw.endIndex, raw[i] == "\"" else { return nil }
+                let start = raw.index(after: i)
+                valueStartOffset = raw.distance(from: raw.startIndex, to: start)
+                scanOffset = valueStartOffset!
+            }
+            if closed { return output }
+
+            // 2) scanOffset'ten devam et
+            var i = raw.index(raw.startIndex, offsetBy: scanOffset)
+            while i < raw.endIndex {
+                let c = raw[i]
+                if c == "\\" {
+                    let n = raw.index(after: i)
+                    if n >= raw.endIndex {
+                        // Escape sequence yarım kaldı, sonraki chunk'ı bekle
+                        scanOffset = raw.distance(from: raw.startIndex, to: i)
+                        return output
+                    }
+                    switch raw[n] {
+                    case "n":  output.append("\n")
+                    case "t":  output.append("\t")
+                    case "r":  output.append("\r")
+                    case "\"": output.append("\"")
+                    case "\\": output.append("\\")
+                    case "/":  output.append("/")
+                    default:   output.append(raw[n])
+                    }
+                    i = raw.index(after: n)
+                    continue
+                }
+                if c == "\"" {
+                    closed = true
+                    scanOffset = raw.distance(from: raw.startIndex, to: i)
+                    return output
+                }
+                output.append(c)
+                i = raw.index(after: i)
+            }
+            scanOffset = raw.distance(from: raw.startIndex, to: i)
+            return output
+        }
     }
 
     private func parseFood(_ content: String) -> AIFoodResult {

@@ -36,7 +36,7 @@ struct LabeledNumberField: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(focused ? Palette.accent.opacity(0.55) : Palette.border, lineWidth: 0.5)
+                    .strokeBorder(focused ? Palette.borderStrong : Palette.border, lineWidth: 0.5)
             )
         }
     }
@@ -75,7 +75,7 @@ struct LabeledNumberFieldRequired: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(focused ? Palette.accent.opacity(0.55) : Palette.border, lineWidth: 0.5)
+                    .strokeBorder(focused ? Palette.borderStrong : Palette.border, lineWidth: 0.5)
             )
         }
     }

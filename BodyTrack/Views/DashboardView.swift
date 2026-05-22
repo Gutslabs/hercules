@@ -23,9 +23,9 @@ struct DashboardView: View {
     }
 
     private var stepCalories: Double {
-        guard let steps = todaysSteps?.steps,
+        guard let entry = todaysSteps,
               let weight = latest?.weight else { return 0 }
-        return StepEntry.calorieBurn(steps: steps, weightKg: weight)
+        return StepEntry.calorieBurn(for: entry, weightKg: weight)
     }
 
     private var todaysFoods: [FoodEntry] {
@@ -223,18 +223,16 @@ struct DashboardView: View {
                 if let w = todaysWorkout {
                     HStack(spacing: 5) {
                         Image(systemName: "figure.strengthtraining.traditional")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.textTertiary)
                         Text("\(w.name) · +\(Fmt.int(w.estimatedCalories)) kcal")
                             .font(Typography.caption)
+                            .foregroundStyle(Palette.textSecondary)
                     }
-                    .foregroundStyle(Palette.accent)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 4)
                     .background(
-                        Capsule().fill(Palette.accent.opacity(0.15))
-                    )
-                    .overlay(
-                        Capsule().strokeBorder(Palette.accent.opacity(0.3), lineWidth: 0.5)
+                        Capsule().fill(Palette.surfaceElevated)
                     )
                 }
                 Spacer()
@@ -389,11 +387,11 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(w.color.opacity(0.10))
+                .fill(Palette.surfaceElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .strokeBorder(w.color.opacity(0.30), lineWidth: 0.5)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
         )
     }
 
@@ -455,9 +453,7 @@ struct FoodRow: View {
     @State private var hovering = false
 
     private var timeString: String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: food.date)
+        Fmt.timeShort.string(from: food.date)
     }
 
     var body: some View {

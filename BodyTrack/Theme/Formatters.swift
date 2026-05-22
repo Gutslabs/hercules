@@ -18,13 +18,26 @@ enum Fmt {
         return f
     }()
 
-    static func num(_ v: Double, digits: Int = 1) -> String {
+    // Per-digit cache so num()/signed()/numOpt() don't allocate a new
+    // NumberFormatter on every call (these get hit dozens of times per render).
+    private static let formatterLock = NSLock()
+    private static var numFormatterCache: [Int: NumberFormatter] = [:]
+
+    private static func numFormatter(digits: Int) -> NumberFormatter {
+        formatterLock.lock()
+        defer { formatterLock.unlock() }
+        if let cached = numFormatterCache[digits] { return cached }
         let f = NumberFormatter()
         f.locale = Locale(identifier: "tr_TR")
         f.numberStyle = .decimal
         f.maximumFractionDigits = digits
         f.minimumFractionDigits = digits
-        return f.string(from: NSNumber(value: v)) ?? "—"
+        numFormatterCache[digits] = f
+        return f
+    }
+
+    static func num(_ v: Double, digits: Int = 1) -> String {
+        numFormatter(digits: digits).string(from: NSNumber(value: v)) ?? "—"
     }
 
     static func numOpt(_ v: Double?, digits: Int = 1) -> String {
@@ -62,11 +75,38 @@ enum Fmt {
         return f
     }()
 
-    static func relative(_ date: Date) -> String {
+    /// Shared formatters used by per-row cell views (DayCell/WorkoutDayCell/etc).
+    /// Hoisted here so a 42-cell calendar grid doesn't allocate 42 formatters per render.
+    static let dayNumber: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d"
+        return f
+    }()
+
+    static let timeShort: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    static let monthShort: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "MMM"
+        return f
+    }()
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.locale = Locale(identifier: "tr_TR")
         f.unitsStyle = .full
-        return f.localizedString(for: date, relativeTo: .now)
+        return f
+    }()
+
+    static func relative(_ date: Date) -> String {
+        relativeFormatter.localizedString(for: date, relativeTo: .now)
     }
 
     static func signed(_ v: Double, digits: Int = 1) -> String {

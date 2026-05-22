@@ -9,15 +9,14 @@ struct MeasurementsView: View {
     @State private var editingMeasurement: Measurement? = nil
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xxl) {
-                header
-                summaryStrip
-                measurementList
-                Spacer(minLength: 24)
-            }
-            .padding(Spacing.xxl)
+        VStack(alignment: .leading, spacing: Spacing.xxl) {
+            header
+            summaryStrip
+            measurementList
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .padding(Spacing.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.background.ignoresSafeArea())
         .sheet(isPresented: $showingNew) {
             MeasurementEditor(mode: .create) { m in
@@ -36,21 +35,50 @@ struct MeasurementsView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .bottom, spacing: Spacing.lg) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Ölçümler").eyebrow()
                 Text("Vücut Ölçümleri")
                     .font(Typography.display(40))
                     .foregroundStyle(Palette.textPrimary)
             }
-            Spacer()
-            HStack(spacing: 8) {
-                GhostButton(title: "Tümünü Dışa Aktar", systemImage: "square.and.arrow.up") {}
-                    .frame(width: 180)
-                PrimaryButton(title: "Yeni Ölçüm", systemImage: "plus") {
-                    showingNew = true
+
+            Spacer(minLength: Spacing.lg)
+
+            HStack(spacing: Spacing.sm) {
+                Button { /* future: export */ } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 34, height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .fill(Palette.surfaceElevated)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .strokeBorder(Palette.border, lineWidth: 0.5)
+                        )
                 }
-                .frame(width: 150)
+                .buttonStyle(.plain)
+                .help("Tüm ölçümleri JSON olarak dışa aktar")
+
+                Button {
+                    showingNew = true
+                } label: {
+                    Label("Yeni Ölçüm", systemImage: "plus")
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(.black.opacity(0.88))
+                        .padding(.horizontal, 14)
+                        .frame(height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .fill(Color.white)
+                        )
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("n", modifiers: .command)
+                .help("Yeni ölçüm ekle (⌘N)")
             }
         }
     }
@@ -76,53 +104,106 @@ struct MeasurementsView: View {
     private var measurementList: some View {
         if measurements.isEmpty {
             EmptyMeasurementState { showingNew = true }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            VStack(spacing: 0) {
-                listHeader
-                Hairline()
-                ForEach(measurements) { m in
-                    MeasurementRow(measurement: m)
-                        .contentShape(Rectangle())
-                        .onTapGesture { editingMeasurement = m }
-                    if m.id != measurements.last?.id {
-                        Hairline()
-                    }
+            measurementsTable
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                        .fill(Palette.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                        .strokeBorder(Palette.border, lineWidth: 0.5)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        }
+    }
+
+    /// Native macOS Table — sortable columns, multi-select, native row chrome.
+    /// Double-click açar düzenleme sheet'ini.
+    /// Sütun genişlikleri esnek — pencere geniş olduğunda büyürler.
+    private var measurementsTable: some View {
+        Table(measurements) {
+            TableColumn("Tarih") { m in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(Fmt.dateLong.string(from: m.date))
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(Self.timeFmt.string(from: m.date))
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .fill(Palette.surface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: 0.5)
-            )
+            .width(min: 150, ideal: 200, max: 280)
+
+            TableColumn("Ağırlık") { m in
+                tableNumber(m.weight, unit: "kg")
+            }
+            .width(min: 80, ideal: 120)
+
+            TableColumn("Yağ %") { m in
+                tableNumber(m.bodyFat, unit: "%")
+            }
+            .width(min: 70, ideal: 100)
+
+            TableColumn("Yağsız") { m in
+                tableNumber(m.leanMass, unit: "kg")
+            }
+            .width(min: 80, ideal: 120)
+
+            TableColumn("Bel") { m in
+                tableNumber(m.waist, unit: "cm")
+            }
+            .width(min: 70, ideal: 100)
+
+            TableColumn("Göğüs") { m in
+                tableNumber(m.chest, unit: "cm")
+            }
+            .width(min: 70, ideal: 100)
+
+            TableColumn("Boyun") { m in
+                tableNumber(m.neck, unit: "cm")
+            }
+            .width(min: 70, ideal: 100)
+
+            TableColumn("") { m in
+                Button {
+                    editingMeasurement = m
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .buttonStyle(.borderless)
+            }
+            .width(40)
         }
     }
 
-    private var listHeader: some View {
-        HStack(spacing: 0) {
-            cell("Tarih", width: 130, align: .leading)
-            cell("Ağırlık", align: .trailing)
-            cell("Yağ %", align: .trailing)
-            cell("Yağsız", align: .trailing)
-            cell("Bel", align: .trailing)
-            cell("Göğüs", align: .trailing)
-            cell("Boyun", align: .trailing)
-            cell(" ", width: 28, align: .trailing)
+    private func tableNumber(_ value: Double?, unit: String) -> some View {
+        HStack(spacing: 3) {
+            if let v = value {
+                Text(Fmt.num(v, digits: 1))
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textPrimary)
+                Text(unit)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+            } else {
+                Text("—")
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textQuaternary)
+            }
         }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, 14)
     }
 
-    private func cell(_ text: String, width: CGFloat? = nil, align: Alignment) -> some View {
-        Text(text)
-            .font(Typography.label)
-            .tracking(1.4)
-            .textCase(.uppercase)
-            .foregroundStyle(Palette.textTertiary)
-            .frame(maxWidth: width ?? .infinity, alignment: align)
-    }
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 }
 
 struct SummaryStat: View {
@@ -181,10 +262,7 @@ struct MeasurementRow: View {
     }
 
     private var timeString: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "HH:mm"
-        return f.string(from: measurement.date)
+        Fmt.timeShort.string(from: measurement.date)
     }
 
     private func valueCell(_ value: Double?, unit: String) -> some View {
@@ -246,6 +324,7 @@ struct MeasurementEditor: View {
     @State private var chest: Double?
     @State private var neck: Double?
     @State private var note: String
+    @State private var showExtra: Bool
 
     init(mode: EditorMode, onSave: @escaping (Measurement) -> Void, onDelete: (() -> Void)? = nil) {
         self.mode = mode
@@ -260,6 +339,7 @@ struct MeasurementEditor: View {
             _chest = State(initialValue: nil)
             _neck = State(initialValue: nil)
             _note = State(initialValue: "")
+            _showExtra = State(initialValue: false)
         case .edit(let m):
             _date = State(initialValue: m.date)
             _weight = State(initialValue: m.weight)
@@ -268,6 +348,8 @@ struct MeasurementEditor: View {
             _chest = State(initialValue: m.chest)
             _neck = State(initialValue: m.neck)
             _note = State(initialValue: m.note ?? "")
+            let hasExtra = m.bodyFat != nil || m.waist != nil || m.chest != nil || m.neck != nil
+            _showExtra = State(initialValue: hasExtra)
         }
     }
 
@@ -276,131 +358,118 @@ struct MeasurementEditor: View {
         return false
     }
 
+    private var saveButtonTitle: String {
+        if isEditing { return "Kaydet" }
+        return showExtra ? "Ölçüm Ekle" : "Tartı Ekle"
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                editorHeader
-                dateCard
-                section(title: "Vücut Kompozisyonu") {
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        grid {
-                            LabeledNumberField(label: "Ağırlık", unit: "kg", value: $weight)
-                            LabeledNumberField(label: "Yağ Oranı", unit: "%", value: $bodyFat)
+        NavigationStack {
+            Form {
+                Section("Tarih") {
+                    DatePicker("Ne zaman", selection: $date)
+                }
+
+                Section("Ağırlık") {
+                    LabeledContent("Kilo (kg)") {
+                        TextField("", value: $weight, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    if !showExtra {
+                        Text("Vücut analizini (yağ %, çevreler) haftada bir kez ekleyebilirsin.")
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+
+                if showExtra {
+                    Section("Vücut Kompozisyonu") {
+                        LabeledContent("Yağ oranı (%)") {
+                            TextField("opsiyonel", value: $bodyFat, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
                         }
                         Link(destination: URL(string: "https://www.agirsaglam.com/vucut-yag-orani-hesaplama/")!) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "ruler").font(.system(size: 10))
-                                Text("Yağ oranı hesapla").font(Typography.caption)
-                                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
-                            }
-                            .foregroundStyle(Palette.accent)
+                            Label("Yağ oranı hesapla", systemImage: "ruler")
+                                .font(Typography.caption)
                         }
-                        .buttonStyle(.plain)
+                        .foregroundStyle(Palette.textSecondary)
+                    }
+
+                    Section("Gövde Çevreleri") {
+                        LabeledContent("Bel (cm)") {
+                            TextField("", value: $waist, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
+                        }
+                        LabeledContent("Göğüs (cm)") {
+                            TextField("", value: $chest, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
+                        }
+                        LabeledContent("Boyun (cm)") {
+                            TextField("", value: $neck, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
+                        }
                     }
                 }
-                section(title: "Gövde Çevreleri") {
-                    grid {
-                        LabeledNumberField(label: "Bel", unit: "cm", value: $waist)
-                        LabeledNumberField(label: "Göğüs", unit: "cm", value: $chest)
-                        LabeledNumberField(label: "Boyun", unit: "cm", value: $neck)
+
+                Section {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showExtra.toggle()
+                        }
+                    } label: {
+                        Label(
+                            showExtra ? "Sadeleştir — sadece ağırlık" : "Vücut analizi ekle",
+                            systemImage: showExtra ? "minus.circle" : "plus.circle"
+                        )
                     }
                 }
-                noteCard
-                actionRow
+
+                Section("Not (opsiyonel)") {
+                    TextField("ör: cardio sonrası, sabah aç karnına", text: $note, axis: .vertical)
+                        .lineLimit(2...5)
+                }
+
+                if isEditing, let onDelete {
+                    Section {
+                        Button(role: .destructive) {
+                            onDelete()
+                            dismiss()
+                        } label: {
+                            Label("Ölçümü Sil", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
             }
-            .padding(Spacing.xxl)
+            .formStyle(.grouped)
+            .navigationTitle(isEditing ? "Ölçümü Düzenle" : (showExtra ? "Yeni Ölçüm" : "Hızlı Tartı"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("İptal") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saveButtonTitle) {
+                        save()
+                        dismiss()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
         }
-        .frame(width: 720, height: 760)
-        .background(Palette.background.ignoresSafeArea())
+        .frame(width: 540, height: showExtra ? 700 : 460)
         .onAppear {
             if case .create = mode {
                 date = .now
-            }
-        }
-    }
-
-    private var editorHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(isEditing ? "Düzenle" : "Yeni Ölçüm").eyebrow()
-                Text(isEditing ? "Ölçümü Güncelle" : "Yeni Ölçüm Ekle")
-                    .font(Typography.title)
-                    .foregroundStyle(Palette.textPrimary)
-            }
-            Spacer()
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(width: 28, height: 28)
-                    .background(Circle().fill(Palette.surfaceElevated))
-                    .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var dateCard: some View {
-        Card(padding: Spacing.lg) {
-            StyledDateField(label: "Tarih", date: $date)
-        }
-    }
-
-    private var noteCard: some View {
-        Card(padding: Spacing.lg) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Not (opsiyonel)").eyebrow()
-                TextEditor(text: $note)
-                    .scrollContentBackground(.hidden)
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textPrimary)
-                    .frame(minHeight: 70)
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Palette.surfaceElevated)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .strokeBorder(Palette.border, lineWidth: 0.5)
-                    )
-            }
-        }
-    }
-
-    private var actionRow: some View {
-        HStack(spacing: Spacing.md) {
-            if isEditing, let onDelete {
-                Button {
-                    onDelete()
-                    dismiss()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("Sil")
-                            .font(Typography.bodyBold)
-                    }
-                    .padding(.vertical, 11)
-                    .frame(maxWidth: .infinity)
-                    .foregroundStyle(Palette.negative)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm)
-                            .fill(Palette.negative.opacity(0.10))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.sm)
-                            .strokeBorder(Palette.negative.opacity(0.20), lineWidth: 0.5)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-            GhostButton(title: "İptal", action: { dismiss() })
-            PrimaryButton(title: isEditing ? "Kaydet" : "Ekle", systemImage: "checkmark") {
-                save()
-                dismiss()
             }
         }
     }
