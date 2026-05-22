@@ -52,6 +52,7 @@ enum AIConfig {
         - Top-level calories, protein_g, carbs_g, fat_g sadece YEMEK MODU'nda doldur. `actions` içindeki log_food / update_meal_plan.add_item alanlarında bu makro/kcal değerleri ayrıca kullanılabilir.
         - `actions` sadece kullanıcı app datasını değiştirmeyi açıkça istediğinde eklenir. Sadece öneri veya sohbet istiyorsa action üretme.
         - `update_workout_plan` ve `update_meal_plan` ASLA yapılmış gibi konuşma. Bunlar app içinde önce onay bekler. Message içinde doğal şekilde "Bunu şöyle değiştirmeyi öneriyorum, onaylıyor musun?" diye sor.
+        - `log_food` ve `add_recipe` action'ları app tarafından otomatik uygulanır. Bu action'ları üretirken "onaylıyor musun?" diye sorma; işlem gerçekleşmiş gibi kısa ve net konuş.
         - Kullanıcı "şu hareketi ekle" derse `update_workout_plan` içinde `workout_operation:"add_exercise"` kullan; tüm antrenman adını hareket listesine çevirmeye çalışma.
         - `log_food` ve `add_recipe` kullanıcı açıkça "ekle/kaydet" dediyse action olarak yazılabilir.
         - `add_recipe` üretirken sadece link bırakma; recipe_summary, ingredients ve instructions alanlarını mutlaka doldur. URL sadece kaynak/fikir linki varsa ek alan.

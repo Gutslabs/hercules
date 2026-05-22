@@ -52,6 +52,7 @@ struct RecipesView: View {
         .sheet(item: $viewing) { r in
             RecipeDetailSheet(recipe: r)
         }
+        .onAppear(perform: mergeDuplicateRecipes)
     }
 
     private var header: some View {
@@ -114,6 +115,67 @@ struct RecipesView: View {
                     RecipeRow(recipe: r, onOpen: { viewing = r }) { editing = r }
                 }
             }
+        }
+    }
+
+    private func mergeDuplicateRecipes() {
+        var keepers: [String: Recipe] = [:]
+        var didChange = false
+
+        for recipe in recipes.sorted(by: { $0.createdAt > $1.createdAt }) {
+            let key = duplicateKey(for: recipe)
+            if let keeper = keepers[key] {
+                merge(recipe, into: keeper)
+                ctx.delete(recipe)
+                didChange = true
+            } else {
+                keepers[key] = recipe
+            }
+        }
+
+        if didChange {
+            try? ctx.save()
+        }
+    }
+
+    private func duplicateKey(for recipe: Recipe) -> String {
+        "\(recipe.category.rawValue)|\(normalizedRecipeTitle(recipe.title))"
+    }
+
+    private func normalizedRecipeTitle(_ title: String) -> String {
+        title
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US"))
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private func merge(_ duplicate: Recipe, into keeper: Recipe) {
+        fillString(&keeper.urlString, with: duplicate.urlString)
+        fillOptionalString(&keeper.summary, with: duplicate.summary)
+        fillOptionalString(&keeper.ingredientsText, with: duplicate.ingredientsText)
+        fillOptionalString(&keeper.instructionsText, with: duplicate.instructionsText)
+        keeper.servings = keeper.servings ?? duplicate.servings
+        keeper.prepMinutes = keeper.prepMinutes ?? duplicate.prepMinutes
+        keeper.calories = keeper.calories ?? duplicate.calories
+        keeper.protein = keeper.protein ?? duplicate.protein
+        keeper.carbs = keeper.carbs ?? duplicate.carbs
+        keeper.fat = keeper.fat ?? duplicate.fat
+    }
+
+    private func fillString(_ target: inout String, with source: String) {
+        guard target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            target = trimmed
+        }
+    }
+
+    private func fillOptionalString(_ target: inout String?, with source: String?) {
+        guard target?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true else { return }
+        let trimmed = source?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            target = trimmed
         }
     }
 }

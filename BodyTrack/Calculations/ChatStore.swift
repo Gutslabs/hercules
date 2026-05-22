@@ -179,6 +179,11 @@ final class ChatStore {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
         ensureCurrentConversation()
+        if let ctx, handleInlineApprovalReply(text, ctx: ctx) {
+            input = ""
+            lastError = nil
+            return
+        }
         input = ""
         lastError = nil
 
@@ -301,6 +306,86 @@ final class ChatStore {
         persistHistory()
     }
 
+    private func handleInlineApprovalReply(_ text: String, ctx: ModelContext) -> Bool {
+        guard isApprovalReply(text) else { return false }
+
+        if let pending = latestPendingConfirmationAction() {
+            messages.append(ChatTurn(role: .user, text: text))
+            updateAction(turnID: pending.turnID, actionID: pending.actionID, ctx: ctx, approve: true)
+            let result = latestActionResult(turnID: pending.turnID, actionID: pending.actionID)
+            messages.append(ChatTurn(
+                role: .assistant,
+                text: "Tamam kanka, \(result ?? "onayladığın işlemi uyguladım")."
+            ))
+            syncCurrentConversation(titleSeed: text)
+            persistHistory()
+            return true
+        }
+
+        if let applied = latestAppliedAutomaticAction() {
+            messages.append(ChatTurn(role: .user, text: text))
+            messages.append(ChatTurn(role: .assistant, text: alreadyAppliedReply(for: applied)))
+            syncCurrentConversation(titleSeed: text)
+            persistHistory()
+            return true
+        }
+
+        return false
+    }
+
+    private func isApprovalReply(_ text: String) -> Bool {
+        let normalized = normalizedKey(text)
+            .lowercased(with: Locale(identifier: "tr_TR"))
+            .replacingOccurrences(of: #"[^a-z0-9ğüşöçıİĞÜŞÖÇ ]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count <= 42 else { return false }
+        let exactMatches: Set<String> = [
+            "evet", "tamam", "ok", "okay", "olur", "yap", "uygula", "ekle", "kaydet",
+            "onayliyorum", "onaylıyorum", "onay veriyorum", "onayladim", "onayladım",
+            "aynen", "tamamdir", "tamamdır"
+        ]
+        if exactMatches.contains(normalized) { return true }
+        return normalized.hasPrefix("onay") || normalized.contains(" onay")
+    }
+
+    private func latestPendingConfirmationAction() -> (turnID: UUID, actionID: UUID, action: AIAppAction)? {
+        for turn in messages.reversed() where turn.role == .assistant {
+            if let action = turn.actions.reversed().first(where: { $0.status == .pending && $0.requiresConfirmation }) {
+                return (turn.id, action.id, action)
+            }
+        }
+        return nil
+    }
+
+    private func latestAppliedAutomaticAction() -> AIAppAction? {
+        let cutoff = Date().addingTimeInterval(-10 * 60)
+        for turn in messages.reversed() where turn.role == .assistant && turn.createdAt >= cutoff {
+            if let action = turn.actions.reversed().first(where: { $0.status == .applied && !$0.requiresConfirmation }) {
+                return action
+            }
+        }
+        return nil
+    }
+
+    private func latestActionResult(turnID: UUID, actionID: UUID) -> String? {
+        guard let turn = messages.first(where: { $0.id == turnID }),
+              let action = turn.actions.first(where: { $0.id == actionID })
+        else { return nil }
+        return action.resultMessage
+    }
+
+    private func alreadyAppliedReply(for action: AIAppAction) -> String {
+        switch action.tool {
+        case .logFood:
+            return "Zaten bugüne eklemiştim kanka; tekrar kalori yazmadım."
+        case .addRecipe:
+            return "Zaten tariflere eklemiştim kanka; tekrar duplicate oluşturmadım."
+        case .updateWorkoutPlan, .updateMealPlan:
+            return "Bu işlem zaten uygulanmış görünüyor kanka."
+        }
+    }
+
     private func updateAction(turnID: UUID, actionID: UUID, ctx: ModelContext, approve: Bool) {
         guard approve,
               let turnIdx = messages.firstIndex(where: { $0.id == turnID }),
@@ -369,20 +454,21 @@ final class ChatStore {
             }
             let rawCategory = action.category ?? RecipeCategory.dinner.rawValue
             let category = RecipeCategory(rawValue: rawCategory) ?? .dinner
-            ctx.insert(Recipe(
-                title: title,
-                urlString: normalizedRecipeURL(action.url, title: title),
-                category: category,
-                summary: action.recipeSummary ?? action.summary,
-                ingredientsText: action.ingredients,
-                instructionsText: action.instructions,
-                servings: action.servings,
-                prepMinutes: action.prepMinutes,
-                calories: action.calories,
-                protein: action.proteinG,
-                carbs: action.carbsG,
-                fat: action.fatG
-            ))
+            let recipes = (try? ctx.fetch(FetchDescriptor<Recipe>())) ?? []
+            if let existing = recipes.first(where: {
+                $0.category == category && normalizedKey($0.title) == normalizedKey(title)
+            }) {
+                existing.title = title
+                existing.category = category
+                applyRecipeDetails(from: action, title: title, to: existing)
+                existing.createdAt = .now
+                try ctx.save()
+                return "\(title) zaten vardı, tarif güncellendi"
+            }
+
+            let recipe = Recipe(title: title, urlString: "", category: category)
+            applyRecipeDetails(from: action, title: title, to: recipe)
+            ctx.insert(recipe)
             try ctx.save()
             return "\(title) tariflere eklendi"
 
@@ -526,6 +612,45 @@ final class ChatStore {
     private func nonEmpty(_ value: String?, fallback: String) -> String {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private func cleaned(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func applyRecipeDetails(from action: AIAppAction, title: String, to recipe: Recipe) {
+        let url = normalizedRecipeURL(action.url, title: title)
+        if !url.isEmpty {
+            recipe.urlString = url
+        }
+        if let summary = cleaned(action.recipeSummary) ?? cleaned(action.summary) {
+            recipe.summary = summary
+        }
+        if let ingredients = cleaned(action.ingredients) {
+            recipe.ingredientsText = ingredients
+        }
+        if let instructions = cleaned(action.instructions) {
+            recipe.instructionsText = instructions
+        }
+        if let servings = action.servings {
+            recipe.servings = servings
+        }
+        if let prepMinutes = action.prepMinutes {
+            recipe.prepMinutes = prepMinutes
+        }
+        if let calories = action.calories {
+            recipe.calories = calories
+        }
+        if let protein = action.proteinG {
+            recipe.protein = protein
+        }
+        if let carbs = action.carbsG {
+            recipe.carbs = carbs
+        }
+        if let fat = action.fatG {
+            recipe.fat = fat
+        }
     }
 
     private func normalizedKey(_ value: String) -> String {
