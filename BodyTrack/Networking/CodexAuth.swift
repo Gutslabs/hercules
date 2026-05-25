@@ -102,7 +102,12 @@ final class CodexAuth {
     /// Hercules'in kendi Codex token kopyası — Codex CLI ile refresh çakışması olmasın diye.
     private var herculesStoreURL: URL {
         let fm = FileManager.default
-        let support = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)) ?? fm.homeDirectoryForCurrentUser
+        #if os(macOS)
+        let fallback = fm.homeDirectoryForCurrentUser
+        #else
+        let fallback = URL(fileURLWithPath: NSHomeDirectory())
+        #endif
+        let support = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)) ?? fallback
         let dir = support.appendingPathComponent("Hercules", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -111,7 +116,11 @@ final class CodexAuth {
     }
 
     private var codexCLIAuthURL: URL {
+        #if os(macOS)
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/auth.json")
+        #else
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/auth.json")
+        #endif
     }
 
     /// Codex CLI'ın auth.json'ından geçerli bir token var mı?

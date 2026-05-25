@@ -20,19 +20,7 @@ struct PubMedResearchSkill: AgentSkill {
     }
 
     func canHandle(_ query: String) -> Bool {
-        let lower = query.foldedForAgent
-        let researchTriggers = [
-            "pubmed", "makale", "calisma", "çalışma", "arastirma", "araştırma",
-            "paper", "evidence", "kanit", "kanıt", "meta", "systematic",
-            "literatur", "literatür", "guncel", "güncel", "son"
-        ]
-        let bodySignals = [
-            "bodybuilding", "vucut", "vücut", "kas", "hipertrofi", "hypertrophy",
-            "protein", "kreatin", "creatine", "supplement", "antrenman",
-            "idman", "training", "resistance", "volume", "bulk", "cut",
-            "definasyon", "yag", "yağ", "sleep", "uyku", "recovery"
-        ]
-        return lower.agentContainsAny(researchTriggers) && lower.agentContainsAny(bodySignals)
+        AgentQueryClassifier.shouldUseLivePubMed(query)
     }
 
     func run(query: String, context: AgentContext) async throws -> SkillResult? {

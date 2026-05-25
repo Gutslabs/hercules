@@ -66,6 +66,9 @@ struct MemoryView: View {
             reload()
             Task { await updateResearchIfNeeded() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .localMemoryChanged)) { _ in
+            reload()
+        }
         .sheet(isPresented: $showingEditor) {
             memoryEditor
                 .frame(width: 520)

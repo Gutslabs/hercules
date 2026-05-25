@@ -15,15 +15,31 @@ struct RecipesView: View {
         return recipes.filter { $0.category == c }
     }
 
+    private var averageProtein: Double? {
+        let values = recipes.compactMap(\.protein)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private var detailedRecipeCount: Int {
+        recipes.filter(\.hasDetail).count
+    }
+
+    private var sourceRecipeCount: Int {
+        recipes.filter { $0.url != nil }.count
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xxl) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 header
+                summaryStrip
                 categoryPicker
                 content
                 Spacer(minLength: 24)
             }
             .padding(Spacing.xxl)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Palette.background.ignoresSafeArea())
         .toolbar {
@@ -56,19 +72,119 @@ struct RecipesView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Yemekler").eyebrow()
-            Text("Tarifler")
-                .font(Typography.display(40))
-                .foregroundStyle(Palette.textPrimary)
+        HStack(alignment: .bottom, spacing: Spacing.xl) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Yemekler").eyebrow()
+                Text("Tarifler")
+                    .font(Typography.display(40))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("AI'ın eklediği tarifleri detay, makro ve kaynak bilgisiyle sakla.")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+
+            Spacer()
+
+            Button {
+                showingNew = true
+            } label: {
+                Label("Yeni Tarif", systemImage: "plus")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.background)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(Palette.textPrimary)
+                    )
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("n", modifiers: .command)
+            .help("Yeni tarif ekle (⌘N)")
         }
     }
 
+    private var summaryStrip: some View {
+        HStack(spacing: 0) {
+            recipeStat("Toplam", value: "\(recipes.count)", detail: "kayıtlı tarif", icon: "book.closed")
+            stripDivider
+            recipeStat("Detaylı", value: "\(detailedRecipeCount)", detail: "malzeme + yapılış", icon: "doc.text")
+            stripDivider
+            recipeStat(
+                "Ort. Protein",
+                value: averageProtein.map { "\(Fmt.int($0))g" } ?? "-",
+                detail: "makrolu tariflerde",
+                icon: "bolt"
+            )
+            stripDivider
+            recipeStat("Kaynaklı", value: "\(sourceRecipeCount)", detail: "link kayıtlı", icon: "link")
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Palette.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+
+    private var stripDivider: some View {
+        Rectangle()
+            .fill(Palette.border)
+            .frame(width: 1)
+            .padding(.vertical, 4)
+    }
+
+    private func recipeStat(_ label: String, value: String, detail: String, icon: String) -> some View {
+        HStack(spacing: Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(Palette.accentSoft)
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label.uppercased())
+                    .font(Typography.label)
+                    .tracking(0.7)
+                    .foregroundStyle(Palette.textQuaternary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(value)
+                        .font(Typography.monoLarge)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(detail)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Spacing.md)
+    }
+
     private var categoryPicker: some View {
-        HStack(spacing: 4) {
-            categoryTab("Tümü", isSelected: selectedCategory == nil) { selectedCategory = nil }
+        HStack(spacing: Spacing.sm) {
+            categoryTab(
+                "Tümü",
+                count: recipes.count,
+                icon: "square.grid.2x2",
+                tint: Palette.textPrimary,
+                isSelected: selectedCategory == nil
+            ) { selectedCategory = nil }
             ForEach(RecipeCategory.allCases) { c in
-                categoryTab(c.label, isSelected: selectedCategory == c) { selectedCategory = c }
+                categoryTab(
+                    c.label,
+                    count: recipes.filter { $0.category == c }.count,
+                    icon: c.icon,
+                    tint: tint(for: c),
+                    isSelected: selectedCategory == c
+                ) { selectedCategory = c }
             }
             Spacer()
             Text("\(filtered.count) tarif")
@@ -86,18 +202,36 @@ struct RecipesView: View {
         )
     }
 
-    private func categoryTab(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func categoryTab(
+        _ title: String,
+        count: Int,
+        icon: String,
+        tint: Color,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(Typography.bodyBold)
-                .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
-                        .fill(isSelected ? Color.white.opacity(0.07) : Color.clear)
-                )
-                .contentShape(Rectangle())
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isSelected ? tint : Palette.textTertiary)
+                Text(title)
+                    .font(Typography.bodyBold)
+                Text("\(count)")
+                    .font(Typography.micro)
+                    .foregroundStyle(isSelected ? Palette.textSecondary : Palette.textQuaternary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Capsule(style: .continuous).fill(Color.white.opacity(isSelected ? 0.08 : 0.035)))
+            }
+            .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .fill(isSelected ? Color.white.opacity(0.075) : Color.clear)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -108,13 +242,25 @@ struct RecipesView: View {
             EmptyRecipesState { showingNew = true }
         } else {
             LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: Spacing.md), GridItem(.flexible(), spacing: Spacing.md)],
-                spacing: Spacing.md
+                columns: Array(
+                    repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: Spacing.lg),
+                    count: 3
+                ),
+                alignment: .leading,
+                spacing: Spacing.lg
             ) {
                 ForEach(filtered) { r in
-                    RecipeRow(recipe: r, onOpen: { viewing = r }) { editing = r }
+                    RecipeLibraryCard(recipe: r, onOpen: { viewing = r }) { editing = r }
                 }
             }
+        }
+    }
+
+    private func tint(for category: RecipeCategory) -> Color {
+        switch category {
+        case .breakfast: return Palette.warning
+        case .dinner: return Palette.accent
+        case .dessert: return Color(red: 0.90, green: 0.62, blue: 0.78)
         }
     }
 
@@ -180,7 +326,7 @@ struct RecipesView: View {
     }
 }
 
-struct RecipeRow: View {
+struct RecipeSpotlightCard: View {
     let recipe: Recipe
     var onOpen: () -> Void
     var onEdit: () -> Void
@@ -188,40 +334,97 @@ struct RecipeRow: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: Spacing.md) {
-            ZStack {
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(Palette.surfaceElevated)
-                    .frame(width: 38, height: 38)
-                Image(systemName: recipe.category.icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.accent)
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                recipeBadge(prominent: true)
+                Spacer()
+                cardActions
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(recipe.title)
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                Text(subtitleText)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
+            HStack(alignment: .top, spacing: Spacing.xl) {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    Text(recipe.title)
+                        .font(Typography.hero(28))
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(2)
+                    Text(subtitleText)
+                        .font(Typography.body)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineSpacing(3)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let calories = recipe.calories {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(Fmt.int(calories))
+                            .font(Typography.display(34))
+                            .foregroundStyle(Palette.textPrimary)
+                        Text("kcal")
+                            .font(Typography.captionBold)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                    .frame(minWidth: 92, alignment: .trailing)
+                }
             }
 
-            Spacer()
+            Divider().overlay(Palette.border)
 
+            HStack(alignment: .top, spacing: Spacing.md) {
+                macroSummary
+                Divider().overlay(Palette.border).frame(height: 48)
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: Spacing.sm) {
+                        infoChip(icon: "person.2", text: recipe.servings.map { "\($0) porsiyon" } ?? "Porsiyon yok")
+                        infoChip(icon: "clock", text: recipe.prepMinutes.map { "\($0) dk" } ?? "Süre yok")
+                        infoChip(icon: recipe.hasDetail ? "checkmark.seal" : "doc.text", text: recipe.hasDetail ? "Detaylı" : "Link formatı")
+                    }
+                    HStack(spacing: Spacing.sm) {
+                        infoChip(icon: "list.bullet", text: "\(ingredientCount) malzeme")
+                        infoChip(icon: "flame", text: "\(instructionCount) adım")
+                        if let host = sourceHost {
+                            infoChip(icon: "link", text: host)
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 7) {
+                Text("Tarifi aç")
+                    .font(Typography.captionBold)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(Palette.textPrimary)
+            .padding(.top, 2)
+        }
+        .padding(Spacing.xl)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(hovering ? Palette.surfaceElevated : Palette.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(hovering ? Palette.borderStrong : Palette.border, lineWidth: 0.7)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { onOpen() }
+    }
+
+    private var cardActions: some View {
+        HStack(spacing: 7) {
             Button {
                 onEdit()
             } label: {
                 Image(systemName: "pencil")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Palette.surfaceElevated))
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
-            .opacity(hovering ? 1 : 0)
+            .foregroundStyle(Palette.textSecondary)
+            .background(Circle().fill(Palette.surfaceElevated))
 
             if let url = recipe.url {
                 Button {
@@ -229,37 +432,246 @@ struct RecipeRow: View {
                 } label: {
                     Image(systemName: "arrow.up.right")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(hovering ? Palette.accent : Palette.textTertiary)
-                        .frame(width: 26, height: 26)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-            } else {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(hovering ? Palette.accent : Palette.textTertiary)
+                .foregroundStyle(Palette.textSecondary)
+                .background(Circle().fill(Palette.surfaceElevated))
             }
         }
+    }
+
+    @ViewBuilder
+    private var macroSummary: some View {
+        if macroMetrics.isEmpty {
+            Text("Makro eklenmemiş")
+                .font(Typography.captionBold)
+                .foregroundStyle(Palette.textTertiary)
+                .frame(minWidth: 260, maxWidth: 320, alignment: .leading)
+                .padding(.vertical, 12)
+        } else {
+            HStack(spacing: Spacing.sm) {
+                ForEach(macroMetrics, id: \.label) { metric in
+                    metricTile(metric, minWidth: 62)
+                }
+            }
+            .frame(minWidth: 260, maxWidth: 320, alignment: .leading)
+        }
+    }
+
+    private func recipeBadge(prominent: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: recipe.category.icon)
+                .font(.system(size: prominent ? 13 : 11, weight: .semibold))
+            Text(recipe.category.label)
+                .font(Typography.captionBold)
+        }
+        .foregroundStyle(categoryTint)
+        .padding(.horizontal, prominent ? 11 : 9)
+        .padding(.vertical, prominent ? 7 : 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(categoryTint.opacity(0.14))
+        )
+    }
+
+    private func metricTile(_ metric: RecipeMetric, minWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(metric.label.uppercased())
+                .font(.system(size: 8, weight: .semibold))
+                .tracking(0.5)
+                .foregroundStyle(Palette.textQuaternary)
+            Text(metric.value)
+                .font(Typography.mono)
+                .foregroundStyle(metric.tint)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(minWidth: minWidth, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.surfaceElevated)
+        )
+    }
+
+    private func infoChip(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(Typography.caption)
+                .lineLimit(1)
+        }
+        .foregroundStyle(Palette.textSecondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
+    }
+
+    private var macroMetrics: [RecipeMetric] {
+        recipe.recipeMetrics
+    }
+
+    private var subtitleText: String {
+        recipe.displaySummary
+    }
+
+    private var ingredientCount: Int { recipe.ingredientLines.count }
+    private var instructionCount: Int { recipe.instructionLines.count }
+    private var sourceHost: String? { recipe.sourceHost }
+    private var categoryTint: Color { recipe.category.displayTint }
+}
+
+struct RecipeLibraryCard: View {
+    let recipe: Recipe
+    var onOpen: () -> Void
+    var onEdit: () -> Void
+    @Environment(\.openURL) private var openURL
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(recipe.category.displayTint.opacity(0.14))
+                        .frame(width: 42, height: 42)
+                    Image(systemName: recipe.category.icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(recipe.category.displayTint)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 7) {
+                        Text(recipe.category.label)
+                            .font(Typography.micro)
+                            .foregroundStyle(recipe.category.displayTint)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule(style: .continuous).fill(recipe.category.displayTint.opacity(0.13)))
+                        if recipe.hasDetail {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Palette.positive)
+                        }
+                    }
+                    Text(recipe.title)
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 8)
+                cardActions
+            }
+
+            Text(recipe.displaySummary)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .lineSpacing(2)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if recipe.recipeMetrics.isEmpty {
+                Text("Makro eklenmemiş")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.vertical, 7)
+            } else {
+                HStack(spacing: Spacing.sm) {
+                    ForEach(recipe.recipeMetrics, id: \.label) { metric in
+                        compactMetric(metric)
+                    }
+                }
+            }
+
+            HStack(spacing: Spacing.sm) {
+                footerChip(icon: "clock", text: recipe.prepMinutes.map { "\($0) dk" } ?? "Süre yok")
+                footerChip(icon: "person.2", text: recipe.servings.map { "\($0) porsiyon" } ?? "Porsiyon yok")
+                if let host = recipe.sourceHost {
+                    footerChip(icon: "link", text: host)
+                }
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
+                Text("Aç")
+                    .font(Typography.captionBold)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(hovering ? Palette.textPrimary : Palette.textSecondary)
+        }
         .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, minHeight: 210, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .fill(hovering ? Palette.surfaceElevated : Palette.surface)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
+                .strokeBorder(hovering ? Palette.borderStrong : Palette.border, lineWidth: 0.6)
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture {
-            onOpen()
-        }
+        .onTapGesture { onOpen() }
     }
 
-    private var subtitleText: String {
-        let summary = recipe.summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !summary.isEmpty { return summary }
-        if let host = recipe.url?.host { return host }
-        return recipe.hasDetail ? "Tarif metni kayıtlı" : "Detay eklenmemiş"
+    private var cardActions: some View {
+        HStack(spacing: 5) {
+            iconButton("pencil", action: onEdit)
+            if let url = recipe.url {
+                iconButton("arrow.up.right") {
+                    openURL(url)
+                }
+            }
+        }
+        .opacity(hovering ? 1 : 0.72)
+    }
+
+    private func iconButton(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Palette.textTertiary)
+                .frame(width: 25, height: 25)
+                .background(Circle().fill(Color.white.opacity(0.045)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func compactMetric(_ metric: RecipeMetric) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(metric.label.uppercased())
+                .font(.system(size: 7.5, weight: .semibold))
+                .tracking(0.45)
+                .foregroundStyle(Palette.textQuaternary)
+            Text(metric.value)
+                .font(Typography.mono)
+                .foregroundStyle(metric.tint)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.surfaceElevated)
+        )
+    }
+
+    private func footerChip(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 8.5, weight: .semibold))
+            Text(text)
+                .font(Typography.caption)
+                .lineLimit(1)
+        }
+        .foregroundStyle(Palette.textTertiary)
     }
 }
 
@@ -609,6 +1021,59 @@ private struct RecipeMetric {
     let label: String
     let value: String
     let tint: Color
+}
+
+private extension Recipe {
+    var displaySummary: String {
+        let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !summary.isEmpty { return summary }
+        if let sourceHost { return sourceHost }
+        return hasDetail ? "Tarif metni kayıtlı" : "Detay eklenmemiş"
+    }
+
+    var sourceHost: String? {
+        guard let host = url?.host else { return nil }
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    var recipeMetrics: [RecipeMetric] {
+        [
+            calories.map { RecipeMetric(label: "Kalori", value: "\(Fmt.int($0))", tint: Palette.textPrimary) },
+            protein.map { RecipeMetric(label: "Protein", value: "\(Fmt.int($0))g", tint: Palette.macroProtein) },
+            carbs.map { RecipeMetric(label: "Karb", value: "\(Fmt.int($0))g", tint: Palette.macroCarbs) },
+            fat.map { RecipeMetric(label: "Yağ", value: "\(Fmt.int($0))g", tint: Palette.macroFat) },
+        ].compactMap { $0 }
+    }
+
+    var ingredientLines: [String] {
+        cleanRecipeLines(ingredientsText)
+    }
+
+    var instructionLines: [String] {
+        cleanRecipeLines(instructionsText)
+    }
+
+    private func cleanRecipeLines(_ value: String?) -> [String] {
+        (value ?? "")
+            .split(whereSeparator: \.isNewline)
+            .map { line in
+                String(line)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: #"^[-*•]\s*"#, with: "", options: .regularExpression)
+                    .replacingOccurrences(of: #"^\d+[\.)]\s*"#, with: "", options: .regularExpression)
+            }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private extension RecipeCategory {
+    var displayTint: Color {
+        switch self {
+        case .breakfast: return Palette.warning
+        case .dinner: return Palette.accent
+        case .dessert: return Color(red: 0.90, green: 0.62, blue: 0.78)
+        }
+    }
 }
 
 struct EmptyRecipesState: View {

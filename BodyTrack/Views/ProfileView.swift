@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if os(macOS)
+import AppKit
+#endif
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var ctx
@@ -1479,10 +1482,15 @@ struct AIProviderCard: View {
                     .background(RoundedRectangle(cornerRadius: 4).fill(Palette.background))
 
                 Button {
+                    #if os(macOS)
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString("codex login", forType: .string)
                     importResult = "✓ Komut panoya kopyalandı"
                     importSuccess = true
+                    #else
+                    importResult = "Bu kopyalama aksiyonu şu an Mac tarafında kullanılabiliyor"
+                    importSuccess = false
+                    #endif
                 } label: {
                     Label("Kopyala", systemImage: "doc.on.doc")
                 }
@@ -1525,10 +1533,15 @@ struct AIProviderCard: View {
     }
 
     private func openTerminal() {
+        #if os(macOS)
         // Terminal.app'i aç
         if let url = URL(string: "file:///System/Applications/Utilities/Terminal.app") {
             NSWorkspace.shared.open(url)
         }
+        #else
+        importResult = "Terminal aksiyonu iPhone tarafında kullanılmaz"
+        importSuccess = false
+        #endif
     }
 
     private func statusRow(icon: String, color: Color, title: String, detail: String) -> some View {
@@ -1612,8 +1625,12 @@ struct BackupCard: View {
     @Environment(\.modelContext) private var ctx
     @State private var lastBackup: Date? = nil
     @State private var backupSize: Int? = nil
+    @State private var vaultLastSync: Date? = nil
+    @State private var vaultConfigured = false
+    @State private var vaultBackupExists = false
     @State private var statusMessage: String? = nil
     @State private var showRestoreConfirm = false
+    @State private var showVaultRestoreConfirm = false
     @State private var importing = false
 
     var body: some View {
@@ -1667,7 +1684,9 @@ struct BackupCard: View {
                 }
                 .foregroundStyle(BackupService.shared.iCloudMirrorAvailable ? Palette.positive : Palette.textTertiary)
 
-                Text("Ölçümler, antrenmanlar, takvim, tarifler, profil, Hakkında, chat geçmişi, memory ve research cache bu yedeğe girer. Restore öncesi otomatik safety backup alınır.")
+                vaultStatusBlock
+
+                Text("Ölçümler, antrenmanlar, takvim, tarifler, profil, Hakkında, chat geçmişi, memory, research cache ve presetler bu sisteme girer. Restore öncesi otomatik safety backup alınır; vault yazarken çakışma yakalanırsa eski dosya conflicts klasörüne kopyalanır.")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(nil)
@@ -1690,6 +1709,19 @@ struct BackupCard: View {
                 .controlSize(.small)
                 .disabled(!BackupService.shared.backupExists)
 
+                Button(action: selectVaultFolder) {
+                    Label(vaultConfigured ? "Klasörü Değiştir" : "Veri Klasörü Seç", systemImage: "folder.badge.gearshape")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button(action: exportVaultNow) {
+                    Label("Vault'a Yaz", systemImage: "arrow.up.doc.on.clipboard")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!vaultConfigured)
+
                 Spacer()
 
                 Button(role: .destructive) {
@@ -1701,6 +1733,16 @@ struct BackupCard: View {
                 .controlSize(.small)
                 .tint(Palette.warning)
                 .disabled(!BackupService.shared.backupExists || importing)
+
+                Button(role: .destructive) {
+                    showVaultRestoreConfirm = true
+                } label: {
+                    Label("Vault'tan Al", systemImage: "arrow.down.doc.on.clipboard")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(Palette.warning)
+                .disabled(!vaultBackupExists || importing)
             }
 
             if let msg = statusMessage {
@@ -1726,6 +1768,57 @@ struct BackupCard: View {
         } message: {
             Text("Mevcut tüm veri silinip yedekteki veriyle değiştirilecek. Önce bir yedek aldığından emin ol.")
         }
+        .alert("Vault'tan Geri Yükle?", isPresented: $showVaultRestoreConfirm) {
+            Button("İptal", role: .cancel) { }
+            Button("Tüm veriyi değiştir", role: .destructive) { restoreVaultNow() }
+        } message: {
+            Text("Seçili veri klasöründeki snapshot içeri alınacak. Mevcut local verinin safety backup'ı önce hem local yedeklere hem vault/backups içine yazılır.")
+        }
+    }
+
+    private var vaultStatusBlock: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                Image(systemName: vaultConfigured ? "externaldrive.connected.to.line.below" : "externaldrive.badge.questionmark")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(vaultConfigured ? "Dosya tabanlı vault aktif" : "Dosya tabanlı vault seçilmedi")
+                    .font(Typography.captionBold)
+                if let vaultLastSync {
+                    Text("· \(Fmt.dateLong.string(from: vaultLastSync))")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+            .foregroundStyle(vaultConfigured ? Palette.positive : Palette.warning)
+
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textTertiary)
+                Text(BackupService.shared.vaultDisplayPath)
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+            }
+
+            if vaultConfigured {
+                Text("Klasör yapısı: manifest.json, data/hercules-backup.json, support/, backups/, conflicts/. iPhone tarafında aynı klasör seçildiğinde bu snapshot okunacak.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.surfaceElevated.opacity(0.75))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
     }
 
     private func backupNow() {
@@ -1749,13 +1842,74 @@ struct BackupCard: View {
         refreshInfo()
     }
 
+    private func selectVaultFolder() {
+        #if os(macOS)
+        let panel = NSOpenPanel()
+        panel.title = "Hercules veri klasörünü seç"
+        panel.message = "iCloud Drive/Hercules gibi cihazların arasında sync olacak bir klasör seç."
+        panel.prompt = "Bu Klasörü Kullan"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                let summary = try BackupService.shared.configureVaultRoot(url, from: ctx)
+                statusMessage = summary.didWriteConflictCopy
+                    ? "✓ Vault seçildi, mevcut uzak kopya conflicts içine korundu"
+                    : "✓ Vault seçildi ve tüm veri yazıldı"
+            } catch {
+                statusMessage = "Vault hata: \(error.localizedDescription)"
+            }
+            refreshInfo()
+        }
+        #endif
+    }
+
+    private func exportVaultNow() {
+        do {
+            let summary = try BackupService.shared.exportToVault(from: ctx)
+            statusMessage = summary.didWriteConflictCopy
+                ? "✓ Vault yazıldı, eski uzak kopya conflicts içine alındı"
+                : "✓ Vault yazıldı"
+        } catch {
+            statusMessage = "Vault hata: \(error.localizedDescription)"
+        }
+        refreshInfo()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+            statusMessage = nil
+        }
+    }
+
+    private func restoreVaultNow() {
+        importing = true
+        defer { importing = false }
+        do {
+            try BackupService.shared.restoreFromVault(into: ctx)
+            statusMessage = "✓ Vault'tan geri yüklendi"
+        } catch {
+            statusMessage = "Vault hata: \(error.localizedDescription)"
+        }
+        refreshInfo()
+    }
+
     private func revealInFinder() {
-        NSWorkspace.shared.activateFileViewerSelecting([BackupService.shared.latestBackupURL])
+        #if os(macOS)
+        if let vaultURL = BackupService.shared.selectedVaultRootURL {
+            NSWorkspace.shared.activateFileViewerSelecting([vaultURL])
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([BackupService.shared.latestBackupURL])
+        }
+        #endif
     }
 
     private func refreshInfo() {
         lastBackup = BackupService.shared.lastBackupDate
         backupSize = BackupService.shared.backupSizeBytes
+        vaultLastSync = BackupService.shared.vaultLastSyncDate
+        vaultConfigured = BackupService.shared.vaultIsConfigured
+        vaultBackupExists = BackupService.shared.vaultBackupExists
     }
 
     private func formatSize(_ bytes: Int) -> String {

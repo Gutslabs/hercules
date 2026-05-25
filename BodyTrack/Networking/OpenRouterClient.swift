@@ -20,6 +20,15 @@ enum AIConfig {
 
         Sen Hercules — Türkçe konuşan, body-building üzerinde neredeyse tüm bilimsel araştırmaları bilen, sürekli yeni araştırmaları takip eden bir science-based body-builder koçusun.
 
+        COACH BRAIN V4 — SCIENCE-BASED FITNESS COACHING:
+        - Fitness, bodybuilding, nutrition, supplement, yağ kaybı, kas kazanımı, recovery ve antrenman programı sorularında beginner klişesi verme. Kullanıcı zaten uygulamada ölçüm, kalori, adım ve antrenman takip ediyor; cevaplarını bu seviyeye göre ver.
+        - Jeff Nippard / Stronger by Science / evidence-based coaching çizgisinde düşün: önce net karar, sonra neden, sonra pratik uygulama ve takip metriği. Gereksiz akademik essay yazma ama basit tavsiye de verme.
+        - Evidence hiyerarşisi: meta-analiz / systematic review / position stand > RCT > mekanizma > anekdot. PubMed/research context geldiyse title/PMID bilgisini kısa kullan; tek çalışma ile kesin hüküm verme.
+        - Kullanıcı verisi geldiyse sayılarla konuş: kilo trendi, yağ oranı, günlük/haftalık kalori ortalaması, protein aralığı, adım ortalaması, antrenman frekansı, hedef tarihi.
+        - Antrenman sorularında volume, frekans, RIR/failure, progressive overload, egzersiz seçimi, teknik sınırlayıcılar, yorgunluk yönetimi ve adherence dengesini birlikte değerlendir.
+        - Definasyon/kilo sorularında su/glikojen, log tutarlılığı, hareket/adım, protein, deficit büyüklüğü ve sürdürülebilir kayıp hızını ayır.
+        - Spor günlerine otomatik ekstra kalori ekleme veya önermeyi default yapma. Kullanıcının hedef kalorisi sabit kabul edilir; sadece açıkça isterse antrenman gününe özel kalori ayrıştır.
+
         CEVAP FORMATI — her zaman SADECE tek bir JSON objesi dön:
 
         Üç mod var:
@@ -38,8 +47,10 @@ enum AIConfig {
         - `summary`: Kullanıcıya gösterilecek kısa Türkçe işlem özeti.
         - Yemek kaydı için: {"tool":"log_food","summary":"Bugüne 520 kcal tavuk pilav ekle","name":"Tavuk pilav","grams":300,"calories":520,"protein_g":42,"carbs_g":55,"fat_g":12}
         - Tarif ekleme için: {"tool":"add_recipe","summary":"Tariflere protein pankek ekle","title":"Protein pankek","category":"breakfast","recipe_summary":"Ucuz, yüksek proteinli kahvaltı.","ingredients":"- 60g yulaf\\n- 2 yumurta\\n- 150g yoğurt","instructions":"1. Malzemeleri karıştır.\\n2. Tavada iki yüzünü pişir.","servings":1,"prep_minutes":12,"calories":520,"protein_g":38,"carbs_g":58,"fat_g":16,"url":"https://..."}; category sadece "breakfast", "dinner", "dessert". URL opsiyonel, ama tarif metni dolu olmalı.
-        - Antrenman planı ad/kcal için: {"tool":"update_workout_plan","summary":"Salı antrenmanını Sırt + Göğüs yap","workout_operation":"set_session","weekday":3,"name":"Sırt + Göğüs","estimated_calories":380}
-        - Antrenman planına hareket ekleme için: {"tool":"update_workout_plan","summary":"Salı planına Lat Pulldown ekle","workout_operation":"add_exercise","weekday":3,"exercise_name":"Lat Pulldown","sets":3,"reps":10,"weight":55}
+        - Antrenman planı ad/not/detay için: {"tool":"update_workout_plan","summary":"Salı gününü upper hipertrofi yap","workout_operation":"set_session","weekday":3,"name":"Upper Hipertrofi","duration_minutes":75,"focus":"Göğüs/sırt hacmi, 1-2 RIR","warmup":"5 dk yürüyüş + 2 ramp-up set","progression":"Tüm setlerde üst rep bandı gelirse +2.5 kg","notes":"Definasyonda failure'ı izolasyonlara sakla.","estimated_calories":0}
+        - Antrenman planına hareket ekleme için: {"tool":"update_workout_plan","summary":"Salı planına Lat Pulldown ekle","workout_operation":"add_exercise","weekday":3,"exercise_name":"Lat Pulldown","sets":3,"reps":"8-12","rir":"1-2","rest":"2 dk","load":"kontrollü form","source_url":"https://exrx.net/WeightExercises/LatissimusDorsi/CBFrontPulldown","notes":"Alt pozisyonda omuzu kilitleme"}
+        - Tüm programı yeniden yazma için tek action kullan ve eski planı arşivlet: {"tool":"update_workout_plan","summary":"Eski planı arşivleyip cut odaklı 3 günlük programı kur","workout_operation":"replace_program","archive_current":true,"program_title":"Cut Hipertrofi V1","program_summary":"Haftada 3 gün, kas koruma + toparlanma odaklı.","program_notes":"Ana liftlerde 1-2 RIR; izolasyonlarda son sette 0-1 RIR olabilir.","days":[{"weekday":3,"name":"Upper A","duration_minutes":70,"estimated_calories":0,"focus":"Göğüs/sırt ana hacim","warmup":"Bench ve row için 2 ramp-up set","progression":"Üst rep bandı tamamlanınca küçük ağırlık artışı","notes":"Dirsek/omuz ağrısı varsa pressing hacmini azalt.","exercises":[{"name":"Incline Bench Press","sets":3,"reps":"6-10","rir":"1-2","rest":"2-3 dk","source_url":"https://exrx.net/WeightExercises/PectoralClavicular/BBInclineBenchPress","notes":"Kontrollü eccentric"},{"name":"Seated Cable Row","sets":3,"reps":"8-12","rir":"1-2","rest":"2 dk","source_url":"https://exrx.net/WeightExercises/BackGeneral/CBStraightBackSeatedRow"}]}]}
+        - Sadece mevcut programı arşivleme için: {"tool":"update_workout_plan","summary":"Mevcut antrenman programını arşivle","workout_operation":"archive_program","program_title":"Mayıs programı","program_notes":"Yeni plana geçmeden önce saklandı."}
         - Yemek planı gün tipi için: {"tool":"update_meal_plan","summary":"Salı gününü tavuk göğsü günü yap","meal_operation":"set_day_type","weekday":3,"day_type":"gogus"}
         - Yemek planına öğe ekleme için: {"tool":"update_meal_plan","summary":"Salı öğlene 200g tavuk göğsü ekle","meal_operation":"add_item","weekday":3,"meal_slot":"ogle","item_name":"Tavuk göğsü","amount":200,"unit":"g","calories":330,"protein_g":62,"carbs_g":0,"fat_g":7}
         - weekday Apple Calendar formatındadır: 1=Pazar, 2=Pazartesi, 3=Salı, 4=Çarşamba, 5=Perşembe, 6=Cuma, 7=Cumartesi.
@@ -52,6 +63,8 @@ enum AIConfig {
         - Top-level calories, protein_g, carbs_g, fat_g sadece YEMEK MODU'nda doldur. `actions` içindeki log_food / update_meal_plan.add_item alanlarında bu makro/kcal değerleri ayrıca kullanılabilir.
         - `actions` sadece kullanıcı app datasını değiştirmeyi açıkça istediğinde eklenir. Sadece öneri veya sohbet istiyorsa action üretme.
         - `update_workout_plan` ve `update_meal_plan` ASLA yapılmış gibi konuşma. Bunlar app içinde önce onay bekler. Message içinde doğal şekilde "Bunu şöyle değiştirmeyi öneriyorum, onaylıyor musun?" diye sor.
+        - Kullanıcı yeni program yazmanı isterse eski programı korumak için `replace_program` action'ında `archive_current:true` kullan. Gün gün yazdığın set/rep/RIR/rest/progression/notlar `days[].exercises[]` ve day/program notlarına dolu gelsin; sadece chat mesajında bırakma.
+        - Antrenman hareketlerinde biliyorsan `source_url` ekle. Öncelik: ExRx / güvenilir egzersiz kütüphanesi / iyi teknik anlatımı. Emin değilsen URL uydurma; boş bırak.
         - `log_food` ve `add_recipe` action'ları app tarafından otomatik uygulanır. Bu action'ları üretirken "onaylıyor musun?" diye sorma; işlem gerçekleşmiş gibi kısa ve net konuş.
         - Kullanıcı "şu hareketi ekle" derse `update_workout_plan` içinde `workout_operation:"add_exercise"` kullan; tüm antrenman adını hareket listesine çevirmeye çalışma.
         - `log_food` ve `add_recipe` kullanıcı açıkça "ekle/kaydet" dediyse action olarak yazılabilir.
@@ -65,7 +78,7 @@ enum AIConfig {
 
         KULLANICI HAKKINDA + VERİSİ + AGENT SKILL CONTEXT:
         - Eğer kullanıcı mesajının başında `[KULLANICI HAKKINDA ...]` bloku varsa, bu kullanıcının kendi yazdığı geçmişi/kişiliği — onu TANI, ona göre cevapla. Bu blok HER mesajda gelir. Ama kullanıcı normal yazıyorsa, bunu kullanıcıya her dakika aktarmamalısın. Kullanıcı sadece öneri isterken/body-building konuşurken bunu göz önünde bulundurarak cevap ver. Örneğin: kullanıcı "selam" yazdığında normal cevap ver; ama body-building ile alakalı bir şey sorarsa verileri ve mevcut durumu göz önüne al.
-        - Eğer `HERCULES AGENT SKILL CONTEXT` bloku varsa, bu kişisel memory, PubMed research adayları veya food lookup sonuçları içerebilir. Sadece alakalı olanları kullan; PubMed sonuçlarını "kanıt yönü" gibi ele al, tek başına kesin hüküm yapma.
+        - Eğer `HERCULES AGENT SKILL CONTEXT` bloku varsa, bu kişisel memory, Coach Intelligence Pack, evidence claim graph, PubMed research adayları veya food lookup sonuçları içerebilir. Coach Intelligence Pack içindeki sayısal trend/decision flag'leri öncelikli karar desteği olarak kullan. PubMed sonuçlarını "kanıt yönü" gibi ele al, tek başına kesin hüküm yapma.
         - Veri geldiyse bu verilere göre yorum yaparsın. Current date'yi de göz önünde bulundur (yukarıda verildi).
         - Hakkında metnindeki bilgiyi sürekli tekrar etme; sadece relevant olduğunda referans ver.
 
@@ -178,6 +191,152 @@ enum AIAppActionStatus: String, Codable, Equatable {
     case failed
 }
 
+struct AIWorkoutExercisePlan: Identifiable, Equatable, Codable {
+    var id: UUID = UUID()
+    var name: String
+    var sets: Int?
+    var reps: String?
+    var load: String?
+    var rir: String?
+    var rest: String?
+    var sourceURL: String?
+    var notes: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, sets, reps, load, rir, rest, notes
+        case sourceURL, source_url, url
+    }
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        sets: Int? = nil,
+        reps: String? = nil,
+        load: String? = nil,
+        rir: String? = nil,
+        rest: String? = nil,
+        sourceURL: String? = nil,
+        notes: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.sets = sets
+        self.reps = reps
+        self.load = load
+        self.rir = rir
+        self.rest = rest
+        self.sourceURL = sourceURL
+        self.notes = notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        sets = try? c.decodeIfPresent(Int.self, forKey: .sets)
+        if let value = try? c.decodeIfPresent(String.self, forKey: .reps) {
+            reps = value
+        } else if let value = try? c.decodeIfPresent(Int.self, forKey: .reps) {
+            reps = "\(value)"
+        } else {
+            reps = nil
+        }
+        load = try? c.decodeIfPresent(String.self, forKey: .load)
+        rir = try? c.decodeIfPresent(String.self, forKey: .rir)
+        rest = try? c.decodeIfPresent(String.self, forKey: .rest)
+        sourceURL = (try? c.decodeIfPresent(String.self, forKey: .sourceURL))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .source_url))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .url))
+        notes = try? c.decodeIfPresent(String.self, forKey: .notes)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(sets, forKey: .sets)
+        try c.encodeIfPresent(reps, forKey: .reps)
+        try c.encodeIfPresent(load, forKey: .load)
+        try c.encodeIfPresent(rir, forKey: .rir)
+        try c.encodeIfPresent(rest, forKey: .rest)
+        try c.encodeIfPresent(sourceURL, forKey: .sourceURL)
+        try c.encodeIfPresent(notes, forKey: .notes)
+    }
+}
+
+struct AIWorkoutDayPlan: Identifiable, Equatable, Codable {
+    var id: UUID = UUID()
+    var weekday: Int
+    var name: String
+    var estimatedCalories: Double?
+    var durationMinutes: Int?
+    var focus: String?
+    var warmup: String?
+    var progression: String?
+    var notes: String?
+    var exercises: [AIWorkoutExercisePlan]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, weekday, name, focus, warmup, progression, notes, exercises
+        case estimatedCalories, estimated_calories
+        case durationMinutes, duration_minutes
+    }
+
+    init(
+        id: UUID = UUID(),
+        weekday: Int,
+        name: String,
+        estimatedCalories: Double? = nil,
+        durationMinutes: Int? = nil,
+        focus: String? = nil,
+        warmup: String? = nil,
+        progression: String? = nil,
+        notes: String? = nil,
+        exercises: [AIWorkoutExercisePlan] = []
+    ) {
+        self.id = id
+        self.weekday = weekday
+        self.name = name
+        self.estimatedCalories = estimatedCalories
+        self.durationMinutes = durationMinutes
+        self.focus = focus
+        self.warmup = warmup
+        self.progression = progression
+        self.notes = notes
+        self.exercises = exercises
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        weekday = (try? c.decode(Int.self, forKey: .weekday)) ?? 0
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        estimatedCalories = (try? c.decodeIfPresent(Double.self, forKey: .estimatedCalories))
+            ?? (try? c.decodeIfPresent(Double.self, forKey: .estimated_calories))
+        durationMinutes = (try? c.decodeIfPresent(Int.self, forKey: .durationMinutes))
+            ?? (try? c.decodeIfPresent(Int.self, forKey: .duration_minutes))
+        focus = try? c.decodeIfPresent(String.self, forKey: .focus)
+        warmup = try? c.decodeIfPresent(String.self, forKey: .warmup)
+        progression = try? c.decodeIfPresent(String.self, forKey: .progression)
+        notes = try? c.decodeIfPresent(String.self, forKey: .notes)
+        exercises = (try? c.decodeIfPresent([AIWorkoutExercisePlan].self, forKey: .exercises)) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(weekday, forKey: .weekday)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(estimatedCalories, forKey: .estimatedCalories)
+        try c.encodeIfPresent(durationMinutes, forKey: .durationMinutes)
+        try c.encodeIfPresent(focus, forKey: .focus)
+        try c.encodeIfPresent(warmup, forKey: .warmup)
+        try c.encodeIfPresent(progression, forKey: .progression)
+        try c.encodeIfPresent(notes, forKey: .notes)
+        try c.encode(exercises, forKey: .exercises)
+    }
+}
+
 struct AIAppAction: Identifiable, Equatable, Codable {
     var id: UUID
     var tool: AIAppToolName
@@ -197,11 +356,25 @@ struct AIAppAction: Identifiable, Equatable, Codable {
 
     var weekday: Int?
     var estimatedCalories: Double?
+    var durationMinutes: Int?
     var workoutOperation: String?
     var exerciseName: String?
     var sets: Int?
-    var reps: Int?
+    var reps: String?
     var weight: Double?
+    var load: String?
+    var rir: String?
+    var rest: String?
+    var sourceURL: String?
+    var workoutNotes: String?
+    var focus: String?
+    var warmup: String?
+    var progression: String?
+    var archiveCurrent: Bool?
+    var programTitle: String?
+    var programSummary: String?
+    var programNotes: String?
+    var days: [AIWorkoutDayPlan]?
     var mealOperation: String?
     var dayType: String?
     var mealSlot: String?
@@ -241,6 +414,12 @@ struct AIAppAction: Identifiable, Equatable, Codable {
             if let exerciseName, !exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return "\(weekdayLabel) → + \(exerciseName)"
             }
+            if workoutOperation == "replace_program" {
+                return programTitle ?? "Yeni program"
+            }
+            if workoutOperation == "archive_program" {
+                return programTitle ?? "Mevcut programı arşivle"
+            }
             return "\(weekdayLabel) → \(name ?? "Antrenman")"
         case .updateMealPlan:
             if mealOperation == "set_day_type" {
@@ -276,9 +455,16 @@ struct AIAppAction: Identifiable, Equatable, Codable {
         case ingredients, instructions, servings
         case prepMinutes, prep_minutes
         case estimatedCalories, estimated_calories
+        case durationMinutes, duration_minutes
         case workoutOperation, workout_operation
         case exerciseName, exercise_name
-        case sets, reps, weight
+        case sets, reps, weight, load, rir, rest, focus, warmup, progression, days
+        case sourceURL, source_url
+        case workoutNotes, workout_notes
+        case archiveCurrent, archive_current
+        case programTitle, program_title
+        case programSummary, program_summary
+        case programNotes, program_notes
         case mealOperation, meal_operation
         case dayType, day_type
         case mealSlot, meal_slot
@@ -314,13 +500,40 @@ struct AIAppAction: Identifiable, Equatable, Codable {
         unit = try? c.decodeIfPresent(String.self, forKey: .unit)
         estimatedCalories = (try? c.decodeIfPresent(Double.self, forKey: .estimatedCalories))
             ?? (try? c.decodeIfPresent(Double.self, forKey: .estimated_calories))
+        durationMinutes = (try? c.decodeIfPresent(Int.self, forKey: .durationMinutes))
+            ?? (try? c.decodeIfPresent(Int.self, forKey: .duration_minutes))
         workoutOperation = (try? c.decodeIfPresent(String.self, forKey: .workoutOperation))
             ?? (try? c.decodeIfPresent(String.self, forKey: .workout_operation))
         exerciseName = (try? c.decodeIfPresent(String.self, forKey: .exerciseName))
             ?? (try? c.decodeIfPresent(String.self, forKey: .exercise_name))
         sets = try? c.decodeIfPresent(Int.self, forKey: .sets)
-        reps = try? c.decodeIfPresent(Int.self, forKey: .reps)
+        if let value = try? c.decodeIfPresent(String.self, forKey: .reps) {
+            reps = value
+        } else if let value = try? c.decodeIfPresent(Int.self, forKey: .reps) {
+            reps = "\(value)"
+        } else {
+            reps = nil
+        }
         weight = try? c.decodeIfPresent(Double.self, forKey: .weight)
+        load = try? c.decodeIfPresent(String.self, forKey: .load)
+        rir = try? c.decodeIfPresent(String.self, forKey: .rir)
+        rest = try? c.decodeIfPresent(String.self, forKey: .rest)
+        sourceURL = (try? c.decodeIfPresent(String.self, forKey: .sourceURL))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .source_url))
+        workoutNotes = (try? c.decodeIfPresent(String.self, forKey: .workoutNotes))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .workout_notes))
+        focus = try? c.decodeIfPresent(String.self, forKey: .focus)
+        warmup = try? c.decodeIfPresent(String.self, forKey: .warmup)
+        progression = try? c.decodeIfPresent(String.self, forKey: .progression)
+        archiveCurrent = (try? c.decodeIfPresent(Bool.self, forKey: .archiveCurrent))
+            ?? (try? c.decodeIfPresent(Bool.self, forKey: .archive_current))
+        programTitle = (try? c.decodeIfPresent(String.self, forKey: .programTitle))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .program_title))
+        programSummary = (try? c.decodeIfPresent(String.self, forKey: .programSummary))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .program_summary))
+        programNotes = (try? c.decodeIfPresent(String.self, forKey: .programNotes))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .program_notes))
+        days = try? c.decodeIfPresent([AIWorkoutDayPlan].self, forKey: .days)
         mealOperation = (try? c.decodeIfPresent(String.self, forKey: .mealOperation))
             ?? (try? c.decodeIfPresent(String.self, forKey: .meal_operation))
         dayType = (try? c.decodeIfPresent(String.self, forKey: .dayType))
@@ -355,11 +568,25 @@ struct AIAppAction: Identifiable, Equatable, Codable {
         try c.encodeIfPresent(prepMinutes, forKey: .prepMinutes)
         try c.encodeIfPresent(weekday, forKey: .weekday)
         try c.encodeIfPresent(estimatedCalories, forKey: .estimatedCalories)
+        try c.encodeIfPresent(durationMinutes, forKey: .durationMinutes)
         try c.encodeIfPresent(workoutOperation, forKey: .workoutOperation)
         try c.encodeIfPresent(exerciseName, forKey: .exerciseName)
         try c.encodeIfPresent(sets, forKey: .sets)
         try c.encodeIfPresent(reps, forKey: .reps)
         try c.encodeIfPresent(weight, forKey: .weight)
+        try c.encodeIfPresent(load, forKey: .load)
+        try c.encodeIfPresent(rir, forKey: .rir)
+        try c.encodeIfPresent(rest, forKey: .rest)
+        try c.encodeIfPresent(sourceURL, forKey: .sourceURL)
+        try c.encodeIfPresent(workoutNotes, forKey: .workoutNotes)
+        try c.encodeIfPresent(focus, forKey: .focus)
+        try c.encodeIfPresent(warmup, forKey: .warmup)
+        try c.encodeIfPresent(progression, forKey: .progression)
+        try c.encodeIfPresent(archiveCurrent, forKey: .archiveCurrent)
+        try c.encodeIfPresent(programTitle, forKey: .programTitle)
+        try c.encodeIfPresent(programSummary, forKey: .programSummary)
+        try c.encodeIfPresent(programNotes, forKey: .programNotes)
+        try c.encodeIfPresent(days, forKey: .days)
         try c.encodeIfPresent(mealOperation, forKey: .mealOperation)
         try c.encodeIfPresent(dayType, forKey: .dayType)
         try c.encodeIfPresent(mealSlot, forKey: .mealSlot)

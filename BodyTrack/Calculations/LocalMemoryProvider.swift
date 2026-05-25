@@ -46,6 +46,14 @@ final class LocalMemoryProvider {
         var memories: [AgentMemory]
     }
 
+    private struct MemoryCandidate {
+        var content: String
+        var tags: [String]
+        var source: String
+        var confidence: Double
+        var pinned: Bool = false
+    }
+
     private let memoryURL: URL
     private var memories: [AgentMemory] = []
 
@@ -163,29 +171,53 @@ final class LocalMemoryProvider {
 
     @discardableResult
     func absorbConversation(userText: String, assistantText: String) -> Int {
-        _ = assistantText
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 0 }
 
-        var inserted = 0
+        var candidates: [MemoryCandidate] = []
         if let explicit = explicitMemoryCandidate(from: trimmed) {
-            remember(content: explicit.content, tags: explicit.tags, source: "explicit", confidence: 0.96, pinned: true)
-            inserted += 1
-        } else if let inferred = inferredMemoryCandidate(from: trimmed) {
-            remember(content: inferred.content, tags: inferred.tags, source: "chat-inferred", confidence: inferred.confidence)
-            inserted += 1
+            candidates.append(MemoryCandidate(
+                content: explicit.content,
+                tags: explicit.tags,
+                source: "explicit",
+                confidence: 0.96,
+                pinned: true
+            ))
+        } else {
+            candidates.append(contentsOf: inferredMemoryCandidates(fromUserText: trimmed))
         }
 
-        if Self.containsAny(trimmed, needles: ["kanka", "knk", "aq", "samimi", "casual"]) {
+        if let style = styleMemoryCandidate(from: trimmed) {
+            candidates.append(style)
+        }
+
+        candidates.append(contentsOf: inferredMemoryCandidates(fromAssistantText: assistantText, userText: trimmed))
+
+        var stored = 0
+        for candidate in Self.deduplicated(candidates) {
             remember(
-                content: "Kullanıcı samimi Türkçe tonda, kısa ve direkt konuşmayı seviyor.",
-                tags: ["communication", "tone"],
-                source: "chat-style",
-                confidence: 0.72
+                content: candidate.content,
+                tags: candidate.tags,
+                source: candidate.source,
+                confidence: candidate.confidence,
+                pinned: candidate.pinned
             )
+            stored += 1
         }
 
-        return inserted
+        return stored
+    }
+
+    private func styleMemoryCandidate(from text: String) -> MemoryCandidate? {
+        guard Self.containsAny(text, needles: ["kanka", "knk", "aq", "amk", "samimi", "casual"]) else {
+            return nil
+        }
+        return MemoryCandidate(
+            content: "Kullanıcı samimi Türkçe tonda, kısa ve direkt konuşmayı seviyor.",
+            tags: ["communication", "tone"],
+            source: "chat-style",
+            confidence: 0.72
+        )
     }
 
     @discardableResult
@@ -253,26 +285,228 @@ final class LocalMemoryProvider {
         return ("Kullanıcı açıkça şunu hatırlatmak istedi: \(content)", Self.tags(for: content))
     }
 
-    private func inferredMemoryCandidate(from text: String) -> (content: String, tags: [String], confidence: Double)? {
+    private func inferredMemoryCandidates(fromUserText text: String) -> [MemoryCandidate] {
         let lower = Self.fold(text)
+        guard !Self.isProbablyNoise(lower),
+              text.count <= 1_200
+        else { return [] }
+
+        let captured = Self.captureText(text)
+        guard !captured.isEmpty else { return [] }
+
         let personalSignals = [
-            "ben ", "bende ", "benim ", "severim", "seviyorum", "sevmiyorum",
-            "tercih", "istemiyorum", "hedefim", "amacim", "amacım", "yapiyorum",
-            "yapıyorum", "gidiyorum", "yiyorum", "kullaniyorum", "kullanıyorum"
+            "ben ", "bende ", "benim ", "bana ", "bende", "kendim", "hakkimda", "hakkımda",
+            "yasim", "yaşim", "yaşım", "boyum", "kilom", "hedefim", "amacim", "amacım",
+            "istiyorum", "istemiyorum", "istemiyoruz", "tercih", "severim", "seviyorum",
+            "sevmiyorum", "zor geliyor", "kolay geliyor", "yapiyorum", "yapıyorum",
+            "gidiyorum", "yiyorum", "kullaniyorum", "kullanıyorum", "alicam", "alacağım",
+            "baslicam", "başlıcam", "baslayacagim", "başlayacağım"
         ]
-        let domainSignals = [
-            "protein", "kalori", "makro", "bulk", "cut", "definasyon", "kilo",
-            "yag", "yağ", "antrenman", "idman", "workout", "gym", "kreatin",
-            "creatine", "whey", "yemek", "ogun", "öğün", "ucuz", "butce", "bütçe",
-            "pismis", "pişmiş", "cig", "çiğ", "bodybuilding"
+        let preferenceSignals = [
+            "istiyorum", "istemiyorum", "istemiyoruz", "olmasin", "olmasın", "olsun",
+            "tercih", "daha iyi", "gerek yok", "lazim", "lazım", "bence", "severim",
+            "seviyorum", "sevmiyorum", "mantikli", "mantıklı"
+        ]
+        let appSignals = [
+            "chat", "memory", "hafiza", "hafıza", "sidebar", "layout", "responsive",
+            "tasarim", "tasarım", "renk", "preset", "popup", "pop-up", "takvim",
+            "tarif", "tarifler", "antrenman sayfasi", "antrenman sayfası", "icloud",
+            "shortcut", "shortcuts", "kaydet", "onay", "buton", "arrow", "resize",
+            "scroll", "typewriter", "profil", "uygulama", "app"
+        ]
+        let nutritionSignals = [
+            "protein", "kalori", "makro", "yemek", "ogun", "öğün", "tarif", "whey",
+            "protein tozu", "pirinc", "pirinç", "tavuk", "yumurta", "yag", "yağ",
+            "karbonhidrat", "carb", "bulk", "cut", "definasyon", "olcek", "ölçek"
+        ]
+        let trainingSignals = [
+            "antrenman", "idman", "workout", "gym", "program", "hareket", "set", "rir",
+            "bench", "squat", "deadlift", "hipertrofi", "hypertrophy", "upper", "lower",
+            "calf", "hamstring", "quad", "gogus", "göğüs", "sirt", "sırt", "bacak"
+        ]
+        let profileSignals = [
+            "hedef", "kilo", "yag orani", "yağ oranı", "boy", "yas", "yaş", "adim",
+            "adım", "ölçüm", "olcum", "vucut", "vücut", "kg", "cm"
+        ]
+        let supplementSignals = [
+            "whey", "protein tozu", "command quadro", "gentopure", "protein ocean",
+            "kreatin", "creatine", "bcaa", "ssn", "olcek", "ölçek", "servis"
         ]
 
-        guard text.count <= 260,
-              Self.containsAny(lower, needles: personalSignals),
-              Self.containsAny(lower, needles: domainSignals)
-        else { return nil }
+        let hasPersonal = Self.containsAny(lower, needles: personalSignals)
+        let hasPreference = Self.containsAny(lower, needles: preferenceSignals)
+        let hasApp = Self.containsAny(lower, needles: appSignals)
+        let hasNutrition = Self.containsAny(lower, needles: nutritionSignals)
+        let hasTraining = Self.containsAny(lower, needles: trainingSignals)
+        let hasProfile = Self.containsAny(lower, needles: profileSignals)
+        let hasSupplement = Self.containsAny(lower, needles: supplementSignals)
+        let hasDurableDomain = hasApp || hasNutrition || hasTraining || hasProfile || hasSupplement
 
-        return ("Kullanıcı hakkında: \(text)", Self.tags(for: text), 0.68)
+        guard hasDurableDomain && (hasPersonal || hasPreference || Self.looksLikeDurableInstruction(lower)) else {
+            return []
+        }
+
+        var candidates: [MemoryCandidate] = []
+
+        if hasSupplement {
+            candidates.append(MemoryCandidate(
+                content: "Takviye bilgisi: \(captured)",
+                tags: Self.tags(for: text) + ["supplement"],
+                source: "chat-inferred",
+                confidence: 0.78
+            ))
+        }
+
+        if hasApp {
+            candidates.append(MemoryCandidate(
+                content: "Uygulama tercihi: \(captured)",
+                tags: Self.tags(for: text) + ["app-preference"],
+                source: "chat-inferred",
+                confidence: hasPreference ? 0.78 : 0.7
+            ))
+        }
+
+        if hasTraining && (hasPersonal || hasPreference || Self.containsAny(lower, needles: ["program", "hareket", "set", "rir", "arşiv", "arsiv"])) {
+            candidates.append(MemoryCandidate(
+                content: "Antrenman tercihi/verisi: \(captured)",
+                tags: Self.tags(for: text) + ["training"],
+                source: "chat-inferred",
+                confidence: hasPreference ? 0.78 : 0.7
+            ))
+        }
+
+        if hasNutrition && (hasPersonal || hasPreference || hasSupplement || Self.containsAny(lower, needles: ["gunde", "günde", "her gun", "her gün", "olcek", "ölçek"])) {
+            candidates.append(MemoryCandidate(
+                content: "Beslenme tercihi/verisi: \(captured)",
+                tags: Self.tags(for: text) + ["nutrition"],
+                source: "chat-inferred",
+                confidence: hasPreference ? 0.78 : 0.7
+            ))
+        }
+
+        if hasProfile && hasPersonal {
+            candidates.append(MemoryCandidate(
+                content: "Profil/hedef bilgisi: \(captured)",
+                tags: Self.tags(for: text) + ["profile"],
+                source: "chat-inferred",
+                confidence: 0.72
+            ))
+        }
+
+        if candidates.isEmpty, hasDurableDomain {
+            candidates.append(MemoryCandidate(
+                content: "Kullanıcı bilgisi: \(captured)",
+                tags: Self.tags(for: text),
+                source: "chat-inferred",
+                confidence: 0.66
+            ))
+        }
+
+        return Array(Self.deduplicated(candidates).prefix(3))
+    }
+
+    private func inferredMemoryCandidates(fromAssistantText assistantText: String, userText: String) -> [MemoryCandidate] {
+        let userLower = Self.fold(userText)
+        guard Self.containsAny(userLower, needles: [
+            "onayliyorum", "onaylıyorum", "onay", "kabul", "tamam", "olur", "bundan sonra",
+            "ayarla", "ekle", "kaydet", "yap"
+        ]) else { return [] }
+
+        let compact = Self.captureAssistantDecision(assistantText)
+        guard !compact.isEmpty else { return [] }
+        return [MemoryCandidate(
+            content: "Koç/app kararı: \(compact)",
+            tags: Self.tags(for: compact) + ["coach-note"],
+            source: "assistant-inferred",
+            confidence: 0.62
+        )]
+    }
+
+    private static func isProbablyNoise(_ lower: String) -> Bool {
+        let compact = lower
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let exactNoise: Set<String> = [
+            "", "ok", "okay", "tamam", "tmm", "devam", "hadi", "evet", "hayir",
+            "hayır", "olur", "ail", "v2", "v3", "kanka", "knk", "onayliyorum", "onaylıyorum"
+        ]
+        if exactNoise.contains(compact) { return true }
+        return compact.count < 8
+    }
+
+    private static func looksLikeDurableInstruction(_ lower: String) -> Bool {
+        containsAny(lower, needles: [
+            "bundan sonra", "hep", "her zaman", "surekli", "sürekli", "artik", "artık",
+            "duzenli", "düzenli", "gunde", "günde", "her gun", "her gün", "istemiyorum",
+            "istemiyoruz", "olmasin", "olmasın", "olsun", "kaldir", "kaldır", "ekle",
+            "ayarla", "tasarl", "gelistir", "geliştir"
+        ])
+    }
+
+    private static func captureText(_ text: String) -> String {
+        var compact = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let fillerPatterns = [
+            #"(?i)\b(kanka|knk|aq|amk|olm)\b"#,
+            #"(?i)\byarram\b"#,
+            #"(?i)\bsikicem\b"#,
+            #"(?i)\bsikice[mn]?\b"#
+        ]
+        for pattern in fillerPatterns {
+            compact = compact.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        compact = compact
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ,.;:-\n\t"))
+
+        let limit = 360
+        guard compact.count > limit else { return compact }
+        let end = compact.index(compact.startIndex, offsetBy: limit)
+        return String(compact[..<end]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+
+    private static func captureAssistantDecision(_ text: String) -> String {
+        let lower = fold(text)
+        guard containsAny(lower, needles: [
+            "bundan sonra", "kabul", "hedef", "program", "ekledim", "eklendi",
+            "guncellendi", "güncellendi", "aktif", "arşiv", "arsiv", "arşivlendi",
+            "arsivlendi", "uygulandi", "uygulandı"
+        ]) else {
+            return ""
+        }
+        let lines = text
+            .split(separator: "\n")
+            .map { captureText(String($0)) }
+            .filter { !$0.isEmpty }
+        guard let selected = lines.first(where: {
+            let folded = fold($0)
+            return containsAny(folded, needles: [
+                "bundan sonra", "kabul", "program", "hedef", "aktif", "arşiv",
+                "arsiv", "eklendi", "guncellendi", "güncellendi", "uygulandi", "uygulandı"
+            ])
+        }) ?? lines.first else {
+            return ""
+        }
+        return selected
+    }
+
+    private static func deduplicated(_ candidates: [MemoryCandidate]) -> [MemoryCandidate] {
+        var output: [MemoryCandidate] = []
+        for candidate in candidates {
+            let key = normalizeMemory(candidate.content)
+            guard !key.isEmpty else { continue }
+            if let idx = output.firstIndex(where: { normalizeMemory($0.content) == key }) {
+                output[idx].tags = Array(Set(output[idx].tags + candidate.tags)).sorted()
+                output[idx].confidence = max(output[idx].confidence, candidate.confidence)
+                output[idx].pinned = output[idx].pinned || candidate.pinned
+            } else {
+                output.append(candidate)
+            }
+        }
+        return output
     }
 
     private func touch(_ selected: [AgentMemory]) {
@@ -325,11 +559,13 @@ final class LocalMemoryProvider {
     private func persist() {
         if memories.isEmpty {
             try? FileManager.default.removeItem(at: memoryURL)
+            NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
             return
         }
         let payload = MemoryPayload(version: 1, savedAt: .now, memories: memories)
         guard let data = try? Self.encoder.encode(payload) else { return }
         try? data.write(to: memoryURL, options: [.atomic])
+        NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
     }
 
     private static func isExpired(_ memory: AgentMemory, now: Date) -> Bool {
@@ -340,16 +576,33 @@ final class LocalMemoryProvider {
     private static func tags(for text: String) -> [String] {
         let lower = fold(text)
         var tags: Set<String> = []
-        if containsAny(lower, needles: ["protein", "kalori", "makro", "yemek", "ogun", "öğün", "pismis", "pişmiş", "cig", "çiğ"]) {
+        if containsAny(lower, needles: [
+            "protein", "kalori", "makro", "yemek", "ogun", "öğün", "pismis",
+            "pişmiş", "cig", "çiğ", "whey", "protein tozu", "pirinc", "pirinç",
+            "tavuk", "yumurta", "karbonhidrat"
+        ]) {
             tags.insert("nutrition")
         }
-        if containsAny(lower, needles: ["antrenman", "idman", "workout", "gym", "hipertrofi", "hypertrophy", "bodybuilding"]) {
+        if containsAny(lower, needles: [
+            "antrenman", "idman", "workout", "gym", "hipertrofi", "hypertrophy",
+            "bodybuilding", "program", "hareket", "rir", "set", "bench", "squat",
+            "deadlift", "upper", "lower", "calf", "hamstring", "quad"
+        ]) {
             tags.insert("training")
+        }
+        if containsAny(lower, needles: ["whey", "protein tozu", "kreatin", "creatine", "bcaa", "ssn", "gentopure", "protein ocean"]) {
+            tags.insert("supplement")
+        }
+        if containsAny(lower, needles: ["chat", "memory", "hafiza", "hafıza", "sidebar", "layout", "preset", "takvim", "profil", "icloud", "shortcut"]) {
+            tags.insert("app")
+        }
+        if containsAny(lower, needles: ["sidebar", "layout", "responsive", "tasarim", "tasarım", "renk", "popup", "pop-up", "buton", "arrow", "resize", "scroll"]) {
+            tags.insert("ui")
         }
         if containsAny(lower, needles: ["bulk", "cut", "definasyon", "kilo", "yag", "yağ", "hedef"]) {
             tags.insert("goal")
         }
-        if containsAny(lower, needles: ["seviyorum", "sevmiyorum", "tercih", "istemiyorum"]) {
+        if containsAny(lower, needles: ["seviyorum", "sevmiyorum", "tercih", "istemiyorum", "istemiyoruz", "olmasin", "olmasın"]) {
             tags.insert("preference")
         }
         if containsAny(lower, needles: ["ucuz", "butce", "bütçe", "ulasılabilir", "ulaşılabilir"]) {
@@ -422,4 +675,8 @@ final class LocalMemoryProvider {
             .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)-unreadable-\(formatter.string(from: Date())).json")
         try? FileManager.default.copyItem(at: url, to: backupURL)
     }
+}
+
+extension Notification.Name {
+    static let localMemoryChanged = Notification.Name("hercules.local-memory.changed")
 }

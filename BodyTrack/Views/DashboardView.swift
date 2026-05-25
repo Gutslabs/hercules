@@ -69,7 +69,6 @@ struct DashboardView: View {
             activity: profile.activity,
             goal: profile.goal,
             manualOffset: profile.manualCalorieOffset,
-            workoutCalories: todaysWorkout?.estimatedCalories ?? 0,
             stepCalories: stepCalories
         )
     }
@@ -225,7 +224,7 @@ struct DashboardView: View {
                         Image(systemName: "figure.strengthtraining.traditional")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Palette.textTertiary)
-                        Text("\(w.name) · +\(Fmt.int(w.estimatedCalories)) kcal")
+                        Text("\(w.name) · hedef sabit")
                             .font(Typography.caption)
                             .foregroundStyle(Palette.textSecondary)
                     }

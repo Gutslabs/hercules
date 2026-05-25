@@ -6,12 +6,16 @@ struct WorkoutView: View {
     @Query(sort: \WorkoutLog.date, order: .reverse) private var logs: [WorkoutLog]
     @Query(sort: \WorkoutSession.weekday) private var templates: [WorkoutSession]
     @Query(sort: \WorkoutPlanOverride.createdAt) private var planOverrides: [WorkoutPlanOverride]
+    @Query(sort: \WorkoutProgramArchive.archivedAt, order: .reverse) private var archivedPrograms: [WorkoutProgramArchive]
 
     @State private var currentMonth: Date = Self.startOfMonth(.now)
     @State private var selectedDay: Date = Calendar.current.startOfDay(for: .now)
     @State private var editing: WorkoutLog? = nil
     @State private var creatingForDate: Date? = nil
     @State private var creatingPrefill: WorkoutLog? = nil
+    @State private var editingProgramSession: WorkoutSession? = nil
+    @State private var showingArchives = false
+    @State private var highlightedProgramWeekday: Int? = nil
 
     /// Exact log dict: startOfDay → log (her gün için doğrudan kayıt).
     private var exactLogByDay: [Date: WorkoutLog] {
@@ -63,16 +67,22 @@ struct WorkoutView: View {
         // Tüm subviews tek dict precompute'unu paylaşır — render başına 1 scan.
         let exact = exactLogByDay
         let tplsByWeekday = templateLogByWeekday
-        return ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                header
-                statsStrip(exact: exact, templatesByWeekday: tplsByWeekday)
-                monthNavBar
-                calendarGrid(exact: exact, templatesByWeekday: tplsByWeekday)
-                selectedDayDetail(exact: exact, templatesByWeekday: tplsByWeekday)
-                Spacer(minLength: 24)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    header
+                    monthNavBar
+                    calendarGrid(exact: exact, templatesByWeekday: tplsByWeekday) { date in
+                        focusProgramDay(for: date, proxy: proxy)
+                    }
+                    activeProgramSection
+                        .id("active-program")
+                    workoutTermsSection
+                    statsStrip(exact: exact, templatesByWeekday: tplsByWeekday)
+                    Spacer(minLength: 24)
+                }
+                .padding(Spacing.xxl)
             }
-            .padding(Spacing.xxl)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -119,6 +129,22 @@ struct WorkoutView: View {
                 try? ctx.save()
             }
         }
+        .sheet(item: $editingProgramSession) { session in
+            WorkoutProgramSessionEditor(session: session) {
+                try? ctx.save()
+                editingProgramSession = nil
+            }
+        }
+        .sheet(isPresented: $showingArchives) {
+            WorkoutProgramArchiveSheet(
+                archives: archivedPrograms,
+                onRestore: restoreArchivedProgram,
+                onDelete: { archive in
+                    ctx.delete(archive)
+                    try? ctx.save()
+                }
+            )
+        }
     }
 
     // MARK: Header
@@ -133,6 +159,263 @@ struct WorkoutView: View {
                 .font(Typography.body)
                 .foregroundStyle(Palette.textSecondary)
         }
+    }
+
+    private var activeProgramSection: some View {
+        let programWeekdays = activeProgramWeekdays
+        let activeDays = programWeekdays.compactMap { weekday in templates.first(where: { $0.weekday == weekday }) }
+        let totalExercises = activeDays.reduce(0) { $0 + $1.templateExercises.count }
+        let totalMinutes = activeDays.reduce(0) { $0 + $1.durationMinutes }
+
+        return VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .center, spacing: Spacing.md) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "list.clipboard")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                        Text("Aktif Program").eyebrow()
+                    }
+                    Text("\(programWeekdays.count) gün · \(totalExercises + planOverrides.count) hareket · \(totalMinutes) dk/hafta")
+                        .font(Typography.body)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+
+                Spacer()
+
+                Button {
+                    archiveActiveProgram()
+                } label: {
+                    Label("Arşivle", systemImage: "archivebox")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(programWeekdays.isEmpty)
+
+                Button {
+                    showingArchives = true
+                } label: {
+                    Label("Arşiv", systemImage: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(archivedPrograms.isEmpty)
+            }
+
+            if programWeekdays.isEmpty {
+                Text("Aktif program yok. AI'dan yeni program yazmasını isteyebilir veya bir güne plan ekleyebilirsin.")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textTertiary)
+                    .frame(maxWidth: .infinity, minHeight: 92, alignment: .center)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .fill(Palette.surfaceElevated.opacity(0.45))
+                    )
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Spacing.md), count: 3), spacing: Spacing.md) {
+                    ForEach(programWeekdays, id: \.self) { weekday in
+                        WorkoutProgramDayCard(
+                            weekday: weekday,
+                            session: templates.first(where: { $0.weekday == weekday }),
+                            legacyOverrides: planOverrides.filter { $0.weekday == weekday },
+                            isHighlighted: highlightedProgramWeekday == weekday
+                        ) {
+                            editProgramSession(weekday)
+                        } onDelete: { session in
+                            ctx.delete(session)
+                            try? ctx.save()
+                        }
+                        .id("program-day-\(weekday)")
+                    }
+                }
+            }
+        }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+
+    private var activeProgramWeekdays: [Int] {
+        var weekdays = Set(templates.filter(isVisibleProgramSession).map(\.weekday))
+        for override in planOverrides {
+            weekdays.insert(override.weekday)
+        }
+        return Self.orderedWeekdays.filter { weekdays.contains($0) }
+    }
+
+    private func isVisibleProgramSession(_ session: WorkoutSession) -> Bool {
+        let defaultName = WorkoutSession.weekdayNames.indices.contains(session.weekday) ? WorkoutSession.weekdayNames[session.weekday] : ""
+        return !session.sortedTemplateExercises.isEmpty
+            || session.estimatedCalories > 0
+            || session.name.trimmingCharacters(in: .whitespacesAndNewlines) != defaultName
+            || hasText(session.focus)
+            || hasText(session.warmup)
+            || hasText(session.progression)
+            || hasText(session.notes)
+    }
+
+    private func hasText(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func focusProgramDay(for date: Date, proxy: ScrollViewProxy) {
+        let weekday = Calendar.current.component(.weekday, from: date)
+        guard activeProgramWeekdays.contains(weekday) else { return }
+        highlightedProgramWeekday = weekday
+        withAnimation(.easeInOut(duration: 0.35)) {
+            proxy.scrollTo("program-day-\(weekday)", anchor: .center)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            guard highlightedProgramWeekday == weekday else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                highlightedProgramWeekday = nil
+            }
+        }
+    }
+
+    private var workoutTermsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                Text("Terimler").eyebrow()
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Spacing.md), count: 4), spacing: Spacing.md) {
+                WorkoutTermCard(term: "RIR", detail: "Reps in reserve. Set bitince tankta kaç temiz tekrar kaldı demek. RIR 2 = iki tekrar daha çıkarırdın.")
+                WorkoutTermCard(term: "4×6-10", detail: "4 set yap. Her sette hedef tekrar aralığı 6 ile 10. Tüm setlerde üst banda yaklaşırsan ağırlık artır.")
+                WorkoutTermCard(term: "Rest 2-3 dk", detail: "Setler arası dinlenme. Ana liftlerde performans düşmesin diye daha uzun, izolasyonda daha kısa olabilir.")
+                WorkoutTermCard(term: "Progression", detail: "Zamanla yük, tekrar, set veya teknik kalite artırma planı. Programın gelişim kuralı burada yazıyor.")
+            }
+        }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+
+    private func editProgramSession(_ weekday: Int) {
+        if let existing = templates.first(where: { $0.weekday == weekday }) {
+            editingProgramSession = existing
+            return
+        }
+        let created = WorkoutSession(
+            weekday: weekday,
+            name: WorkoutSession.weekdayNames[weekday],
+            estimatedCalories: 0,
+            durationMinutes: 60
+        )
+        ctx.insert(created)
+        try? ctx.save()
+        editingProgramSession = created
+    }
+
+    private func archiveActiveProgram() {
+        let snapshots = activeProgramSnapshots()
+        guard !snapshots.isEmpty else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(snapshots),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        let title = "Program \(Self.archiveDateFormatter.string(from: .now))"
+        ctx.insert(WorkoutProgramArchive(
+            title: title,
+            summary: "\(snapshots.count) gün · \(snapshots.reduce(0) { $0 + $1.exercises.count }) hareket",
+            notes: "Manuel arşiv",
+            source: "manual",
+            sessionsJSON: json
+        ))
+        try? ctx.save()
+    }
+
+    private func activeProgramSnapshots() -> [WorkoutProgramSessionSnapshot] {
+        var snapshots = templates.sorted { $0.weekday < $1.weekday }.map(\.snapshot)
+        for override in planOverrides.sorted(by: { $0.createdAt < $1.createdAt }) {
+            let exercise = WorkoutTemplateExerciseSnapshot(
+                name: override.exerciseName,
+                order: snapshots.first(where: { $0.weekday == override.weekday })?.exercises.count ?? 0,
+                sets: override.sets,
+                reps: override.reps.map(String.init),
+                load: formatLoad(override.weight),
+                rir: nil,
+                rest: nil,
+                sourceURL: nil,
+                notes: override.note
+            )
+            if let idx = snapshots.firstIndex(where: { $0.weekday == override.weekday }) {
+                snapshots[idx].exercises.append(exercise)
+            } else {
+                snapshots.append(WorkoutProgramSessionSnapshot(
+                    weekday: override.weekday,
+                    name: WorkoutSession.weekdayNames.indices.contains(override.weekday) ? WorkoutSession.weekdayNames[override.weekday] : "Antrenman",
+                    estimatedCalories: 0,
+                    durationMinutes: 60,
+                    focus: "Eski AI eklemesi",
+                    warmup: nil,
+                    progression: nil,
+                    notes: override.note,
+                    exercises: [exercise]
+                ))
+            }
+        }
+        return snapshots.sorted { $0.weekday < $1.weekday }
+    }
+
+    private func restoreArchivedProgram(_ archive: WorkoutProgramArchive) {
+        for session in templates {
+            ctx.delete(session)
+        }
+        for override in planOverrides {
+            ctx.delete(override)
+        }
+        for snapshot in archive.sessions {
+            let session = WorkoutSession(
+                weekday: snapshot.weekday,
+                name: snapshot.name,
+                estimatedCalories: snapshot.estimatedCalories,
+                durationMinutes: snapshot.durationMinutes,
+                focus: snapshot.focus,
+                warmup: snapshot.warmup,
+                progression: snapshot.progression,
+                notes: snapshot.notes
+            )
+            ctx.insert(session)
+            for exerciseSnapshot in snapshot.exercises.sorted(by: { $0.order < $1.order }) {
+                let exercise = WorkoutTemplateExercise(
+                    name: exerciseSnapshot.name,
+                    order: exerciseSnapshot.order,
+                    sets: exerciseSnapshot.sets,
+                    reps: exerciseSnapshot.reps,
+                    load: exerciseSnapshot.load,
+                    rir: exerciseSnapshot.rir,
+                    rest: exerciseSnapshot.rest,
+                    sourceURL: exerciseSnapshot.sourceURL,
+                    notes: exerciseSnapshot.notes
+                )
+                ctx.insert(exercise)
+                session.templateExercises.append(exercise)
+            }
+        }
+        try? ctx.save()
+        showingArchives = false
+    }
+
+    private func formatLoad(_ weight: Double?) -> String? {
+        guard let weight else { return nil }
+        return weight == weight.rounded() ? "@ \(Int(weight)) kg" : "@ \(String(format: "%.1f", weight)) kg"
     }
 
     // MARK: Stats strip
@@ -299,7 +582,8 @@ struct WorkoutView: View {
 
     private func calendarGrid(
         exact: [Date: WorkoutLog],
-        templatesByWeekday: [Int: WorkoutLog]
+        templatesByWeekday: [Int: WorkoutLog],
+        onSelectProgramDay: @escaping (Date) -> Void
     ) -> some View {
         let cols = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
         let cal = Calendar.current
@@ -331,6 +615,7 @@ struct WorkoutView: View {
                         if !cal.isDate(date, equalTo: currentMonth, toGranularity: .month) {
                             currentMonth = Self.startOfMonth(date)
                         }
+                        onSelectProgramDay(date)
                     }
                 }
             }
@@ -345,6 +630,7 @@ struct WorkoutView: View {
     ) -> some View {
         let eff = effectiveLog(for: selectedDay, exact: exact, templates: templatesByWeekday)
         let dayOverrides = overrides(for: selectedDay)
+        let plannedSession = programSession(for: selectedDay)
         return Card(padding: Spacing.lg) {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 HStack(alignment: .firstTextBaseline) {
@@ -440,6 +726,66 @@ struct WorkoutView: View {
                             .font(Typography.caption)
                             .foregroundStyle(Palette.textTertiary)
                             .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else if let plannedSession {
+                    HStack(spacing: 6) {
+                        Image(systemName: "list.clipboard")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.accent)
+                        Text(plannedSession.name)
+                            .font(Typography.bodyBold)
+                            .foregroundStyle(Palette.textPrimary)
+                        Spacer()
+                        Button {
+                            editProgramSession(plannedSession.weekday)
+                        } label: {
+                            Label("Programı düzenle", systemImage: "pencil")
+                                .font(Typography.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        Button {
+                            creatingForDate = selectedDay
+                            creatingPrefill = nil
+                        } label: {
+                            Label("Seans ekle", systemImage: "plus")
+                                .font(Typography.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    if let focus = plannedSession.focus, !focus.isEmpty {
+                        Text(focus)
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                    let exercises = plannedSession.sortedTemplateExercises
+                    if !exercises.isEmpty {
+                        Hairline()
+                        VStack(spacing: 6) {
+                            ForEach(exercises) { ex in
+                                HStack(spacing: Spacing.md) {
+                                    Text("\(ex.order + 1).")
+                                        .font(Typography.mono)
+                                        .foregroundStyle(Palette.textQuaternary)
+                                        .frame(width: 20, alignment: .leading)
+                                    Text(ex.name)
+                                        .font(Typography.body)
+                                        .foregroundStyle(Palette.textPrimary)
+                                    Spacer()
+                                    Text(ex.prescriptionText)
+                                        .font(Typography.mono)
+                                        .foregroundStyle(Palette.textSecondary)
+                                }
+                            }
+                        }
+                    }
+                    if let progression = plannedSession.progression, !progression.isEmpty {
+                        Hairline()
+                        Text(progression)
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
@@ -538,6 +884,11 @@ struct WorkoutView: View {
         return templates.first(where: { $0.weekday == weekday })?.name
     }
 
+    private func programSession(for day: Date) -> WorkoutSession? {
+        let weekday = Calendar.current.component(.weekday, from: day)
+        return templates.first(where: { $0.weekday == weekday })
+    }
+
     private func suggestedName(for day: Date) -> String {
         templateName(for: day) ?? "Antrenman"
     }
@@ -564,6 +915,7 @@ struct WorkoutView: View {
     }
 
     fileprivate static let weekdayHeaders: [String] = ["PZT", "SAL", "ÇAR", "PER", "CUM", "CMT", "PAZ"]
+    fileprivate static let orderedWeekdays: [Int] = [2, 3, 4, 5, 6, 7, 1]
 
     fileprivate static let monthTitleFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -578,11 +930,454 @@ struct WorkoutView: View {
         f.dateFormat = "d MMMM EEEE"
         return f
     }()
+
+    fileprivate static let archiveDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMM yyyy HH:mm"
+        return f
+    }()
 }
 
 private struct CreateDate: Identifiable {
     let date: Date
     var id: TimeInterval { date.timeIntervalSince1970 }
+}
+
+// MARK: - Active program board
+
+private struct WorkoutTermCard: View {
+    let term: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(term)
+                .font(Typography.bodyBold)
+                .foregroundStyle(Palette.textPrimary)
+            Text(detail)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Palette.surfaceElevated.opacity(0.45))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+}
+
+private struct WorkoutProgramDayCard: View {
+    let weekday: Int
+    let session: WorkoutSession?
+    let legacyOverrides: [WorkoutPlanOverride]
+    let isHighlighted: Bool
+    var onEdit: () -> Void
+    var onDelete: (WorkoutSession) -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(WorkoutSession.weekdayNames[weekday])
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(session == nil ? Palette.textTertiary : Palette.textPrimary)
+                    Text(session?.name ?? "Serbest / Dinlenme")
+                        .font(Typography.caption)
+                        .foregroundStyle(session == nil ? Palette.textQuaternary : Palette.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button(action: onEdit) {
+                    Image(systemName: session == nil ? "plus" : "pencil")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Palette.surfaceElevated))
+                }
+                .buttonStyle(.plain)
+                .help(session == nil ? "Güne plan ekle" : "Planı düzenle")
+                if let session {
+                    Button {
+                        onDelete(session)
+                    } label: {
+                        Image(systemName: "archivebox")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Palette.textTertiary)
+                            .frame(width: 24, height: 24)
+                            .background(Circle().fill(Palette.surfaceElevated))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Bu günü aktif plandan kaldır")
+                    .opacity(hovering ? 1 : 0.2)
+                }
+            }
+
+            if let session {
+                HStack(spacing: 6) {
+                    smallMetric("\(session.durationMinutes) dk")
+                    smallMetric("\(session.sortedTemplateExercises.count) hareket")
+                    if session.estimatedCalories > 0 {
+                        smallMetric("\(Fmt.int(session.estimatedCalories)) kcal")
+                    }
+                }
+
+                if let focus = session.focus, !focus.isEmpty {
+                    Text(focus)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                let exercises = session.sortedTemplateExercises
+                if !exercises.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(exercises) { exercise in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text("\(exercise.order + 1).")
+                                        .font(Typography.mono)
+                                        .foregroundStyle(Palette.textQuaternary)
+                                        .frame(width: 20, alignment: .leading)
+                                    Text(exercise.name)
+                                        .font(Typography.captionBold)
+                                        .foregroundStyle(Palette.textPrimary)
+                                        .lineLimit(1)
+                                    if let sourceURL = exercise.sourceURL,
+                                       let url = URL(string: sourceURL) {
+                                        Link(destination: url) {
+                                            Image(systemName: "link")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundStyle(Palette.textTertiary)
+                                                .frame(width: 18, height: 18)
+                                                .background(Circle().fill(Color.white.opacity(0.05)))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Hareket kaynağını aç")
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                Text(exercise.prescriptionText)
+                                    .font(Typography.caption)
+                                    .foregroundStyle(Palette.textTertiary)
+                                    .lineLimit(2)
+                                    .padding(.leading, 26)
+                            }
+                        }
+                    }
+                } else {
+                    emptyLine("Hareket reçetesi yok")
+                }
+
+                if let progression = session.progression, !progression.isEmpty {
+                    Hairline()
+                    labelBlock("Progression", progression)
+                }
+            } else if !legacyOverrides.isEmpty {
+                labelBlock("Eski AI eklemeleri", legacyOverrides.map { "+ \($0.exerciseName) · \($0.prescriptionText)" }.joined(separator: "\n"))
+            } else {
+                Spacer(minLength: 10)
+                emptyLine("Plan yok")
+            }
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(isHighlighted ? Palette.accent.opacity(0.12) : (hovering ? Palette.surfaceElevated.opacity(0.7) : Palette.surfaceElevated.opacity(0.52)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(isHighlighted ? Palette.accent.opacity(0.95) : Palette.border, lineWidth: isHighlighted ? 1.2 : 0.5)
+        )
+        .shadow(color: isHighlighted ? Palette.accent.opacity(0.18) : .clear, radius: 18, x: 0, y: 8)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onEdit)
+        .onHover { hovering = $0 }
+    }
+
+    private func smallMetric(_ text: String) -> some View {
+        Text(text)
+            .font(Typography.caption)
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.white.opacity(0.055)))
+    }
+
+    private func emptyLine(_ text: String) -> some View {
+        Text(text)
+            .font(Typography.caption)
+            .foregroundStyle(Palette.textQuaternary)
+            .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Color.white.opacity(0.025)))
+    }
+
+    private func labelBlock(_ label: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(Typography.label)
+                .foregroundStyle(Palette.textQuaternary)
+            Text(text)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct WorkoutProgramSessionEditor: View {
+    @Bindable var session: WorkoutSession
+    var onDone: () -> Void
+    @Environment(\.modelContext) private var ctx
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var duration = 60
+    @State private var calories: Double = 0
+    @State private var focus = ""
+    @State private var warmup = ""
+    @State private var progression = ""
+    @State private var notes = ""
+    @State private var exercises: [ProgramExerciseDraft] = []
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(WorkoutSession.weekdayNames[session.weekday]) {
+                    TextField("Gün adı", text: $name, prompt: Text("Upper A / Lower / Full Body"))
+                    LabeledContent("Süre") {
+                        TextField("", value: $duration, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                    }
+                    LabeledContent("Yakım") {
+                        TextField("", value: $calories, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                    }
+                }
+
+                Section("Koç Notları") {
+                    TextField("Günün amacı", text: $focus, axis: .vertical)
+                        .lineLimit(2...4)
+                    TextField("Isınma", text: $warmup, axis: .vertical)
+                        .lineLimit(2...4)
+                    TextField("Progression", text: $progression, axis: .vertical)
+                        .lineLimit(2...5)
+                    TextField("Ek not", text: $notes, axis: .vertical)
+                        .lineLimit(2...6)
+                }
+
+                ForEach(Array(exercises.enumerated()), id: \.element.id) { idx, _ in
+                    Section {
+                        TextField("Hareket", text: $exercises[idx].name, prompt: Text("Incline Bench Press"))
+                        HStack {
+                            LabeledContent("Set") {
+                                TextField("", value: $exercises[idx].sets, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 64)
+                            }
+                            LabeledContent("Tekrar") {
+                                TextField("6-10", text: $exercises[idx].reps)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 88)
+                            }
+                            LabeledContent("RIR") {
+                                TextField("1-2", text: $exercises[idx].rir)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 70)
+                            }
+                        }
+                        TextField("Yük / tempo", text: $exercises[idx].load, prompt: Text("@ 80 kg / kontrollü eccentric"))
+                        TextField("Dinlenme", text: $exercises[idx].rest, prompt: Text("2-3 dk"))
+                        TextField("Kaynak linki", text: $exercises[idx].sourceURL, prompt: Text("https://exrx.net/..."))
+                            .textContentType(.URL)
+                        TextField("Not", text: $exercises[idx].notes, axis: .vertical)
+                            .lineLimit(1...4)
+                        Button(role: .destructive) {
+                            exercises.remove(at: idx)
+                        } label: {
+                            Label("Hareketi Sil", systemImage: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    } header: {
+                        Text(exercises[idx].name.isEmpty ? "Hareket \(idx + 1)" : exercises[idx].name)
+                    }
+                }
+
+                Section {
+                    Button {
+                        exercises.append(ProgramExerciseDraft(order: exercises.count))
+                    } label: {
+                        Label("Hareket Ekle", systemImage: "plus.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Program Günü")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("İptal") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Kaydet") {
+                        save()
+                        onDone()
+                        dismiss()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .frame(width: 720, height: 760)
+        .onAppear(perform: load)
+    }
+
+    private func load() {
+        name = session.name
+        duration = session.durationMinutes
+        calories = session.estimatedCalories
+        focus = session.focus ?? ""
+        warmup = session.warmup ?? ""
+        progression = session.progression ?? ""
+        notes = session.notes ?? ""
+        exercises = session.sortedTemplateExercises.map {
+            ProgramExerciseDraft(
+                name: $0.name,
+                order: $0.order,
+                sets: $0.sets,
+                reps: $0.reps ?? "",
+                load: $0.load ?? "",
+                rir: $0.rir ?? "",
+                rest: $0.rest ?? "",
+                sourceURL: $0.sourceURL ?? "",
+                notes: $0.notes ?? ""
+            )
+        }
+    }
+
+    private func save() {
+        session.name = clean(name) ?? WorkoutSession.weekdayNames[session.weekday]
+        session.durationMinutes = duration
+        session.estimatedCalories = calories
+        session.focus = clean(focus)
+        session.warmup = clean(warmup)
+        session.progression = clean(progression)
+        session.notes = clean(notes)
+
+        for old in session.templateExercises {
+            ctx.delete(old)
+        }
+        session.templateExercises.removeAll()
+        for (idx, draft) in exercises.enumerated() {
+            guard let exerciseName = clean(draft.name) else { continue }
+            let exercise = WorkoutTemplateExercise(
+                name: exerciseName,
+                order: idx,
+                sets: draft.sets,
+                reps: clean(draft.reps),
+                load: clean(draft.load),
+                rir: clean(draft.rir),
+                rest: clean(draft.rest),
+                sourceURL: clean(draft.sourceURL),
+                notes: clean(draft.notes)
+            )
+            ctx.insert(exercise)
+            session.templateExercises.append(exercise)
+        }
+    }
+
+    private func clean(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct ProgramExerciseDraft: Identifiable {
+    let id = UUID()
+    var name: String = ""
+    var order: Int = 0
+    var sets: Int? = 3
+    var reps: String = ""
+    var load: String = ""
+    var rir: String = ""
+    var rest: String = ""
+    var sourceURL: String = ""
+    var notes: String = ""
+}
+
+private struct WorkoutProgramArchiveSheet: View {
+    let archives: [WorkoutProgramArchive]
+    var onRestore: (WorkoutProgramArchive) -> Void
+    var onDelete: (WorkoutProgramArchive) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(archives) { archive in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(archive.title)
+                                    .font(Typography.bodyBold)
+                                Text(WorkoutView.archiveDateFormatter.string(from: archive.archivedAt))
+                                    .font(Typography.caption)
+                                    .foregroundStyle(Palette.textTertiary)
+                            }
+                            Spacer()
+                            Text("\(archive.sessions.count) gün")
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textSecondary)
+                        }
+                        if let summary = archive.summary, !summary.isEmpty {
+                            Text(summary)
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textSecondary)
+                        }
+                        Text(archive.sessions.map { "\(WorkoutSession.weekdayShort[$0.weekday]) \($0.name)" }.joined(separator: " · "))
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textQuaternary)
+                            .lineLimit(2)
+                        HStack {
+                            Button {
+                                onRestore(archive)
+                                dismiss()
+                            } label: {
+                                Label("Geri Yükle", systemImage: "arrow.clockwise")
+                            }
+                            Button(role: .destructive) {
+                                onDelete(archive)
+                            } label: {
+                                Label("Sil", systemImage: "trash")
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+            .navigationTitle("Program Arşivi")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Kapat") { dismiss() }
+                }
+            }
+        }
+        .frame(width: 560, height: 560)
+    }
 }
 
 // MARK: - Day cell

@@ -48,8 +48,9 @@ enum CalorieCalculator {
         }
 
         let tdee = bmr * activity.multiplier
-        // Antrenman + adım kalorileri: o günkü ek bütçe → daha fazla yiyebilirsin
-        let goalCalories = max(1200, tdee + goal.calorieAdjustment + manualOffset + workoutCalories + stepCalories)
+        // Antrenman kalorileri hedefe eklenmez; günlük plan sabit kalır.
+        // Adım kalorisi düşük yoğunluklu günlük hareket bütçesi olarak ayrı tutulur.
+        let goalCalories = max(1200, tdee + goal.calorieAdjustment + manualOffset + stepCalories)
 
         let proteinGrams = lbm * 2.2
         let proteinCals = proteinGrams * 4.0

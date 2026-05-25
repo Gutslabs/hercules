@@ -5,6 +5,32 @@ enum WorkoutPlanOverrideOperation: String, Codable, CaseIterable, Hashable {
     case addExercise = "add_exercise"
 }
 
+struct WorkoutProgramSessionSnapshot: Codable, Equatable, Identifiable {
+    var id: Int { weekday }
+    var weekday: Int
+    var name: String
+    var estimatedCalories: Double
+    var durationMinutes: Int
+    var focus: String?
+    var warmup: String?
+    var progression: String?
+    var notes: String?
+    var exercises: [WorkoutTemplateExerciseSnapshot]
+}
+
+struct WorkoutTemplateExerciseSnapshot: Codable, Equatable, Identifiable {
+    var id: Int { order }
+    var name: String
+    var order: Int
+    var sets: Int?
+    var reps: String?
+    var load: String?
+    var rir: String?
+    var rest: String?
+    var sourceURL: String?
+    var notes: String?
+}
+
 @Model
 final class WorkoutPlanOverride {
     /// Calendar.weekday convention: 1=Pazar, 2=Pazartesi, ... 7=Cumartesi
@@ -62,16 +88,140 @@ final class WorkoutPlanOverride {
 }
 
 @Model
+final class WorkoutProgramArchive {
+    var title: String
+    var summary: String?
+    var notes: String?
+    var source: String
+    var archivedAt: Date
+    var sessionsJSON: String
+
+    init(
+        title: String,
+        summary: String? = nil,
+        notes: String? = nil,
+        source: String = "manual",
+        archivedAt: Date = .now,
+        sessionsJSON: String
+    ) {
+        self.title = title
+        self.summary = summary
+        self.notes = notes
+        self.source = source
+        self.archivedAt = archivedAt
+        self.sessionsJSON = sessionsJSON
+    }
+
+    var sessions: [WorkoutProgramSessionSnapshot] {
+        guard let data = sessionsJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([WorkoutProgramSessionSnapshot].self, from: data)
+        else { return [] }
+        return decoded
+    }
+}
+
+@Model
+final class WorkoutTemplateExercise {
+    var name: String
+    var order: Int
+    var sets: Int?
+    var reps: String?
+    var load: String?
+    var rir: String?
+    var rest: String?
+    var sourceURL: String?
+    var notes: String?
+
+    init(
+        name: String,
+        order: Int = 0,
+        sets: Int? = nil,
+        reps: String? = nil,
+        load: String? = nil,
+        rir: String? = nil,
+        rest: String? = nil,
+        sourceURL: String? = nil,
+        notes: String? = nil
+    ) {
+        self.name = name
+        self.order = order
+        self.sets = sets
+        self.reps = reps
+        self.load = load
+        self.rir = rir
+        self.rest = rest
+        self.sourceURL = sourceURL
+        self.notes = notes
+    }
+
+    var prescriptionText: String {
+        var parts: [String] = []
+        if let sets, let reps, !reps.isEmpty {
+            parts.append("\(sets)×\(reps)")
+        } else if let sets {
+            parts.append("\(sets) set")
+        } else if let reps, !reps.isEmpty {
+            parts.append(reps)
+        }
+        if let load, !load.isEmpty {
+            parts.append(load)
+        }
+        if let rir, !rir.isEmpty {
+            parts.append("RIR \(rir)")
+        }
+        if let rest, !rest.isEmpty {
+            parts.append(rest)
+        }
+        return parts.isEmpty ? "reçete yok" : parts.joined(separator: " · ")
+    }
+
+    var snapshot: WorkoutTemplateExerciseSnapshot {
+        WorkoutTemplateExerciseSnapshot(
+            name: name,
+            order: order,
+            sets: sets,
+            reps: reps,
+            load: load,
+            rir: rir,
+            rest: rest,
+            sourceURL: sourceURL,
+            notes: notes
+        )
+    }
+}
+
+@Model
 final class WorkoutSession {
     /// Calendar.weekday convention: 1=Pazar, 2=Pazartesi, …, 7=Cumartesi
     var weekday: Int
     var name: String
     var estimatedCalories: Double
+    /// Optional on disk so older stores can migrate without losing data.
+    var durationMinutesValue: Int?
+    var focus: String?
+    var warmup: String?
+    var progression: String?
+    var notes: String?
+    @Relationship(deleteRule: .cascade) var templateExercises: [WorkoutTemplateExercise] = []
 
-    init(weekday: Int, name: String, estimatedCalories: Double = 300) {
+    init(
+        weekday: Int,
+        name: String,
+        estimatedCalories: Double = 300,
+        durationMinutes: Int = 60,
+        focus: String? = nil,
+        warmup: String? = nil,
+        progression: String? = nil,
+        notes: String? = nil
+    ) {
         self.weekday = weekday
         self.name = name
         self.estimatedCalories = estimatedCalories
+        self.durationMinutesValue = durationMinutes
+        self.focus = focus
+        self.warmup = warmup
+        self.progression = progression
+        self.notes = notes
     }
 
     static let weekdayNames: [String] = [
@@ -85,5 +235,28 @@ final class WorkoutSession {
     var weekdayName: String {
         guard weekday >= 1 && weekday <= 7 else { return "?" }
         return Self.weekdayNames[weekday]
+    }
+
+    var sortedTemplateExercises: [WorkoutTemplateExercise] {
+        templateExercises.sorted { $0.order < $1.order }
+    }
+
+    var durationMinutes: Int {
+        get { durationMinutesValue ?? 60 }
+        set { durationMinutesValue = newValue }
+    }
+
+    var snapshot: WorkoutProgramSessionSnapshot {
+        WorkoutProgramSessionSnapshot(
+            weekday: weekday,
+            name: name,
+            estimatedCalories: estimatedCalories,
+            durationMinutes: durationMinutes,
+            focus: focus,
+            warmup: warmup,
+            progression: progression,
+            notes: notes,
+            exercises: sortedTemplateExercises.map(\.snapshot)
+        )
     }
 }

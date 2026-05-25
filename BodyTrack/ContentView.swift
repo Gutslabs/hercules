@@ -67,6 +67,9 @@ struct ContentView: View {
     @State private var chatStore = ChatStore()
     @State private var chatOpen: Bool = false
     @State private var chatWidth: CGFloat = 380
+    private let chatMinWidth: CGFloat = 320
+    private let chatMaxWidth: CGFloat = 560
+    private let detailReserveWidth: CGFloat = 760
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -108,41 +111,93 @@ struct ContentView: View {
     // MARK: Detail column (with optional right-side chat)
 
     private var detailColumn: some View {
-        ZStack(alignment: .bottomTrailing) {
-            selectedDetail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.trailing, chatOpen ? chatWidth : 0)
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: chatOpen)
-                .animation(.spring(response: 0.25, dampingFraction: 0.9), value: chatWidth)
+        GeometryReader { proxy in
+            let maxAllowedChatWidth = maxChatWidth(for: proxy.size.width)
+            ZStack(alignment: .bottomTrailing) {
+                HStack(spacing: 0) {
+                    selectedDetail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
 
-            if chatOpen {
-                ChatSidebar(
-                    store: chatStore,
-                    width: $chatWidth,
-                    onClose: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            chatOpen = false
-                        }
-                    }
-                )
-                .frame(maxHeight: .infinity)
-                .ignoresSafeArea(.container, edges: [.top, .bottom])
-                .transition(.move(edge: .trailing))
-                .zIndex(2)
-            }
-
-            if !chatOpen {
-                FloatingChatButton(isOpen: chatOpen) {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        chatOpen = true
+                    if chatOpen {
+                        ChatSidebar(
+                            store: chatStore,
+                            width: chatWidthBinding(maxWidth: maxAllowedChatWidth),
+                            minWidth: chatMinWidth,
+                            maxWidth: maxAllowedChatWidth,
+                            onClose: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    chatOpen = false
+                                }
+                            }
+                        )
+                        .frame(maxHeight: .infinity)
+                        .ignoresSafeArea(.container, edges: [.top, .bottom])
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
-                .padding(20)
-                .transition(.scale.combined(with: .opacity))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: chatOpen)
+
+                if !chatOpen {
+                    FloatingChatButton(isOpen: chatOpen) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            chatOpen = true
+                        }
+                    }
+                    .padding(20)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .onAppear {
+                columnVisibility = .all
+                clampStoredChatWidth(maxWidth: maxAllowedChatWidth)
+            }
+            .onChange(of: proxy.size.width) { _, newWidth in
+                columnVisibility = .all
+                clampStoredChatWidth(maxWidth: maxChatWidth(for: newWidth))
             }
         }
         .background(Palette.background)
+        #if os(macOS)
         .toolbar(chatOpen ? .hidden : .visible, for: .windowToolbar)
+        #endif
+    }
+
+    private func maxChatWidth(for detailWidth: CGFloat) -> CGFloat {
+        let reserveLimited = detailWidth - detailReserveWidth
+        let fractionLimited = detailWidth * 0.40
+        let naturalMax = min(chatMaxWidth, reserveLimited, fractionLimited)
+        return max(chatMinWidth, naturalMax)
+    }
+
+    private func clampedChatWidth(_ value: CGFloat, maxWidth: CGFloat) -> CGFloat {
+        min(maxWidth, max(chatMinWidth, value))
+    }
+
+    private func chatWidthBinding(maxWidth: CGFloat) -> Binding<CGFloat> {
+        Binding(
+            get: {
+                clampedChatWidth(chatWidth, maxWidth: maxWidth)
+            },
+            set: { newWidth in
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    chatWidth = clampedChatWidth(newWidth, maxWidth: maxWidth)
+                }
+            }
+        )
+    }
+
+    private func clampStoredChatWidth(maxWidth: CGFloat) {
+        let clamped = clampedChatWidth(chatWidth, maxWidth: maxWidth)
+        guard abs(chatWidth - clamped) > 0.5 else { return }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            chatWidth = clamped
+        }
     }
 
     @ViewBuilder

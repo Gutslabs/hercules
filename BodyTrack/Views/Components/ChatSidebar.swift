@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
+#if os(macOS)
 import AppKit
+#endif
 
 private enum ChatChrome {
     static let background = Color(red: 0.045, green: 0.045, blue: 0.050)
@@ -22,8 +24,11 @@ private enum ChatChrome {
 
 struct ChatSidebar: View {
     @Environment(\.modelContext) private var ctx
+    @Query(sort: \FoodPreset.sortOrder) private var foodPresets: [FoodPreset]
     @Bindable var store: ChatStore
     @Binding var width: CGFloat
+    var minWidth: CGFloat = 320
+    var maxWidth: CGFloat = 560
     var onClose: () -> Void
 
     @State private var currentProvider: AIProvider = AIKeyStore.shared.provider
@@ -39,11 +44,18 @@ struct ChatSidebar: View {
     /// Kullanıcı chat'in dibindeyse typewriter follow eder; yukarı çıktıysa rahat bırakır.
     @State private var autoFollowMessages = true
     @State private var suppressAutoFollowUntil = Date.distantPast
+    @State private var showingPresetWidget = false
+    @State private var presetQuery = ""
+    @State private var presetFeedback: String? = nil
+    @State private var collapseHandleHovering = false
+    @State private var resizeCursorActive = false
+    @State private var resizeStartWidth: CGFloat? = nil
+    @State private var resizeStartLocationX: CGFloat? = nil
 
     /// Streaming sırasında scrollTo'yu throttle etmek için kullanılan tick.
-    /// `store.messages.last?.text.count` her ~50 karakterde değiştiğinde artar.
+    /// Uzun cevaplarda scrollTo da layout maliyeti yarattığı için daha seyrek tetiklenir.
     private var streamingScrollTick: Int {
-        ((store.messages.last?.text.count ?? 0) / 50)
+        ((store.messages.last?.text.count ?? 0) / 320)
     }
 
     private var canSendInput: Bool {
@@ -59,14 +71,15 @@ struct ChatSidebar: View {
         return min(118, max(38, CGFloat(explicitLines) * 20 + 24))
     }
 
-    private let minWidth: CGFloat = 320
-    private let maxWidth: CGFloat = 720
     private static let chatBottomID = "chat-bottom-anchor"
     private static let chatScrollSpace = "chat-scroll-space"
 
+    private var resolvedMinWidth: CGFloat {
+        min(minWidth, maxWidth)
+    }
+
     var body: some View {
-        HStack(spacing: 0) {
-            resizeHandle
+        ZStack(alignment: .leading) {
             VStack(spacing: 0) {
                 header
                 Hairline()
@@ -76,34 +89,101 @@ struct ChatSidebar: View {
             }
             .frame(maxWidth: .infinity)
             .background(ChatChrome.background)
-        }
-        .frame(width: width)
-        .overlay(alignment: .leading) {
+
             Rectangle()
                 .fill(ChatChrome.border)
                 .frame(width: 0.5)
+                .allowsHitTesting(false)
+
+            resizeHandle
         }
+        .frame(width: width)
     }
 
     private var resizeHandle: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: 6)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { v in
-                        let new = width - v.translation.width
-                        width = min(maxWidth, max(minWidth, new))
-                    }
-            )
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.pop()
+        ZStack(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.clear)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                        .onChanged { v in
+                            if resizeStartWidth == nil {
+                                resizeStartWidth = width
+                                resizeStartLocationX = v.startLocation.x
+                            }
+                            let base = resizeStartWidth ?? width
+                            let startX = resizeStartLocationX ?? v.startLocation.x
+                            let delta = startX - v.location.x
+                            let new = min(maxWidth, max(resolvedMinWidth, base + delta))
+                            guard abs(width - new) >= 0.5 else { return }
+                            var transaction = Transaction(animation: nil)
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                width = new
+                            }
+                        }
+                        .onEnded { _ in
+                            resizeStartWidth = nil
+                            resizeStartLocationX = nil
+                        }
+                )
+
+            VStack(spacing: 8) {
+                Capsule()
+                    .fill(collapseHandleHovering ? ChatChrome.borderStrong : ChatChrome.border)
+                    .frame(width: 4, height: 46)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.black.opacity(0.25), lineWidth: 0.5)
+                    )
+
+                Button(action: closeFromHandle) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(ChatChrome.primary)
+                        .frame(width: 26, height: 38)
+                        .background(
+                            Capsule()
+                                .fill(collapseHandleHovering ? ChatChrome.panelPressed : ChatChrome.panelRaised)
+                                .shadow(color: .black.opacity(0.32), radius: 10, y: 3)
+                        )
+                        .overlay(Capsule().strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
                 }
+                .buttonStyle(.plain)
+                .help("Chat'i kapat")
             }
+            .offset(x: -4)
+            .padding(.bottom, 34)
+        }
+        .frame(width: 44)
+        .frame(maxHeight: .infinity)
+        .offset(x: -34)
+        .onHover { hovering in
+            collapseHandleHovering = hovering
+            setResizeCursor(hovering)
+        }
+        .onDisappear {
+            setResizeCursor(false)
+        }
+    }
+
+    private func closeFromHandle() {
+        setResizeCursor(false)
+        collapseHandleHovering = false
+        onClose()
+    }
+
+    private func setResizeCursor(_ active: Bool) {
+        guard resizeCursorActive != active else { return }
+        resizeCursorActive = active
+        #if os(macOS)
+        if active {
+            NSCursor.resizeLeftRight.push()
+        } else {
+            NSCursor.pop()
+        }
+        #endif
     }
 
     private var header: some View {
@@ -118,38 +198,25 @@ struct ChatSidebar: View {
                     .foregroundStyle(ChatChrome.white)
             }
 
-            modelPicker
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Codex")
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(ChatChrome.primary)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(currentModel)
+                    if currentProvider.supportsIntelligence {
+                        Text("· \(currentIntelligence.label)")
+                    }
+                }
+                .font(Typography.caption)
+                .foregroundStyle(ChatChrome.tertiary)
+                .lineLimit(1)
+            }
 
             Spacer()
 
-            historyMenu
-
-            Button {
-                store.newChat()
-                inputFocused = true
-            } label: {
-                headerIcon("square.and.pencil")
-            }
-            .buttonStyle(.plain)
-            .disabled(store.isSending)
-            .opacity(store.isSending ? 0.45 : 1)
-            .help("Yeni sohbet")
-
-            Button {
-                store.clear()
-            } label: {
-                headerIcon("trash")
-            }
-            .buttonStyle(.plain)
-            .disabled(!canDeleteConversation || store.isSending)
-            .opacity((!canDeleteConversation || store.isSending) ? 0.4 : 1)
-            .help("Bu sohbeti sil")
-
-            Button(action: onClose) {
-                headerIcon("xmark")
-            }
-            .buttonStyle(.plain)
-            .help("Kapat")
+            chatOptionsMenu
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
@@ -157,7 +224,103 @@ struct ChatSidebar: View {
         .onReceive(NotificationCenter.default.publisher(for: .aiClientChanged)) { _ in
             currentProvider = AIKeyStore.shared.provider
             currentModel = AIKeyStore.shared.model
+            currentIntelligence = AIKeyStore.shared.intelligence
         }
+    }
+
+    private var chatOptionsMenu: some View {
+        Menu {
+            Section("Sohbet") {
+                Button {
+                    store.newChat()
+                    inputFocused = true
+                } label: {
+                    Label("Yeni sohbet", systemImage: "square.and.pencil")
+                }
+                .disabled(store.isSending)
+
+                if !store.conversationList.isEmpty {
+                    Menu {
+                        ForEach(store.conversationList) { conversation in
+                            Button {
+                                store.selectConversation(conversation.id)
+                                inputFocused = true
+                            } label: {
+                                Label(
+                                    conversation.title,
+                                    systemImage: conversation.id == store.currentConversationID ? "checkmark.circle.fill" : "message"
+                                )
+                            }
+                            .disabled(store.isSending)
+                        }
+                    } label: {
+                        Label("Geçmiş sohbetler", systemImage: "clock")
+                    }
+                }
+            }
+
+            Section("Model") {
+                Menu {
+                    ForEach(AIProvider.selectable) { provider in
+                        Button {
+                            AIKeyStore.shared.provider = provider
+                            currentProvider = provider
+                            currentModel = AIKeyStore.shared.model
+                            NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+                        } label: {
+                            Label(provider.label, systemImage: provider == currentProvider ? "checkmark" : "circle")
+                        }
+                    }
+                } label: {
+                    Label("Sağlayıcı", systemImage: "cpu")
+                }
+
+                Menu {
+                    ForEach(currentProvider.availableModels, id: \.self) { model in
+                        Button {
+                            AIKeyStore.shared.model = model
+                            currentModel = model
+                            NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+                        } label: {
+                            Label(model, systemImage: model == currentModel ? "checkmark" : "circle")
+                        }
+                    }
+                } label: {
+                    Label("Model", systemImage: "switch.2")
+                }
+
+                if currentProvider.supportsIntelligence {
+                    Menu {
+                        ForEach(IntelligenceLevel.allCases) { level in
+                            Button {
+                                AIKeyStore.shared.intelligence = level
+                                currentIntelligence = level
+                                NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+                            } label: {
+                                Label(level.label, systemImage: level == currentIntelligence ? "checkmark" : "circle")
+                            }
+                        }
+                    } label: {
+                        Label("Düşünme seviyesi", systemImage: "slider.horizontal.3")
+                    }
+                }
+            }
+
+            Section("Panel") {
+                Button {
+                    store.clear()
+                } label: {
+                    Label("Bu sohbeti sil", systemImage: "trash")
+                }
+                .disabled(!canDeleteConversation || store.isSending)
+            }
+        } label: {
+            headerIcon("ellipsis")
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .help("Chat ayarları")
     }
 
     private var historyMenu: some View {
@@ -315,7 +478,7 @@ struct ChatSidebar: View {
             ScrollViewReader { proxy in
                 GeometryReader { viewport in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
+                        LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(store.messages) { turn in
                                 MessageBubble(
                                     turn: turn,
@@ -328,6 +491,10 @@ struct ChatSidebar: View {
                                     store.rejectAction(turnID: turn.id, actionID: action.id)
                                 }
                                 .id(turn.id)
+                                .transaction { transaction in
+                                    transaction.animation = nil
+                                    transaction.disablesAnimations = true
+                                }
                             }
                             // Boş assistant turn varsa typing indicator gizlenir
                             if store.isSending,
@@ -399,12 +566,31 @@ struct ChatSidebar: View {
 
     /// AI'ya gönderilecek context:
     /// — "Hakkında" metni daima inject edilir (kullanıcının kim olduğunu AI bilsin)
-    /// — @-mention varsa ilgili veri bölümleri de eklenir
+    /// — V4 coach mode'da @-mention olmasa bile alakalı veri bölümleri eklenir
     /// — İkisi de boşsa nil
     private func sendWithContext() {
         let mentions = UserContextSnapshot.parseMentions(store.input)
-        let snapshot = UserContextSnapshot.combined(tags: mentions, ctx: ctx)
+        let snapshot = UserContextSnapshot.coachContext(for: store.input, explicitTags: mentions, ctx: ctx)
         Task { await store.send(userContext: snapshot, ctx: ctx) }
+    }
+
+    private func addPresetToToday(_ preset: FoodPreset, servings: Double) {
+        let entry = preset.makeFoodEntry(servings: servings)
+        ctx.insert(entry)
+        do {
+            try ctx.save()
+            let message = "\(entry.name) bugüne eklendi"
+            presetFeedback = message
+            inputFocused = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                if presetFeedback == message {
+                    presetFeedback = nil
+                }
+            }
+        } catch {
+            presetFeedback = "Eklenemedi: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Mention autocomplete
@@ -600,6 +786,68 @@ struct ChatSidebar: View {
         }
     }
 
+    private var presetLauncher: some View {
+        Button {
+            showingPresetWidget.toggle()
+        } label: {
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(ChatChrome.whiteSoft)
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "takeoutbag.and.cup.and.straw")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(ChatChrome.primary)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Presetler")
+                        .font(Typography.captionBold)
+                        .foregroundStyle(ChatChrome.primary)
+                    Text("Sık kullandıklarını ekle")
+                        .font(Typography.caption)
+                        .foregroundStyle(ChatChrome.tertiary)
+                }
+
+                Spacer(minLength: 0)
+
+                Text("\(foodPresets.count)")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(ChatChrome.ink)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(ChatChrome.white))
+
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(ChatChrome.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(showingPresetWidget ? ChatChrome.panelPressed : ChatChrome.whiteSoft)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(showingPresetWidget ? ChatChrome.borderStrong : ChatChrome.border, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showingPresetWidget, arrowEdge: .bottom) {
+            FoodPresetWidget(
+                presets: foodPresets,
+                query: $presetQuery,
+                feedback: presetFeedback,
+                onAdd: addPresetToToday
+            )
+            .frame(width: min(max(width - 32, 340), 460))
+            .frame(maxHeight: 520)
+        }
+        .help("Presetler")
+    }
+
     private func contextChip(_ text: String, icon: String?, tint: Color) -> some View {
         HStack(spacing: 4) {
             if let icon {
@@ -626,6 +874,10 @@ struct ChatSidebar: View {
             mentionHint
                 .padding(.horizontal, Spacing.md)
                 .padding(.top, Spacing.sm)
+
+            presetLauncher
+                .padding(.horizontal, Spacing.md)
+                .padding(.top, 2)
 
             HStack(spacing: Spacing.sm) {
                 chatInputEditor
@@ -695,9 +947,11 @@ struct ChatSidebar: View {
                 }
                 // ⇧↩ native yeni satır; ↩ popup açıksa tag seçer, değilse gönderir.
                 .onKeyPress(.return) {
+                    #if os(macOS)
                     if NSEvent.modifierFlags.contains(.shift) {
                         return .ignored
                     }
+                    #endif
 
                     if let q = activeMentionQuery {
                         let matches = filteredMentions(query: q)
@@ -742,6 +996,237 @@ struct ChatSidebar: View {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .strokeBorder(inputFocused ? ChatChrome.borderStrong : ChatChrome.border, lineWidth: 0.5)
         )
+    }
+}
+
+private struct FoodPresetWidget: View {
+    let presets: [FoodPreset]
+    @Binding var query: String
+    let feedback: String?
+    var onAdd: (FoodPreset, Double) -> Void
+
+    private var filteredPresets: [FoodPreset] {
+        let q = normalized(query.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !q.isEmpty else { return presets }
+        return presets.filter { preset in
+            normalized([preset.brand, preset.name, preset.category, preset.note, preset.searchText].joined(separator: " "))
+                .contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(ChatChrome.whiteSoft)
+                            .frame(width: 32, height: 32)
+                        Image(systemName: "takeoutbag.and.cup.and.straw")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(ChatChrome.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Presetler")
+                            .font(Typography.bodyBold)
+                            .foregroundStyle(ChatChrome.primary)
+                        Text("Sık kullandıklarını bugüne ekle")
+                            .font(Typography.caption)
+                            .foregroundStyle(ChatChrome.tertiary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Text("\(filteredPresets.count)")
+                        .font(Typography.captionBold)
+                        .foregroundStyle(ChatChrome.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(ChatChrome.whiteSoft))
+                }
+
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ChatChrome.tertiary)
+                    TextField("Protein, marka, ürün ara", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(Typography.body)
+                        .foregroundStyle(ChatChrome.primary)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(ChatChrome.panelRaised)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .strokeBorder(ChatChrome.border, lineWidth: 0.5)
+                )
+
+                if let feedback {
+                    Label(feedback, systemImage: "checkmark.circle.fill")
+                        .font(Typography.captionBold)
+                        .foregroundStyle(Color(red: 0.58, green: 0.86, blue: 0.70))
+                        .lineLimit(2)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .fill(Color(red: 0.18, green: 0.36, blue: 0.25).opacity(0.42))
+                        )
+                }
+            }
+            .padding(14)
+
+            Hairline()
+
+            if filteredPresets.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 24, weight: .light))
+                        .foregroundStyle(ChatChrome.quaternary)
+                    Text("Preset bulunamadı")
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(ChatChrome.secondary)
+                    Text("Aramayı biraz kısaltmayı dene.")
+                        .font(Typography.caption)
+                        .foregroundStyle(ChatChrome.tertiary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 190)
+                .padding(24)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(filteredPresets) { preset in
+                            FoodPresetRow(preset: preset, onAdd: onAdd)
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+        .background(ChatChrome.background)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+    }
+
+    private func normalized(_ text: String) -> String {
+        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "tr_TR"))
+            .lowercased(with: Locale(identifier: "tr_TR"))
+    }
+}
+
+private struct FoodPresetRow: View {
+    let preset: FoodPreset
+    var onAdd: (FoodPreset, Double) -> Void
+
+    private var defaultServings: Double {
+        max(1, preset.defaultServings)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(ChatChrome.whiteSoft)
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "bolt.heart")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ChatChrome.white)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(preset.brand)
+                        .font(Typography.captionBold)
+                        .foregroundStyle(ChatChrome.tertiary)
+                    Text(preset.name)
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(ChatChrome.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(Fmt.int(preset.servingGrams)) g / \(preset.servingLabel)")
+                        .font(Typography.caption)
+                        .foregroundStyle(ChatChrome.tertiary)
+                }
+
+                Spacer(minLength: 0)
+
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(Fmt.int(preset.calories(for: defaultServings)))
+                        .font(Typography.monoLarge)
+                        .foregroundStyle(ChatChrome.primary)
+                    Text("kcal")
+                        .font(Typography.caption)
+                        .foregroundStyle(ChatChrome.tertiary)
+                }
+            }
+
+            Text(preset.note)
+                .font(Typography.caption)
+                .foregroundStyle(ChatChrome.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                presetMacroChip("P", preset.protein(for: defaultServings))
+                presetMacroChip("K", preset.carbs(for: defaultServings))
+                presetMacroChip("Y", preset.fat(for: defaultServings))
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    onAdd(preset, defaultServings)
+                } label: {
+                    Label(preset.servingCountText(defaultServings), systemImage: "plus")
+                        .font(Typography.captionBold)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ChatChrome.ink)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: Radius.sm - 2).fill(ChatChrome.white))
+
+                Button {
+                    onAdd(preset, 1)
+                } label: {
+                    Text(preset.servingCountText(1))
+                        .font(Typography.captionBold)
+                        .frame(width: 82)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ChatChrome.secondary)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: Radius.sm - 2).fill(ChatChrome.whiteSoft))
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(ChatChrome.assistantBubble)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(ChatChrome.border, lineWidth: 0.5)
+        )
+    }
+
+    private func presetMacroChip(_ label: String, _ value: Double?) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(Typography.captionBold)
+                .foregroundStyle(ChatChrome.tertiary)
+            Text(value.map { "\(Fmt.num($0, digits: 1))g" } ?? "—")
+                .font(Typography.captionBold)
+                .foregroundStyle(ChatChrome.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(ChatChrome.whiteSoft))
     }
 }
 
@@ -865,7 +1350,7 @@ private struct MessageBubble: View {
                 }
                 // Streaming sırasında satır sonunda blinking cursor.
                 if isStreaming && !turn.text.isEmpty {
-                    Text("\(turn.text) ▍")
+                    Text(turn.text + " ▍")
                         .font(Typography.body)
                         .foregroundStyle(ChatChrome.primary)
                         .multilineTextAlignment(.leading)
@@ -898,7 +1383,11 @@ private struct MessageBubble: View {
                 bubbleShape
                     .strokeBorder(turn.role == .user ? ChatChrome.borderStrong : ChatChrome.border, lineWidth: 0.5)
             )
-            .shadow(color: .black.opacity(turn.role == .user ? 0.18 : 0.10), radius: 10, y: 3)
+            .shadow(
+                color: .black.opacity(isStreaming ? 0 : (turn.role == .user ? 0.14 : 0.07)),
+                radius: isStreaming ? 0 : 7,
+                y: isStreaming ? 0 : 2
+            )
 
             if turn.role == .assistant {
                 Spacer(minLength: 32)

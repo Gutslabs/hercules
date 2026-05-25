@@ -495,21 +495,7 @@ struct ResearchLibrarySkill: AgentSkill {
     let description = "Local PubMed research cache içinden bodybuilding/nutrition/training makalelerini getirir."
 
     func canHandle(_ query: String) -> Bool {
-        let lower = query.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US"))
-            .lowercased()
-        let researchTriggers = [
-            "pubmed", "makale", "calisma", "çalışma", "arastirma", "araştırma",
-            "paper", "evidence", "kanit", "kanıt", "meta", "systematic",
-            "literatur", "literatür", "guncel", "güncel", "son"
-        ]
-        let bodySignals = [
-            "bodybuilding", "vucut", "vücut", "kas", "hipertrofi", "hypertrophy",
-            "protein", "kreatin", "creatine", "supplement", "antrenman",
-            "idman", "training", "resistance", "volume", "bulk", "cut",
-            "definasyon", "yag", "yağ", "sleep", "uyku", "recovery"
-        ]
-        return researchTriggers.contains { lower.contains($0) }
-            && bodySignals.contains { lower.contains($0) }
+        AgentQueryClassifier.shouldUseResearchCache(query)
     }
 
     func run(query: String, context: AgentContext) async throws -> SkillResult? {

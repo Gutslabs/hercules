@@ -162,6 +162,34 @@ final class CodexClient: AIClient {
         // taramak yerine son scan offset'ten devam eder. Stream uzadıkça
         // performans sabit kalır (O(n²) → O(n)).
         var extractor = MessageStreamExtractor()
+        var lastPartialSent = ""
+        var lastPartialSentAt = Date.distantPast
+        let partialUpdateInterval: TimeInterval = 0.12
+        let partialUpdateCharacterBudget = 96
+
+        func publishPartial(_ partial: String, force: Bool = false) async {
+            guard partial != lastPartialSent else { return }
+            let now = Date()
+            let currentLength = partial.count
+            let characterBudget: Int
+            let interval: TimeInterval
+            if currentLength > 3_000 {
+                characterBudget = 240
+                interval = 0.22
+            } else if currentLength > 1_200 {
+                characterBudget = 160
+                interval = 0.16
+            } else {
+                characterBudget = partialUpdateCharacterBudget
+                interval = partialUpdateInterval
+            }
+            let grewEnough = currentLength - lastPartialSent.count >= characterBudget
+            let waitedEnough = now.timeIntervalSince(lastPartialSentAt) >= interval
+            guard force || grewEnough || waitedEnough else { return }
+            lastPartialSent = partial
+            lastPartialSentAt = now
+            await onMessageUpdate(partial)
+        }
 
         for try await line in bytes.lines {
             guard line.hasPrefix("data: ") else { continue }
@@ -178,7 +206,7 @@ final class CodexClient: AIClient {
                     accumulatedText += delta
                     // Typewriter: çıkartılan partial message'ı UI'a yolla
                     if let partial = extractor.feed(accumulated: accumulatedText) {
-                        await onMessageUpdate(partial)
+                        await publishPartial(partial)
                     }
                 }
             case "response.output_item.added":
@@ -204,12 +232,15 @@ final class CodexClient: AIClient {
                     if let output = response["output"] as? [[String: Any]] {
                         collectedOutput = output
                     }
-                    if accumulatedText.isEmpty,
-                       let outputText = response["output_text"] as? String {
-                        accumulatedText = outputText
-                    }
-                }
-                return StreamResult(output: collectedOutput, accumulatedText: accumulatedText, searchQuery: searchQuery)
+	                    if accumulatedText.isEmpty,
+	                       let outputText = response["output_text"] as? String {
+	                        accumulatedText = outputText
+	                    }
+	                }
+	                if let partial = extractor.feed(accumulated: accumulatedText) {
+	                    await publishPartial(partial, force: true)
+	                }
+	                return StreamResult(output: collectedOutput, accumulatedText: accumulatedText, searchQuery: searchQuery)
             case "response.failed", "error":
                 let msg = (obj["error"] as? [String: Any])?["message"] as? String
                     ?? (obj["message"] as? String)
@@ -220,6 +251,9 @@ final class CodexClient: AIClient {
             }
         }
         if !accumulatedText.isEmpty || !collectedOutput.isEmpty {
+            if let partial = extractor.feed(accumulated: accumulatedText) {
+                await publishPartial(partial, force: true)
+            }
             return StreamResult(output: collectedOutput, accumulatedText: accumulatedText, searchQuery: searchQuery)
         }
         throw OpenRouterError.decoding("Stream ended without response.completed")

@@ -10,6 +10,8 @@ import SwiftData
 //   4 — eklendi: AI/user yemek planı override'ları
 //   5 — eklendi: AI/user antrenman planı override'ları
 //   6 — eklendi: tarif içerikleri, malzemeler, yapılış ve makro özeti
+//   7 — eklendi: tek tık kalori presetleri
+//   8 — eklendi: detaylı antrenman programı, template hareketleri ve program arşivi
 //
 // Eski v1 backup'ları okumaya devam ediyoruz — eksik alanlar nil/default kalır.
 
@@ -19,7 +21,10 @@ private struct HerculesBackup: Codable {
     let profile: ProfileSnapshot?
     let measurements: [MeasurementSnapshot]
     let foods: [FoodSnapshot]
+    /// v7+: tek tık kalori/makro presetleri.
+    let foodPresets: [FoodPresetSnapshot]?
     let workouts: [WorkoutSnapshot]
+    let workoutArchives: [WorkoutArchiveSnapshot]?
     let workoutPlanOverrides: [WorkoutPlanOverrideSnapshot]?
     let recipes: [RecipeSnapshot]
     let steps: [StepSnapshot]
@@ -68,10 +73,44 @@ private struct FoodSnapshot: Codable {
     let fat: Double?
 }
 
+private struct FoodPresetSnapshot: Codable {
+    let presetID: String
+    let name: String
+    let brand: String
+    let category: String
+    let servingLabel: String
+    let servingGrams: Double
+    let defaultServings: Double
+    let calories: Double
+    let protein: Double?
+    let carbs: Double?
+    let fat: Double?
+    let note: String
+    let searchText: String
+    let sortOrder: Int
+    let createdAt: Date
+    let updatedAt: Date
+}
+
 private struct WorkoutSnapshot: Codable {
     let weekday: Int
     let name: String
     let estimatedCalories: Double
+    let durationMinutes: Int?
+    let focus: String?
+    let warmup: String?
+    let progression: String?
+    let notes: String?
+    let exercises: [WorkoutTemplateExerciseSnapshot]?
+}
+
+private struct WorkoutArchiveSnapshot: Codable {
+    let title: String
+    let summary: String?
+    let notes: String?
+    let source: String
+    let archivedAt: Date
+    let sessionsJSON: String
 }
 
 private struct WorkoutPlanOverrideSnapshot: Codable {
@@ -173,6 +212,63 @@ private struct PreferenceSnapshot: Codable {
     let boolValue: Bool?
 }
 
+// MARK: - Vault metadata
+
+private struct VaultManifest: Codable {
+    struct Counts: Codable {
+        let measurements: Int
+        let foods: Int
+        let foodPresets: Int
+        let workouts: Int
+        let workoutArchives: Int
+        let workoutPlanOverrides: Int
+        let recipes: Int
+        let steps: Int
+        let monthlyGoals: Int
+        let mealPlanOverrides: Int
+        let workoutLogs: Int
+        let supportFiles: Int
+        let preferences: Int
+    }
+
+    let version: Int
+    let appName: String
+    let updatedAt: Date
+    let deviceID: String
+    let snapshotFile: String
+    let legacySnapshotFile: String
+    let backupVersion: Int
+    let exportedAt: Date
+    let counts: Counts
+    let domains: [String]
+}
+
+struct VaultOperationSummary {
+    let didWriteConflictCopy: Bool
+    let snapshotURL: URL
+    let manifestURL: URL
+}
+
+enum BackupServiceError: LocalizedError {
+    case vaultNotConfigured
+    case vaultSnapshotMissing
+    case emptyStoreExportSkipped
+    case richerVaultSnapshotExists
+
+    var errorDescription: String? {
+        switch self {
+        case .vaultNotConfigured:
+            return "Veri klasörü seçilmedi."
+        case .vaultSnapshotMissing:
+            return "Seçili veri klasöründe Hercules snapshot bulunamadı."
+        case .emptyStoreExportSkipped:
+            return "Bu cihazda aktarılacak anlamlı veri yok; mevcut vault ezilmedi."
+        case .richerVaultSnapshotExists:
+            return "Vault'ta daha dolu bir snapshot var; önce Vault'tan Al yap."
+        }
+    }
+}
+
 // MARK: - Service
 
 @MainActor
@@ -182,24 +278,39 @@ final class BackupService {
     private static let supportFileNames = [
         "chat-history.json",
         "agent-memory.json",
-        "research-library.json"
+        "research-library.json",
+        "codex_auth.json"
     ]
 
     private static let preferenceKeys = [
         "mealplan.deficit",
         "mealplan.selectedWeekday",
         "hercules.ai.provider",
+        "hercules.openrouter.api_key",
         "hercules.codex.model",
         "hercules.codex.reasoning",
         "hercules.openrouter.model"
     ]
 
+    private let vaultBookmarkKey = "hercules.vault.bookmark_v1"
+    private let vaultLastSeenExportKey = "hercules.vault.last_seen_exported_at_v1"
+    private let vaultDeviceIDKey = "hercules.vault.device_id_v1"
+    private let vaultSnapshotRelativePath = "data/hercules-backup.json"
+    private let vaultLegacySnapshotName = "hercules-backup.json"
+    private let vaultManifestName = "manifest.json"
+    private let vaultReadmeName = "README.md"
+
     /// Yedek konumu: ~/Documents/Hercules/hercules-backup.json
     /// Kullanıcı görsün, Dropbox/iCloud Drive'a kopyalayabilsin diye Documents'da.
     var backupURL: URL {
         let fm = FileManager.default
+        #if os(macOS)
+        let fallbackDocs = fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents", isDirectory: true)
+        #else
+        let fallbackDocs = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents", isDirectory: true)
+        #endif
         let docs = (try? fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
-            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents")
+            ?? fallbackDocs
         let dir = docs.appendingPathComponent("Hercules", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -210,6 +321,7 @@ final class BackupService {
     /// Paid Developer / CloudKit entitlement gerekmeden çalışan iCloud Drive mirror.
     /// iCloud Drive kapalıysa nil döner ve app normal local backup ile devam eder.
     var iCloudBackupURL: URL? {
+        #if os(macOS)
         let fm = FileManager.default
         let cloudDocs = fm.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
@@ -219,6 +331,40 @@ final class BackupService {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         return dir.appendingPathComponent("hercules-backup.json")
+        #else
+        return nil
+        #endif
+    }
+
+    /// Kullanıcının seçtiği Obsidian-style veri klasörü. iCloud Drive, Dropbox
+    /// veya düz klasör olabilir; app bu klasörün içine `manifest.json`,
+    /// `data/`, `backups/`, `conflicts/` yazar.
+    var selectedVaultRootURL: URL? {
+        try? resolveVaultBookmark().url
+    }
+
+    var vaultIsConfigured: Bool {
+        selectedVaultRootURL != nil
+    }
+
+    var vaultDisplayPath: String {
+        guard let url = selectedVaultRootURL else {
+            return "Seçilmedi"
+        }
+        return url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+    }
+
+    var vaultBackupExists: Bool {
+        (try? withVaultRoot { root in
+            bestVaultRestoreCandidate(root: root) != nil
+        }) ?? false
+    }
+
+    var vaultLastSyncDate: Date? {
+        guard let value = try? withVaultRoot({ root in
+            bestVaultRestoreCandidate(root: root)?.backup.exportedAt
+        }) else { return nil }
+        return value
     }
 
     var latestBackupURL: URL {
@@ -231,12 +377,17 @@ final class BackupService {
 
     private var supportDirectoryURL: URL {
         let fm = FileManager.default
+        #if os(macOS)
+        let fallback = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+        #else
+        let fallback = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
+        #endif
         let base = (try? fm.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        )) ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+        )) ?? fallback
         let dir = base.appendingPathComponent("Hercules", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -271,9 +422,32 @@ final class BackupService {
         let recipeCount = (try? ctx.fetchCount(FetchDescriptor<Recipe>())) ?? 0
         let logCount = (try? ctx.fetchCount(FetchDescriptor<WorkoutLog>())) ?? 0
         let goalCount = (try? ctx.fetchCount(FetchDescriptor<MonthlyGoal>())) ?? 0
+        let stepCount = (try? ctx.fetchCount(FetchDescriptor<StepEntry>())) ?? 0
+        let archiveCount = (try? ctx.fetchCount(FetchDescriptor<WorkoutProgramArchive>())) ?? 0
+        let workoutOverrideCount = (try? ctx.fetchCount(FetchDescriptor<WorkoutPlanOverride>())) ?? 0
+        let mealOverrideCount = (try? ctx.fetchCount(FetchDescriptor<MealPlanOverride>())) ?? 0
+        let profile = (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first
+        let hasProfileData = {
+            guard let profile else { return false }
+            let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let about = profile.about.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !name.isEmpty || !about.isEmpty || profile.targetWeight != nil || profile.manualBodyFat != nil
+        }()
+        let presets = (try? ctx.fetch(FetchDescriptor<FoodPreset>())) ?? []
+        let hasCustomPreset = presets.contains { !FoodPresetSeed.defaultPresetIDs.contains($0.presetID) }
         // En az birinin dolu olması yeterli — DemoSeed sadece profile + 3 template kurar,
         // o yüzden onları sayıma katmıyoruz.
-        return (measurementCount + foodCount + recipeCount + logCount + goalCount) > 0 || hasSupportFiles()
+        return (
+            measurementCount +
+            foodCount +
+            recipeCount +
+            logCount +
+            goalCount +
+            stepCount +
+            archiveCount +
+            workoutOverrideCount +
+            mealOverrideCount
+        ) > 0 || hasProfileData || hasCustomPreset || hasSupportFiles()
     }
 
     /// Mevcut tüm verileri JSON'a yaz. Hatalar sessizce yutulur (best-effort).
@@ -287,9 +461,14 @@ final class BackupService {
         }
         do {
             let backup = try buildBackup(ctx: ctx)
+            guard richerVaultCandidate(than: backup) == nil else {
+                print("[Backup] vault daha dolu, export atlandı.")
+                return false
+            }
             let data = try encoder.encode(backup)
             try data.write(to: backupURL, options: [.atomic])
             mirrorToICloud(data)
+            _ = try? writeVaultSnapshot(backup, data: data)
             return true
         } catch {
             print("[Backup] export failed: \(error)")
@@ -313,8 +492,19 @@ final class BackupService {
             print("[Backup] async build failed: \(error)")
             return
         }
+        guard richerVaultCandidate(than: snapshot) == nil else {
+            print("[Backup] vault daha dolu, async export atlandı.")
+            return
+        }
         let url = backupURL
         let cloudURL = iCloudBackupURL
+        let vaultRoot = selectedVaultRootURL
+        let vaultDeviceID = deviceID
+        let lastSeen = lastSeenVaultExportedAt
+        let vaultSnapshotRelativePath = self.vaultSnapshotRelativePath
+        let vaultLegacySnapshotName = self.vaultLegacySnapshotName
+        let vaultManifestName = self.vaultManifestName
+        let vaultReadmeName = self.vaultReadmeName
         let encoder = self.encoder
         Task.detached(priority: .utility) {
             do {
@@ -322,6 +512,23 @@ final class BackupService {
                 try data.write(to: url, options: [.atomic])
                 if let cloudURL {
                     try? data.write(to: cloudURL, options: [.atomic])
+                }
+                if let vaultRoot {
+                    _ = try Self.writeVaultSnapshotDetached(
+                        snapshot,
+                        data: data,
+                        root: vaultRoot,
+                        deviceID: vaultDeviceID,
+                        lastSeenExportedAt: lastSeen,
+                        snapshotRelativePath: vaultSnapshotRelativePath,
+                        legacySnapshotName: vaultLegacySnapshotName,
+                        manifestName: vaultManifestName,
+                        readmeName: vaultReadmeName,
+                        encoder: encoder
+                    )
+                    await MainActor.run {
+                        self.lastSeenVaultExportedAt = snapshot.exportedAt
+                    }
                 }
             } catch {
                 print("[Backup] async write failed: \(error)")
@@ -348,7 +555,9 @@ final class BackupService {
 
         let measurements = (try? ctx.fetch(FetchDescriptor<Measurement>())) ?? []
         let foods = (try? ctx.fetch(FetchDescriptor<FoodEntry>())) ?? []
+        let foodPresets = (try? ctx.fetch(FetchDescriptor<FoodPreset>())) ?? []
         let workouts = (try? ctx.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        let workoutArchives = (try? ctx.fetch(FetchDescriptor<WorkoutProgramArchive>())) ?? []
         let workoutPlanOverrides = (try? ctx.fetch(FetchDescriptor<WorkoutPlanOverride>())) ?? []
         let recipes = (try? ctx.fetch(FetchDescriptor<Recipe>())) ?? []
         let steps = (try? ctx.fetch(FetchDescriptor<StepEntry>())) ?? []
@@ -357,7 +566,7 @@ final class BackupService {
         let workoutLogs = (try? ctx.fetch(FetchDescriptor<WorkoutLog>(sortBy: [SortDescriptor(\.date)]))) ?? []
 
         return HerculesBackup(
-            version: 6,
+            version: 8,
             exportedAt: .now,
             profile: profileData,
             measurements: measurements.map {
@@ -373,8 +582,48 @@ final class BackupService {
                     carbs: $0.carbs, fat: $0.fat
                 )
             },
+            foodPresets: foodPresets.map {
+                FoodPresetSnapshot(
+                    presetID: $0.presetID,
+                    name: $0.name,
+                    brand: $0.brand,
+                    category: $0.category,
+                    servingLabel: $0.servingLabel,
+                    servingGrams: $0.servingGrams,
+                    defaultServings: $0.defaultServings,
+                    calories: $0.calories,
+                    protein: $0.protein,
+                    carbs: $0.carbs,
+                    fat: $0.fat,
+                    note: $0.note,
+                    searchText: $0.searchText,
+                    sortOrder: $0.sortOrder,
+                    createdAt: $0.createdAt,
+                    updatedAt: $0.updatedAt
+                )
+            },
             workouts: workouts.map {
-                WorkoutSnapshot(weekday: $0.weekday, name: $0.name, estimatedCalories: $0.estimatedCalories)
+                WorkoutSnapshot(
+                    weekday: $0.weekday,
+                    name: $0.name,
+                    estimatedCalories: $0.estimatedCalories,
+                    durationMinutes: $0.durationMinutes,
+                    focus: $0.focus,
+                    warmup: $0.warmup,
+                    progression: $0.progression,
+                    notes: $0.notes,
+                    exercises: $0.sortedTemplateExercises.map(\.snapshot)
+                )
+            },
+            workoutArchives: workoutArchives.map {
+                WorkoutArchiveSnapshot(
+                    title: $0.title,
+                    summary: $0.summary,
+                    notes: $0.notes,
+                    source: $0.source,
+                    archivedAt: $0.archivedAt,
+                    sessionsJSON: $0.sessionsJSON
+                )
             },
             workoutPlanOverrides: workoutPlanOverrides.map {
                 WorkoutPlanOverrideSnapshot(
@@ -461,6 +710,481 @@ final class BackupService {
         )
     }
 
+    // MARK: - User-selected vault sync
+
+    /// Kullanıcının seçtiği klasörü vault olarak kaydeder ve mevcut datayı
+    /// mevcut cihazda anlamlı veri varsa oraya yazar. Boş/temiz mobil kurulumda
+    /// seçim sadece klasörü kaydeder; var olan iCloud snapshot'ı ezmez.
+    @discardableResult
+    func configureVaultRoot(_ url: URL, from ctx: ModelContext) throws -> VaultOperationSummary {
+        try persistVaultBookmark(for: url)
+        guard storeHasMeaningfulData(ctx) else {
+            return try withVaultRoot { root in
+                try Self.ensureVaultLayout(
+                    root: root,
+                    snapshotRelativePath: vaultSnapshotRelativePath,
+                    legacySnapshotName: vaultLegacySnapshotName,
+                    manifestName: vaultManifestName,
+                    readmeName: vaultReadmeName
+                )
+                return VaultOperationSummary(
+                    didWriteConflictCopy: false,
+                    snapshotURL: root.appendingPathComponent(vaultSnapshotRelativePath),
+                    manifestURL: root.appendingPathComponent(vaultManifestName)
+                )
+            }
+        }
+        return try exportToVault(from: ctx)
+    }
+
+    func clearVaultSelection() {
+        UserDefaults.standard.removeObject(forKey: vaultBookmarkKey)
+        UserDefaults.standard.removeObject(forKey: vaultLastSeenExportKey)
+    }
+
+    @discardableResult
+    func exportToVault(from ctx: ModelContext) throws -> VaultOperationSummary {
+        guard storeHasMeaningfulData(ctx) else {
+            throw BackupServiceError.emptyStoreExportSkipped
+        }
+        let backup = try buildBackup(ctx: ctx)
+        guard richerVaultCandidate(than: backup) == nil else {
+            throw BackupServiceError.richerVaultSnapshotExists
+        }
+        let data = try encoder.encode(backup)
+        try data.write(to: backupURL, options: [.atomic])
+        mirrorToICloud(data)
+        return try writeVaultSnapshot(backup, data: data)
+    }
+
+    func restoreFromVault(into ctx: ModelContext) throws {
+        try withVaultRoot { root in
+            try Self.ensureVaultLayout(
+                root: root,
+                snapshotRelativePath: vaultSnapshotRelativePath,
+                legacySnapshotName: vaultLegacySnapshotName,
+                manifestName: vaultManifestName,
+                readmeName: vaultReadmeName
+            )
+            guard let candidate = bestVaultRestoreCandidate(root: root) else {
+                throw BackupServiceError.vaultSnapshotMissing
+            }
+            try writePreVaultRestoreSafetyBackup(into: root, from: ctx)
+            try restore(from: candidate.url, into: ctx, mode: .replaceAll)
+            if let data = try? Data(contentsOf: candidate.url) {
+                try? data.write(to: backupURL, options: [.atomic])
+            }
+            lastSeenVaultExportedAt = candidate.backup.exportedAt
+        }
+    }
+
+    /// App açıldığında/öne geldiğinde seçili vault daha yeniyse içeri alır.
+    /// Local taraf anlamlı veri taşıyorsa restore öncesi local safety backup alınır.
+    func restoreFromVaultIfNewer(into ctx: ModelContext) {
+        do {
+            let shouldRestore = try withVaultRoot { root in
+                guard let candidate = bestVaultRestoreCandidate(root: root) else { return false }
+                let vaultDate = candidate.backup.exportedAt
+                let localDate = comparableBackupDate(for: backupURL) ?? .distantPast
+                let localIsEmpty = !storeHasMeaningfulData(ctx)
+                let candidateScore = Self.backupMeaningfulScore(candidate.backup)
+                let candidateIsMeaningful = candidateScore > 0
+                let localScore = (try? buildBackup(ctx: ctx)).map(Self.backupMeaningfulScore) ?? 0
+                let candidateIsMuchRicher = candidateScore >= localScore + 25
+                return (localIsEmpty && candidateIsMeaningful)
+                    || candidateIsMuchRicher
+                    || vaultDate.timeIntervalSince(localDate) > 2
+            }
+            guard shouldRestore else { return }
+            try restoreFromVault(into: ctx)
+            print("[Vault] restored newer vault snapshot")
+        } catch {
+            print("[Vault] auto-restore failed: \(error)")
+        }
+    }
+
+    private func writeVaultSnapshot(_ backup: HerculesBackup, data: Data) throws -> VaultOperationSummary {
+        try withVaultRoot { root in
+            let summary = try Self.writeVaultSnapshotDetached(
+                backup,
+                data: data,
+                root: root,
+                deviceID: deviceID,
+                lastSeenExportedAt: lastSeenVaultExportedAt,
+                snapshotRelativePath: vaultSnapshotRelativePath,
+                legacySnapshotName: vaultLegacySnapshotName,
+                manifestName: vaultManifestName,
+                readmeName: vaultReadmeName,
+                encoder: encoder
+            )
+            lastSeenVaultExportedAt = backup.exportedAt
+            return summary
+        }
+    }
+
+    nonisolated private static func writeVaultSnapshotDetached(
+        _ backup: HerculesBackup,
+        data: Data,
+        root: URL,
+        deviceID: String,
+        lastSeenExportedAt: Date?,
+        snapshotRelativePath: String,
+        legacySnapshotName: String,
+        manifestName: String,
+        readmeName: String,
+        encoder: JSONEncoder
+    ) throws -> VaultOperationSummary {
+        let didStart = root.startAccessingSecurityScopedResource()
+        defer {
+            if didStart {
+                root.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        try ensureVaultLayout(
+            root: root,
+            snapshotRelativePath: snapshotRelativePath,
+            legacySnapshotName: legacySnapshotName,
+            manifestName: manifestName,
+            readmeName: readmeName
+        )
+
+        let fm = FileManager.default
+        let snapshotURL = root.appendingPathComponent(snapshotRelativePath)
+        let legacyURL = root.appendingPathComponent(legacySnapshotName)
+        let manifestURL = root.appendingPathComponent(manifestName)
+
+        let didWriteConflict = try copyVaultConflictIfNeeded(
+            snapshotURL: snapshotURL,
+            conflictsDir: root.appendingPathComponent("conflicts", isDirectory: true),
+            lastSeenExportedAt: lastSeenExportedAt
+        )
+
+        try data.write(to: snapshotURL, options: [.atomic])
+        try data.write(to: legacyURL, options: [.atomic])
+
+        let manifest = makeVaultManifest(
+            backup,
+            deviceID: deviceID,
+            snapshotRelativePath: snapshotRelativePath,
+            legacySnapshotName: legacySnapshotName
+        )
+        let manifestData = try encoder.encode(manifest)
+        try manifestData.write(to: manifestURL, options: [.atomic])
+
+        for supportFile in backup.supportFiles ?? [] {
+            let destination = root
+                .appendingPathComponent("support", isDirectory: true)
+                .appendingPathComponent(supportFile.name)
+            try supportFile.data.write(to: destination, options: [.atomic])
+        }
+
+        let readmeURL = root.appendingPathComponent(readmeName)
+        if !fm.fileExists(atPath: readmeURL.path) {
+            try defaultVaultReadme.write(to: readmeURL, atomically: true, encoding: .utf8)
+        }
+
+        return VaultOperationSummary(
+            didWriteConflictCopy: didWriteConflict,
+            snapshotURL: snapshotURL,
+            manifestURL: manifestURL
+        )
+    }
+
+    private func writePreVaultRestoreSafetyBackup(into root: URL, from ctx: ModelContext) throws {
+        guard storeHasMeaningfulData(ctx) else { return }
+        let backup = try buildBackup(ctx: ctx)
+        let data = try encoder.encode(backup)
+        let url = root
+            .appendingPathComponent("backups", isDirectory: true)
+            .appendingPathComponent("pre-vault-restore-\(timestampForFilename()).json")
+        try data.write(to: url, options: [.atomic])
+    }
+
+    nonisolated private static func copyVaultConflictIfNeeded(
+        snapshotURL: URL,
+        conflictsDir: URL,
+        lastSeenExportedAt: Date?
+    ) throws -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: snapshotURL.path) else { return false }
+
+        let data = try Data(contentsOf: snapshotURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let existing = try? decoder.decode(HerculesBackup.self, from: data)
+        let existingDate = existing?.exportedAt ?? ((try? fm.attributesOfItem(atPath: snapshotURL.path)[.modificationDate]) as? Date)
+        let lastSeen = lastSeenExportedAt ?? .distantPast
+        guard let existingDate, existingDate.timeIntervalSince(lastSeen) > 2 else { return false }
+
+        try fm.createDirectory(at: conflictsDir, withIntermediateDirectories: true)
+        let conflictURL = conflictsDir.appendingPathComponent("hercules-conflict-\(timestampForFilename()).json")
+        try fm.copyItem(at: snapshotURL, to: conflictURL)
+        return true
+    }
+
+    private func bestVaultRestoreCandidate(root: URL) -> (url: URL, backup: HerculesBackup)? {
+        let candidates = vaultCandidateURLs(root: root).compactMap { url -> (url: URL, backup: HerculesBackup)? in
+            guard let data = try? Data(contentsOf: url),
+                  let backup = try? decoder.decode(HerculesBackup.self, from: data)
+            else { return nil }
+            return (url, backup)
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        let ranked = candidates
+            .map { candidate in
+                (url: candidate.url, backup: candidate.backup, score: Self.backupMeaningfulScore(candidate.backup))
+            }
+            .sorted {
+                if $0.score != $1.score {
+                    return $0.score > $1.score
+                }
+                return $0.backup.exportedAt > $1.backup.exportedAt
+            }
+
+        if let meaningful = ranked.first(where: { $0.score > 0 }) {
+            return (meaningful.url, meaningful.backup)
+        }
+
+        return ranked.first.map { ($0.url, $0.backup) }
+    }
+
+    private func richerVaultCandidate(than backup: HerculesBackup, minimumScoreDelta: Int = 25) -> (url: URL, backup: HerculesBackup)? {
+        (try? withVaultRoot { root in
+            guard let candidate = bestVaultRestoreCandidate(root: root) else { return nil }
+            let vaultScore = Self.backupMeaningfulScore(candidate.backup)
+            let localScore = Self.backupMeaningfulScore(backup)
+            guard vaultScore >= localScore + minimumScoreDelta else { return nil }
+            return candidate
+        }) ?? nil
+    }
+
+    private func vaultCandidateURLs(root: URL) -> [URL] {
+        let fm = FileManager.default
+        let required = [
+            root.appendingPathComponent(vaultSnapshotRelativePath),
+            root.appendingPathComponent(vaultLegacySnapshotName)
+        ]
+        let generated = ["conflicts", "backups"].flatMap { directory -> [URL] in
+            let dir = root.appendingPathComponent(directory, isDirectory: true)
+            let files = (try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            return files.filter { $0.pathExtension.lowercased() == "json" }
+        }
+
+        var seen = Set<String>()
+        return (required + generated).filter { url in
+            guard fm.fileExists(atPath: url.path), !seen.contains(url.path) else { return false }
+            seen.insert(url.path)
+            return true
+        }
+    }
+
+    nonisolated private static func backupMeaningfulScore(_ backup: HerculesBackup) -> Int {
+        let profileScore: Int = {
+            guard let profile = backup.profile else { return 0 }
+            let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let about = (profile.about ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            var score = 0
+            if !name.isEmpty { score += 1 }
+            if !about.isEmpty { score += 1 }
+            if profile.targetWeight != nil { score += 1 }
+            if profile.manualBodyFat != nil { score += 1 }
+            return score
+        }()
+
+        let customPresetCount = (backup.foodPresets ?? [])
+            .filter { !FoodPresetSeed.defaultPresetIDs.contains($0.presetID) }
+            .count
+
+        return profileScore
+            + backup.measurements.count * 4
+            + backup.foods.count * 2
+            + backup.recipes.count * 3
+            + backup.steps.count
+            + (backup.monthlyGoals?.count ?? 0)
+            + (backup.mealPlanOverrides?.count ?? 0)
+            + (backup.workoutPlanOverrides?.count ?? 0)
+            + (backup.workoutLogs?.count ?? 0) * 3
+            + (backup.workoutArchives?.count ?? 0) * 2
+            + (backup.supportFiles?.count ?? 0)
+            + customPresetCount
+    }
+
+    nonisolated private static func ensureVaultLayout(
+        root: URL,
+        snapshotRelativePath: String,
+        legacySnapshotName: String,
+        manifestName: String,
+        readmeName: String
+    ) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        for name in ["data", "support", "backups", "conflicts"] {
+            try fm.createDirectory(at: root.appendingPathComponent(name, isDirectory: true), withIntermediateDirectories: true)
+        }
+        _ = snapshotRelativePath
+        _ = legacySnapshotName
+        _ = manifestName
+        _ = readmeName
+    }
+
+    nonisolated private static func makeVaultManifest(
+        _ backup: HerculesBackup,
+        deviceID: String,
+        snapshotRelativePath: String,
+        legacySnapshotName: String
+    ) -> VaultManifest {
+        VaultManifest(
+            version: 1,
+            appName: "Hercules",
+            updatedAt: .now,
+            deviceID: deviceID,
+            snapshotFile: snapshotRelativePath,
+            legacySnapshotFile: legacySnapshotName,
+            backupVersion: backup.version,
+            exportedAt: backup.exportedAt,
+            counts: VaultManifest.Counts(
+                measurements: backup.measurements.count,
+                foods: backup.foods.count,
+                foodPresets: backup.foodPresets?.count ?? 0,
+                workouts: backup.workouts.count,
+                workoutArchives: backup.workoutArchives?.count ?? 0,
+                workoutPlanOverrides: backup.workoutPlanOverrides?.count ?? 0,
+                recipes: backup.recipes.count,
+                steps: backup.steps.count,
+                monthlyGoals: backup.monthlyGoals?.count ?? 0,
+                mealPlanOverrides: backup.mealPlanOverrides?.count ?? 0,
+                workoutLogs: backup.workoutLogs?.count ?? 0,
+                supportFiles: backup.supportFiles?.count ?? 0,
+                preferences: backup.preferences?.count ?? 0
+            ),
+            domains: [
+                "profile",
+                "about",
+                "measurements",
+                "foods",
+                "food-presets",
+                "workout-program",
+                "workout-archives",
+                "workout-plan-overrides",
+                "workout-logs",
+                "recipes",
+                "steps",
+                "monthly-goals",
+                "meal-plan-overrides",
+                "chat-history",
+                "agent-memory",
+                "research-library",
+                "preferences"
+            ]
+        )
+    }
+
+    private func persistVaultBookmark(for url: URL) throws {
+        let bookmark = try url.bookmarkData(options: Self.bookmarkCreationOptions, includingResourceValuesForKeys: nil, relativeTo: nil)
+        UserDefaults.standard.set(bookmark, forKey: vaultBookmarkKey)
+    }
+
+    private func resolveVaultBookmark() throws -> (url: URL, isStale: Bool) {
+        guard let data = UserDefaults.standard.data(forKey: vaultBookmarkKey) else {
+            throw BackupServiceError.vaultNotConfigured
+        }
+        var isStale = false
+        let url = try URL(
+            resolvingBookmarkData: data,
+            options: Self.bookmarkResolutionOptions,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+        if isStale {
+            try? persistVaultBookmark(for: url)
+        }
+        return (url, isStale)
+    }
+
+    private func withVaultRoot<T>(_ body: (URL) throws -> T) throws -> T {
+        let root = try resolveVaultBookmark().url
+        let didStart = root.startAccessingSecurityScopedResource()
+        defer {
+            if didStart {
+                root.stopAccessingSecurityScopedResource()
+            }
+        }
+        return try body(root)
+    }
+
+    private var deviceID: String {
+        let defaults = UserDefaults.standard
+        if let existing = defaults.string(forKey: vaultDeviceIDKey), !existing.isEmpty {
+            return existing
+        }
+        let value = UUID().uuidString
+        defaults.set(value, forKey: vaultDeviceIDKey)
+        return value
+    }
+
+    private var lastSeenVaultExportedAt: Date? {
+        get {
+            let raw = UserDefaults.standard.double(forKey: vaultLastSeenExportKey)
+            return raw > 0 ? Date(timeIntervalSince1970: raw) : nil
+        }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue.timeIntervalSince1970, forKey: vaultLastSeenExportKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: vaultLastSeenExportKey)
+            }
+        }
+    }
+
+    private static var bookmarkCreationOptions: URL.BookmarkCreationOptions {
+        #if os(macOS)
+        return [.withSecurityScope]
+        #else
+        return []
+        #endif
+    }
+
+    private static var bookmarkResolutionOptions: URL.BookmarkResolutionOptions {
+        #if os(macOS)
+        return [.withSecurityScope]
+        #else
+        return []
+        #endif
+    }
+
+    nonisolated private static var defaultVaultReadme: String {
+        """
+        # Hercules Vault
+
+        Bu klasor Hercules'in dosya tabanli veri kasasidir.
+
+        - `data/hercules-backup.json`: Tum profil, olcum, yemek, tarif, antrenman, chat, memory ve research snapshot'i.
+        - `manifest.json`: Son export tarihi, cihaz kimligi ve kayit sayilari.
+        - `support/`: Chat history, agent memory ve research cache gibi okunabilir destek dosyalari.
+        - `backups/`: Restore oncesi guvenlik kopyalari.
+        - `conflicts/`: Baska cihazdan gelen daha yeni kopya ezilmeden once buraya alinmis conflict dosyalari.
+
+        iCloud Drive, Dropbox veya benzeri bir klasoru bu vault olarak secebilirsin. SQLite store'u direkt sync etmiyoruz; veri kaybi riskini dusurmek icin JSON snapshot kullaniyoruz.
+        """
+    }
+
+    nonisolated private static func timestampForFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+
+    private func timestampForFilename() -> String {
+        Self.timestampForFilename()
+    }
+
     // MARK: - Import
 
     private let importedFlagKey = "hercules.backup.imported_v1"
@@ -536,7 +1260,11 @@ final class BackupService {
             // Mevcut veriyi temizle — workoutLog cascade'le exercises+sets de gider.
             ((try? ctx.fetch(FetchDescriptor<Measurement>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<FoodEntry>())) ?? []).forEach { ctx.delete($0) }
+            if backup.foodPresets != nil {
+                ((try? ctx.fetch(FetchDescriptor<FoodPreset>())) ?? []).forEach { ctx.delete($0) }
+            }
             ((try? ctx.fetch(FetchDescriptor<WorkoutSession>())) ?? []).forEach { ctx.delete($0) }
+            ((try? ctx.fetch(FetchDescriptor<WorkoutProgramArchive>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<WorkoutPlanOverride>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<Recipe>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<StepEntry>())) ?? []).forEach { ctx.delete($0) }
@@ -576,9 +1304,89 @@ final class BackupService {
                 carbs: f.carbs, fat: f.fat
             ))
         }
+        if let presetSnapshots = backup.foodPresets {
+            let existingPresets = (try? ctx.fetch(FetchDescriptor<FoodPreset>())) ?? []
+            var presetsByID: [String: FoodPreset] = [:]
+            for preset in existingPresets where presetsByID[preset.presetID] == nil {
+                presetsByID[preset.presetID] = preset
+            }
+            for p in presetSnapshots {
+                let preset = presetsByID[p.presetID] ?? FoodPreset(
+                    presetID: p.presetID,
+                    name: p.name,
+                    brand: p.brand,
+                    category: p.category,
+                    servingLabel: p.servingLabel,
+                    servingGrams: p.servingGrams,
+                    defaultServings: p.defaultServings,
+                    calories: p.calories,
+                    protein: p.protein,
+                    carbs: p.carbs,
+                    fat: p.fat,
+                    note: p.note,
+                    searchText: p.searchText,
+                    sortOrder: p.sortOrder,
+                    createdAt: p.createdAt,
+                    updatedAt: p.updatedAt
+                )
+                preset.name = p.name
+                preset.brand = p.brand
+                preset.category = p.category
+                preset.servingLabel = p.servingLabel
+                preset.servingGrams = p.servingGrams
+                preset.defaultServings = p.defaultServings
+                preset.calories = p.calories
+                preset.protein = p.protein
+                preset.carbs = p.carbs
+                preset.fat = p.fat
+                preset.note = p.note
+                preset.searchText = p.searchText
+                preset.sortOrder = p.sortOrder
+                preset.createdAt = p.createdAt
+                preset.updatedAt = p.updatedAt
+
+                if presetsByID[p.presetID] == nil {
+                    ctx.insert(preset)
+                    presetsByID[p.presetID] = preset
+                }
+            }
+        }
         for w in backup.workouts {
-            ctx.insert(WorkoutSession(
-                weekday: w.weekday, name: w.name, estimatedCalories: w.estimatedCalories
+            let session = WorkoutSession(
+                weekday: w.weekday,
+                name: w.name,
+                estimatedCalories: w.estimatedCalories,
+                durationMinutes: w.durationMinutes ?? 60,
+                focus: w.focus,
+                warmup: w.warmup,
+                progression: w.progression,
+                notes: w.notes
+            )
+            ctx.insert(session)
+            for exerciseSnapshot in (w.exercises ?? []).sorted(by: { $0.order < $1.order }) {
+                let exercise = WorkoutTemplateExercise(
+                    name: exerciseSnapshot.name,
+                    order: exerciseSnapshot.order,
+                    sets: exerciseSnapshot.sets,
+                    reps: exerciseSnapshot.reps,
+                    load: exerciseSnapshot.load,
+                    rir: exerciseSnapshot.rir,
+                    rest: exerciseSnapshot.rest,
+                    sourceURL: exerciseSnapshot.sourceURL,
+                    notes: exerciseSnapshot.notes
+                )
+                ctx.insert(exercise)
+                session.templateExercises.append(exercise)
+            }
+        }
+        for archive in (backup.workoutArchives ?? []) {
+            ctx.insert(WorkoutProgramArchive(
+                title: archive.title,
+                summary: archive.summary,
+                notes: archive.notes,
+                source: archive.source,
+                archivedAt: archive.archivedAt,
+                sessionsJSON: archive.sessionsJSON
             ))
         }
         for w in (backup.workoutPlanOverrides ?? []) {
@@ -667,8 +1475,10 @@ final class BackupService {
         restoreSupportFiles(backup.supportFiles ?? [], mode: mode)
         restorePreferences(backup.preferences ?? [])
         try ctx.save()
+        #if os(macOS)
         LocalMemoryProvider.shared.reloadFromDisk()
         ResearchLibrary.shared.reloadFromDisk()
+        #endif
         NotificationCenter.default.post(name: .herculesSupportFilesRestored, object: nil)
     }
 

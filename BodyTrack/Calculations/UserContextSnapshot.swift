@@ -149,6 +149,22 @@ enum UserContextSnapshot {
         return parts.joined(separator: "\n\n")
     }
 
+    /// V4 coach context: @mention olmasa bile fitness/nutrition sorularında
+    /// alakalı profil, ölçüm, kalori, adım ve antrenman verisini otomatik ekler.
+    static func coachContext(for query: String, explicitTags tags: Set<MentionTag>, ctx: ModelContext) -> String? {
+        let about = aboutSection(ctx: ctx)
+        let aboutMentions = aboutMentionTags(ctx: ctx)
+        let allTags = tags.union(aboutMentions)
+
+        var neededSections = Set(allTags.flatMap { $0.sections })
+        neededSections.formUnion(inferredSections(for: query))
+
+        let data = neededSections.isEmpty ? nil : buildSnapshot(sections: neededSections, ctx: ctx)
+        let parts = [about, data].compactMap { $0 }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "\n\n")
+    }
+
     /// Profil.about metnindeki @ etiketlerini çıkar — kalıcı veri attachment olarak.
     static func aboutMentionTags(ctx: ModelContext) -> Set<MentionTag> {
         guard let profile = fetchProfile(ctx: ctx) else { return [] }
@@ -219,6 +235,44 @@ enum UserContextSnapshot {
         let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive],
                                locale: Locale(identifier: "en_US"))
         return folded
+    }
+
+    private static func inferredSections(for query: String) -> Set<SnapshotSection> {
+        let lower = normalize(query).lowercased()
+
+        if containsAny(lower, ["hepsi", "tumu", "tum veri", "her sey", "all", "everything"]) {
+            return Set(SnapshotSection.allCases)
+        }
+
+        guard AgentQueryClassifier.isCoachQuery(query) else { return [] }
+
+        var sections: Set<SnapshotSection> = [.profile, .latestMeasurement, .trend, .goals]
+
+        if containsAny(lower, AgentQueryClassifier.trainingSignals) {
+            sections.formUnion([.workout, .workoutLogs, .steps])
+        }
+
+        if containsAny(lower, AgentQueryClassifier.nutritionSignals) {
+            sections.formUnion([.todayIntake, .caloriePeriods, .steps, .mealPlan])
+        }
+
+        if containsAny(lower, ["kilo", "yag", "lean", "definasyon", "cut", "bulk", "plato", "hedef", "adim", "step"]) {
+            sections.formUnion([.todayIntake, .caloriePeriods, .steps])
+        }
+
+        if containsAny(lower, ["tarif", "recipe", "yemek tarifi"]) {
+            sections.formUnion([.recipes])
+        }
+
+        if containsAny(lower, ["yemek plani", "meal plan", "ogun", "öğün", "diyet plan"]) {
+            sections.formUnion([.mealPlan])
+        }
+
+        return sections
+    }
+
+    private static func containsAny(_ lowercasedText: String, _ needles: [String]) -> Bool {
+        AgentQueryClassifier.containsAny(lowercasedText, needles)
     }
 
     // MARK: - Sections
@@ -420,7 +474,9 @@ enum UserContextSnapshot {
         var totalKcal: Double = 0
         for wd in orderedWeekdays {
             if let w = workouts.first(where: { $0.weekday == wd }) {
-                weekParts.append("\(weekdayShort[wd])=\(w.name)")
+                let exCount = w.templateExercises.count
+                let detail = exCount > 0 ? " · \(exCount) hareket" : ""
+                weekParts.append("\(weekdayShort[wd])=\(w.name)\(detail)")
                 totalKcal += w.estimatedCalories
             } else {
                 weekParts.append("\(weekdayShort[wd])=—")
@@ -434,6 +490,27 @@ enum UserContextSnapshot {
                 "\(weekdayShort[item.weekday]) + \(item.exerciseName) (\(item.prescriptionText))"
             }
             lines.append("- AI/user plan eklemeleri: " + overrideParts.joined(separator: " · "))
+        }
+        let detailedDays = workouts
+            .sorted { $0.weekday < $1.weekday }
+            .filter { !$0.templateExercises.isEmpty || ($0.focus?.isEmpty == false) || ($0.progression?.isEmpty == false) }
+        if !detailedDays.isEmpty {
+            lines.append("- Aktif program detayları:")
+            for day in detailedDays {
+                let exercises = day.sortedTemplateExercises.map {
+                    var item = "\($0.name) [\($0.prescriptionText)]"
+                    if let sourceURL = $0.sourceURL, !sourceURL.isEmpty {
+                        item += " kaynak: \(sourceURL)"
+                    }
+                    return item
+                }.joined(separator: "; ")
+                var dayLine = "  - \(weekdayShort[day.weekday]) \(day.name)"
+                if let focus = day.focus, !focus.isEmpty { dayLine += " — amaç: \(focus)" }
+                if !exercises.isEmpty { dayLine += " — hareketler: \(exercises)" }
+                if let progression = day.progression, !progression.isEmpty { dayLine += " — progression: \(progression)" }
+                if let notes = day.notes, !notes.isEmpty { dayLine += " — not: \(notes)" }
+                lines.append(dayLine)
+            }
         }
         return lines.joined(separator: "\n")
     }
