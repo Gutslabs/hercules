@@ -91,3 +91,74 @@ protocol AIClient {
         onMessageUpdate: @MainActor @escaping (String) -> Void
     ) async throws -> (AIFoodResult, String?)
 }
+
+final class CodexFirstFallbackClient: AIClient {
+    private let codex: AIClient
+    private let openRouter: AIClient
+
+    init(codex: AIClient = CodexClient(), openRouter: AIClient = OpenRouterClient()) {
+        self.codex = codex
+        self.openRouter = openRouter
+    }
+
+    func send(
+        history: [ChatTurn],
+        newUserText: String,
+        userContext: String?,
+        onSearchStart: @MainActor @escaping (String) -> Void,
+        onMessageUpdate: @MainActor @escaping (String) -> Void
+    ) async throws -> (AIFoodResult, String?) {
+        do {
+            return try await codex.send(
+                history: history,
+                newUserText: newUserText,
+                userContext: userContext,
+                onSearchStart: onSearchStart,
+                onMessageUpdate: onMessageUpdate
+            )
+        } catch {
+            let notice = Self.routingNotice(for: error)
+            await onMessageUpdate(notice)
+
+            do {
+                var (result, searchQuery) = try await openRouter.send(
+                    history: history,
+                    newUserText: newUserText,
+                    userContext: userContext,
+                    onSearchStart: onSearchStart,
+                    onMessageUpdate: { partial in
+                        let routedPartial = [notice, partial]
+                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty }
+                            .joined(separator: "\n\n")
+                        onMessageUpdate(routedPartial)
+                    }
+                )
+                result.message = [notice, result.message]
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n\n")
+                return (result, searchQuery)
+            } catch {
+                throw AIFallbackError(codexError: notice, openRouterError: error.localizedDescription)
+            }
+        }
+    }
+
+    private static func routingNotice(for error: Error) -> String {
+        let message = error.localizedDescription
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let clipped = String(message.prefix(180))
+        return "Codex hata verdi: \(clipped). OpenRouter'a yönlendirdim."
+    }
+}
+
+struct AIFallbackError: LocalizedError {
+    var codexError: String
+    var openRouterError: String
+
+    var errorDescription: String? {
+        "\(codexError) OpenRouter da hata verdi: \(openRouterError)"
+    }
+}

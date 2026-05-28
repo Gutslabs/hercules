@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum Sex: String, Codable, CaseIterable, Identifiable {
+enum Sex: String, Codable, CaseIterable, Identifiable, Sendable {
     case male, female
     var id: String { rawValue }
     var label: String {
@@ -12,7 +12,7 @@ enum Sex: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum ActivityLevel: String, Codable, CaseIterable, Identifiable {
+enum ActivityLevel: String, Codable, CaseIterable, Identifiable, Sendable {
     case sedentary, light, moderate, active, veryActive, extreme
 
     var id: String { rawValue }
@@ -51,7 +51,7 @@ enum ActivityLevel: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum Goal: String, Codable, CaseIterable, Identifiable {
+enum Goal: String, Codable, CaseIterable, Identifiable, Sendable {
     case loseFast, lose, maintain, gain, gainFast
 
     var id: String { rawValue }
@@ -87,8 +87,39 @@ enum Goal: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum CalorieOffsetMacro: String, Codable, CaseIterable, Identifiable, Sendable {
+    case protein, carbs, fat
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .carbs: return "Karbonhidrat"
+        case .fat: return "Yağ"
+        case .protein: return "Protein"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .carbs: return "Karb"
+        case .fat: return "Yağ"
+        case .protein: return "Protein"
+        }
+    }
+
+    var caloriesPerGram: Double {
+        switch self {
+        case .carbs, .protein: return 4
+        case .fat: return 9
+        }
+    }
+}
+
 @Model
 final class UserProfile {
+    static let defaultSupplements = "Kreatin\nProtein tozu"
+
     var name: String
     var sex: Sex
     var birthDate: Date
@@ -98,9 +129,16 @@ final class UserProfile {
     var targetWeight: Double?
     var manualBodyFat: Double?
     var manualCalorieOffset: Double = 0
+    var manualCalorieOffsetMacroRaw: String? = CalorieOffsetMacro.carbs.rawValue
+    var manualProteinGrams: Double?
+    var manualCarbsGrams: Double?
+    var manualFatGrams: Double?
     /// Kullanıcının kendisi hakkında yazdığı kalıcı bilgi — her AI sohbetinde
     /// "kullanıcı kim" olarak system context'e enjekte edilir.
     var about: String = ""
+    /// Kullanıcının düzenli kullandığı supplementler — AI context'e kalıcı
+    /// profil bilgisi olarak enjekte edilir.
+    var supplements: String = UserProfile.defaultSupplements
 
     init(
         name: String = "",
@@ -112,7 +150,12 @@ final class UserProfile {
         targetWeight: Double? = nil,
         manualBodyFat: Double? = nil,
         manualCalorieOffset: Double = 0,
-        about: String = ""
+        manualCalorieOffsetMacro: CalorieOffsetMacro = .carbs,
+        manualProteinGrams: Double? = nil,
+        manualCarbsGrams: Double? = nil,
+        manualFatGrams: Double? = nil,
+        about: String = "",
+        supplements: String = UserProfile.defaultSupplements
     ) {
         self.name = name
         self.sex = sex
@@ -123,10 +166,29 @@ final class UserProfile {
         self.targetWeight = targetWeight
         self.manualBodyFat = manualBodyFat
         self.manualCalorieOffset = manualCalorieOffset
+        self.manualCalorieOffsetMacroRaw = manualCalorieOffsetMacro.rawValue
+        self.manualProteinGrams = manualProteinGrams
+        self.manualCarbsGrams = manualCarbsGrams
+        self.manualFatGrams = manualFatGrams
         self.about = about
+        self.supplements = supplements
     }
 
     var age: Int {
         Calendar.current.dateComponents([.year], from: birthDate, to: .now).year ?? 0
+    }
+
+    var manualCalorieOffsetMacro: CalorieOffsetMacro {
+        get {
+            CalorieOffsetMacro(rawValue: manualCalorieOffsetMacroRaw ?? "") ?? .carbs
+        }
+        set {
+            manualCalorieOffsetMacroRaw = newValue.rawValue
+        }
+    }
+
+    var effectiveSupplements: String {
+        let trimmed = supplements.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultSupplements : supplements
     }
 }

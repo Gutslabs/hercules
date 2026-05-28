@@ -1,6 +1,6 @@
 import Foundation
 
-struct AgentMemory: Codable, Identifiable, Equatable {
+struct AgentMemory: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var content: String
     var tags: [String]
@@ -40,10 +40,21 @@ struct AgentMemory: Codable, Identifiable, Equatable {
 final class LocalMemoryProvider {
     static let shared = LocalMemoryProvider()
 
-    private struct MemoryPayload: Codable {
+    private struct MemoryPayload: Codable, Sendable {
         var version: Int
         var savedAt: Date
         var memories: [AgentMemory]
+    }
+
+    private struct DiskFingerprint: Equatable {
+        var exists: Bool
+        var modificationDate: Date?
+        var fileSize: Int?
+    }
+
+    private enum PersistMode {
+        case immediate
+        case deferredTouch
     }
 
     private struct MemoryCandidate {
@@ -56,6 +67,12 @@ final class LocalMemoryProvider {
 
     private let memoryURL: URL
     private var memories: [AgentMemory] = []
+    private var memoryTermsByID: [UUID: Set<String>] = [:]
+    private var memoryTagTermsByID: [UUID: Set<String>] = [:]
+    private var loadedFingerprint: DiskFingerprint?
+    private let writeQueue = DispatchQueue(label: "com.hercules.local-memory.write", qos: .utility)
+    private var pendingWriteWorkItem: DispatchWorkItem?
+    private var writeSequence = 0
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -76,6 +93,7 @@ final class LocalMemoryProvider {
     }
 
     func reloadFromDisk() {
+        cancelDeferredWrite()
         load()
         if pruneExpiredMemories() {
             persist()
@@ -83,7 +101,10 @@ final class LocalMemoryProvider {
     }
 
     func search(query: String, topK: Int) -> [AgentMemory] {
-        reloadFromDisk()
+        refreshFromDiskIfChanged()
+        if pruneExpiredMemories() {
+            persist()
+        }
         let queryTerms = Set(Self.tokens(query))
         guard !queryTerms.isEmpty else { return [] }
 
@@ -91,9 +112,10 @@ final class LocalMemoryProvider {
         let scored = memories
             .filter { !Self.isExpired($0, now: now) }
             .map { memory -> (memory: AgentMemory, score: Double) in
-                let memoryTerms = Set(Self.tokens(memory.content + " " + memory.tags.joined(separator: " ")))
+                let memoryTerms = memoryTermsByID[memory.id] ?? Set(Self.tokens(memory.content + " " + memory.tags.joined(separator: " ")))
+                let tagTerms = memoryTagTermsByID[memory.id] ?? Set(memory.tags.flatMap(Self.tokens))
                 let overlap = queryTerms.intersection(memoryTerms)
-                let tagOverlap = queryTerms.intersection(Set(memory.tags.flatMap(Self.tokens)))
+                let tagOverlap = queryTerms.intersection(tagTerms)
                 let recencyDays = max(0, now.timeIntervalSince(memory.lastSeenAt) / 86_400)
                 let recency = 1.0 / (1.0 + min(recencyDays, 60))
                 let score = Double(overlap.count) * 2.0
@@ -117,7 +139,7 @@ final class LocalMemoryProvider {
     }
 
     func allMemories() -> [AgentMemory] {
-        reloadFromDisk()
+        refreshFromDiskIfChanged()
         if pruneExpiredMemories() {
             persist()
         }
@@ -130,11 +152,14 @@ final class LocalMemoryProvider {
     }
 
     func deleteMemory(id: UUID) {
+        refreshFromDiskIfChanged()
         memories.removeAll { $0.id == id }
+        rebuildSearchIndex()
         persist()
     }
 
     func setPinned(id: UUID, pinned: Bool) {
+        refreshFromDiskIfChanged()
         guard let idx = memories.firstIndex(where: { $0.id == id }) else { return }
         memories[idx].pinned = pinned
         memories[idx].updatedAt = .now
@@ -143,6 +168,7 @@ final class LocalMemoryProvider {
     }
 
     func updateMemory(id: UUID, content: String, tags: [String]) {
+        refreshFromDiskIfChanged()
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let idx = memories.firstIndex(where: { $0.id == id })
@@ -153,6 +179,7 @@ final class LocalMemoryProvider {
         memories[idx].confidence = max(memories[idx].confidence, 0.9)
         memories[idx].updatedAt = .now
         memories[idx].lastSeenAt = .now
+        rebuildSearchIndex()
         persist()
     }
 
@@ -171,6 +198,7 @@ final class LocalMemoryProvider {
 
     @discardableResult
     func absorbConversation(userText: String, assistantText: String) -> Int {
+        refreshFromDiskIfChanged()
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 0 }
 
@@ -195,7 +223,7 @@ final class LocalMemoryProvider {
 
         var stored = 0
         for candidate in Self.deduplicated(candidates) {
-            remember(
+            _ = upsertMemory(
                 content: candidate.content,
                 tags: candidate.tags,
                 source: candidate.source,
@@ -203,6 +231,10 @@ final class LocalMemoryProvider {
                 pinned: candidate.pinned
             )
             stored += 1
+        }
+        if stored > 0 {
+            rebuildSearchIndex()
+            persist()
         }
 
         return stored
@@ -229,6 +261,28 @@ final class LocalMemoryProvider {
         expiresAt: Date? = nil,
         pinned: Bool = false
     ) -> AgentMemory {
+        refreshFromDiskIfChanged()
+        let memory = upsertMemory(
+            content: content,
+            tags: tags,
+            source: source,
+            confidence: confidence,
+            expiresAt: expiresAt,
+            pinned: pinned
+        )
+        rebuildSearchIndex()
+        persist()
+        return memory
+    }
+
+    private func upsertMemory(
+        content: String,
+        tags: [String],
+        source: String,
+        confidence: Double,
+        expiresAt: Date? = nil,
+        pinned: Bool = false
+    ) -> AgentMemory {
         let normalizedContent = Self.normalizeMemory(content)
         let normalizedTags = Self.normalizedTags(tags)
 
@@ -244,7 +298,6 @@ final class LocalMemoryProvider {
             } else if memories[idx].expiresAt == nil {
                 memories[idx].expiresAt = expiresAt
             }
-            persist()
             return memories[idx]
         }
 
@@ -257,7 +310,6 @@ final class LocalMemoryProvider {
             pinned: pinned
         )
         memories.append(memory)
-        persist()
         return memory
     }
 
@@ -512,10 +564,11 @@ final class LocalMemoryProvider {
     private func touch(_ selected: [AgentMemory]) {
         guard !selected.isEmpty else { return }
         let ids = Set(selected.map(\.id))
+        let now = Date()
         for idx in memories.indices where ids.contains(memories[idx].id) {
-            memories[idx].lastSeenAt = .now
+            memories[idx].lastSeenAt = now
         }
-        persist()
+        persist(.deferredTouch)
     }
 
     private static func makeMemoryURL() -> URL {
@@ -533,19 +586,35 @@ final class LocalMemoryProvider {
         return dir.appendingPathComponent("agent-memory.json")
     }
 
+    private func refreshFromDiskIfChanged() {
+        guard pendingWriteWorkItem == nil else { return }
+        let fingerprint = Self.diskFingerprint(for: memoryURL)
+        guard fingerprint != loadedFingerprint else { return }
+        load()
+        if pruneExpiredMemories() {
+            persist()
+        }
+    }
+
     private func load() {
+        let fingerprint = Self.diskFingerprint(for: memoryURL)
         guard let data = try? Data(contentsOf: memoryURL) else {
             memories = []
+            loadedFingerprint = fingerprint
+            rebuildSearchIndex()
             return
         }
 
         do {
             let payload = try Self.decoder.decode(MemoryPayload.self, from: data)
             memories = Self.deduplicated(payload.memories)
+            loadedFingerprint = fingerprint
         } catch {
             Self.backupUnreadableFile(at: memoryURL)
             memories = []
+            loadedFingerprint = fingerprint
         }
+        rebuildSearchIndex()
     }
 
     @discardableResult
@@ -553,19 +622,87 @@ final class LocalMemoryProvider {
         let now = Date()
         let before = memories.count
         memories.removeAll { Self.isExpired($0, now: now) }
-        return before != memories.count
+        let changed = before != memories.count
+        if changed {
+            rebuildSearchIndex()
+        }
+        return changed
     }
 
-    private func persist() {
-        if memories.isEmpty {
-            try? FileManager.default.removeItem(at: memoryURL)
+    private func persist(_ mode: PersistMode = .immediate) {
+        let payload = memories.isEmpty ? nil : MemoryPayload(version: 1, savedAt: .now, memories: memories)
+        writeSequence += 1
+        let sequence = writeSequence
+        pendingWriteWorkItem?.cancel()
+        pendingWriteWorkItem = nil
+
+        switch mode {
+        case .immediate:
+            writeQueue.sync {
+                Self.write(payload: payload, to: memoryURL)
+            }
+            loadedFingerprint = Self.diskFingerprint(for: memoryURL)
+        case .deferredTouch:
+            let url = memoryURL
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self, self.writeSequence == sequence else { return }
+                Self.write(payload: payload, to: url)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.writeSequence == sequence else { return }
+                    self.pendingWriteWorkItem = nil
+                    self.loadedFingerprint = Self.diskFingerprint(for: self.memoryURL)
+                }
+            }
+            pendingWriteWorkItem = workItem
+            writeQueue.async(execute: workItem)
+        }
+        postLocalMemoryChanged()
+    }
+
+    private func postLocalMemoryChanged() {
+        if Thread.isMainThread {
             NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
+        } else {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
+            }
+        }
+    }
+
+    private func cancelDeferredWrite() {
+        pendingWriteWorkItem?.cancel()
+        pendingWriteWorkItem = nil
+        writeSequence += 1
+    }
+
+    private func rebuildSearchIndex() {
+        memoryTermsByID = Dictionary(uniqueKeysWithValues: memories.map { memory in
+            (memory.id, Set(Self.tokens(memory.content + " " + memory.tags.joined(separator: " "))))
+        })
+        memoryTagTermsByID = Dictionary(uniqueKeysWithValues: memories.map { memory in
+            (memory.id, Set(memory.tags.flatMap(Self.tokens)))
+        })
+    }
+
+    private static func write(payload: MemoryPayload?, to url: URL) {
+        guard let payload else {
+            try? FileManager.default.removeItem(at: url)
             return
         }
-        let payload = MemoryPayload(version: 1, savedAt: .now, memories: memories)
-        guard let data = try? Self.encoder.encode(payload) else { return }
-        try? data.write(to: memoryURL, options: [.atomic])
-        NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
+        guard let data = try? encoder.encode(payload) else { return }
+        try? data.write(to: url, options: [.atomic])
+    }
+
+    private static func diskFingerprint(for url: URL) -> DiskFingerprint {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return DiskFingerprint(exists: false, modificationDate: nil, fileSize: nil)
+        }
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        return DiskFingerprint(
+            exists: true,
+            modificationDate: values?.contentModificationDate,
+            fileSize: values?.fileSize
+        )
     }
 
     private static func isExpired(_ memory: AgentMemory, now: Date) -> Bool {

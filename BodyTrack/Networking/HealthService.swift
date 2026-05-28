@@ -259,13 +259,26 @@ final class ShortcutHealthSyncService {
             incomingByDay[calendar.startOfDay(for: record.date)] = record
         }
 
-        let existing = (try? ctx.fetch(FetchDescriptor<StepEntry>())) ?? []
+        guard let firstDay = incomingByDay.keys.min(),
+              let lastDay = incomingByDay.keys.max(),
+              let rangeEnd = calendar.date(byAdding: .day, value: 1, to: lastDay)
+        else { return 0 }
+
+        let descriptor = FetchDescriptor<StepEntry>(
+            predicate: #Predicate<StepEntry> { entry in
+                entry.date >= firstDay && entry.date < rangeEnd
+            },
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        let existing = (try? ctx.fetch(descriptor)) ?? []
+        var existingByDay: [Date: [StepEntry]] = [:]
+        for entry in existing {
+            existingByDay[calendar.startOfDay(for: entry.date), default: []].append(entry)
+        }
         var changedDays = 0
 
         for (day, record) in incomingByDay {
-            let sameDay = existing
-                .filter { calendar.isDate($0.date, inSameDayAs: day) }
-                .sorted { $0.date > $1.date }
+            let sameDay = existingByDay[day] ?? []
 
             let entry = sameDay.first ?? StepEntry(date: day, source: "shortcuts")
             if sameDay.isEmpty {

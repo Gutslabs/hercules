@@ -39,6 +39,9 @@ struct MobileRootView: View {
     @State private var measurementWeight = ""
     @State private var measurementBodyFat = ""
     @State private var measurementWaist = ""
+    @State private var measurementChest = ""
+    @State private var measurementNeck = ""
+    @State private var measurementFullCheckIn = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -73,7 +76,7 @@ struct MobileRootView: View {
         }
         .sheet(isPresented: $showAddMeasurement) {
             measurementForm
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
         }
         .onAppear {
             restoreIfNewer()
@@ -245,6 +248,7 @@ struct MobileRootView: View {
                 seedMeasurementForm()
                 showAddMeasurement = true
             }
+            measurementCadenceCard
             latestMeasurementCard
             MobileCard {
                 VStack(alignment: .leading, spacing: 12) {
@@ -260,6 +264,45 @@ struct MobileRootView: View {
                 }
             }
         }
+    }
+
+    private var measurementCadenceCard: some View {
+        let isFullDay = MeasurementCadence.isFullCheckInDay()
+        let hasThisWeekFull = MeasurementCadence.hasFullCheckInThisWeek(measurements)
+        let nextFull = MeasurementCadence.nextFullCheckIn()
+
+        return MobileCard {
+            HStack(alignment: .top, spacing: 12) {
+                icon(isFullDay ? "ruler.fill" : "calendar.badge.clock", color: isFullDay ? Palette.accent : Palette.textSecondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(isFullDay ? "Bugün tam ölçüm günü" : "Cumartesi tam ölçüm")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(mobileMeasurementCadenceText(isFullDay: isFullDay, hasThisWeekFull: hasThisWeekFull, nextFull: nextFull))
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    seedMeasurementForm(forceFull: true)
+                    showAddMeasurement = true
+                } label: {
+                    Text("Tam")
+                        .font(Typography.captionBold)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func mobileMeasurementCadenceText(isFullDay: Bool, hasThisWeekFull: Bool, nextFull: Date) -> String {
+        if isFullDay {
+            return hasThisWeekFull
+                ? "Bu haftanın tam ölçümü girilmiş. Gerekirse yeni tam ölçümle düzelt."
+                : "Kilo dışında yağ %, bel, göğüs ve boyun da gir."
+        }
+        return "Bugün hızlı tartı yeterli. Sıradaki tam ölçüm: \(Fmt.dateLong.string(from: nextFull))."
     }
 
     private var syncPage: some View {
@@ -561,6 +604,13 @@ struct MobileRootView: View {
                         metric("Yağ", value: measurement.bodyFat.map { Fmt.num($0, digits: 1) } ?? "-", unit: "%")
                         metric("Bel", value: measurement.waist.map { Fmt.num($0, digits: 1) } ?? "-", unit: "cm")
                     }
+                    if measurement.isFullCheckIn {
+                        HStack(spacing: 10) {
+                            metric("Göğüs", value: measurement.chest.map { Fmt.num($0, digits: 1) } ?? "-", unit: "cm")
+                            metric("Boyun", value: measurement.neck.map { Fmt.num($0, digits: 1) } ?? "-", unit: "cm")
+                            metric("Tip", value: "Tam", unit: "")
+                        }
+                    }
                 } else {
                     emptyText("Ölçüm kaydı yok.")
                 }
@@ -693,25 +743,53 @@ struct MobileRootView: View {
     private var measurementForm: some View {
         NavigationStack {
             Form {
-                TextField("Kilo", text: $measurementWeight)
-                    .keyboardType(.decimalPad)
-                TextField("Yağ %", text: $measurementBodyFat)
-                    .keyboardType(.decimalPad)
-                TextField("Bel", text: $measurementWaist)
-                    .keyboardType(.decimalPad)
+                Section("Mod") {
+                    Toggle("Tam ölçüm", isOn: $measurementFullCheckIn)
+                    Text(measurementFullCheckIn ? "Kilo + yağ + bel + göğüs + boyun. Cumartesi ana takip kaydı." : "Günlük hızlı tartı. Sadece kilo girmen yeterli.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+
+                Section("Tartı") {
+                    TextField("Kilo", text: $measurementWeight)
+                        .keyboardType(.decimalPad)
+                }
+
+                if measurementFullCheckIn {
+                    Section("Tam ölçüm") {
+                        TextField("Yağ %", text: $measurementBodyFat)
+                            .keyboardType(.decimalPad)
+                        TextField("Bel", text: $measurementWaist)
+                            .keyboardType(.decimalPad)
+                        TextField("Göğüs", text: $measurementChest)
+                            .keyboardType(.decimalPad)
+                        TextField("Boyun", text: $measurementNeck)
+                            .keyboardType(.decimalPad)
+                    }
+                }
             }
-            .navigationTitle("Ölçüm Ekle")
+            .navigationTitle(measurementFullCheckIn ? "Tam Ölçüm" : "Tartı Ekle")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Kapat") { showAddMeasurement = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Kaydet") { addMeasurement() }
-                        .disabled(number(measurementWeight) == nil && number(measurementBodyFat) == nil && number(measurementWaist) == nil)
+                        .disabled(!measurementFormHasValue)
                 }
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var measurementFormHasValue: Bool {
+        number(measurementWeight) != nil
+            || (measurementFullCheckIn && (
+                number(measurementBodyFat) != nil
+                    || number(measurementWaist) != nil
+                    || number(measurementChest) != nil
+                    || number(measurementNeck) != nil
+            ))
     }
 
     private func sectionHeader(_ title: String, action: String, systemImage: String, perform: @escaping () -> Void) -> some View {
@@ -892,21 +970,43 @@ struct MobileRootView: View {
     }
 
     private func measurementRow(_ measurement: Measurement) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(measurement.date, style: .date)
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textPrimary)
-                Text(measurement.date, style: .time)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(measurement.date, style: .date)
+                            .font(Typography.bodyBold)
+                            .foregroundStyle(Palette.textPrimary)
+                        Text(measurement.isFullCheckIn ? "Tam" : "Tartı")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(measurement.isFullCheckIn ? Palette.accent : Palette.textTertiary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill((measurement.isFullCheckIn ? Palette.accent : Color.white).opacity(0.12)))
+                    }
+                    Text(measurement.date, style: .time)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                Spacer()
+                Text(measurement.weight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "-")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
             }
-            Spacer()
-            Text(measurement.weight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "-")
-                .font(Typography.captionBold)
-                .foregroundStyle(Palette.textSecondary)
+
+            if measurement.isFullCheckIn {
+                Text([
+                    measurement.bodyFat.map { "Yağ \(Fmt.num($0, digits: 1))%" },
+                    measurement.waist.map { "Bel \(Fmt.num($0, digits: 1)) cm" },
+                    measurement.chest.map { "Göğüs \(Fmt.num($0, digits: 1)) cm" },
+                    measurement.neck.map { "Boyun \(Fmt.num($0, digits: 1)) cm" }
+                ].compactMap { $0 }.joined(separator: " · "))
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(2)
+            }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 5)
     }
 
     private func metric(_ label: String, value: String, unit: String) -> some View {
@@ -1141,11 +1241,18 @@ struct MobileRootView: View {
         let latestWeight = measurements.first?.weight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "yok"
         let latestBodyFat = measurements.first?.bodyFat.map { "\(Fmt.num($0, digits: 1))%" } ?? "yok"
         let target = profile?.targetWeight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "yok"
+        let supplements = profile?.effectiveSupplements
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " + ")
+        let supplementLine = supplements?.isEmpty == false ? (supplements ?? "yok") : "yok"
         let todaySummary = "\(Fmt.int(todayCalories)) kcal, \(Fmt.int(todayProtein))g protein"
         return """
         MOBIL FOOD AI CONTEXT:
         - Bu istek sadece yemek/makro tahmini icin. App action üretme.
         - Kullanici hedefi: \(profile?.goal.label ?? "bilinmiyor"), hedef kilo: \(target)
+        - Kullanici supplementleri: \(supplementLine)
         - Son kilo: \(latestWeight), son yag orani: \(latestBodyFat)
         - Bugun simdiye kadar: \(todaySummary)
         - Çiğ/pişmiş ayrımına dikkat et. Kullanıcı pişmiş diyorsa pişmiş değerleri kullan.
@@ -1200,21 +1307,27 @@ struct MobileRootView: View {
         return "AI hata: \(message)"
     }
 
-    private func seedMeasurementForm() {
+    private func seedMeasurementForm(forceFull: Bool = false) {
+        let shouldOpenFull = forceFull || MeasurementCadence.isFullCheckInDay()
+        let latestFull = measurements.first(where: \.isFullCheckIn)
+
         measurementWeight = measurements.first?.weight.map { Fmt.num($0, digits: 1) } ?? ""
-        measurementBodyFat = measurements.first?.bodyFat.map { Fmt.num($0, digits: 1) } ?? ""
-        measurementWaist = measurements.first?.waist.map { Fmt.num($0, digits: 1) } ?? ""
+        measurementFullCheckIn = shouldOpenFull
+        measurementBodyFat = shouldOpenFull ? (latestFull?.bodyFat.map { Fmt.num($0, digits: 1) } ?? "") : ""
+        measurementWaist = shouldOpenFull ? (latestFull?.waist.map { Fmt.num($0, digits: 1) } ?? "") : ""
+        measurementChest = shouldOpenFull ? (latestFull?.chest.map { Fmt.num($0, digits: 1) } ?? "") : ""
+        measurementNeck = shouldOpenFull ? (latestFull?.neck.map { Fmt.num($0, digits: 1) } ?? "") : ""
     }
 
     private func addMeasurement() {
         ctx.insert(Measurement(
             date: .now,
             weight: number(measurementWeight),
-            bodyFat: number(measurementBodyFat),
-            waist: number(measurementWaist),
-            chest: nil,
-            neck: nil,
-            note: nil
+            bodyFat: measurementFullCheckIn ? number(measurementBodyFat) : nil,
+            waist: measurementFullCheckIn ? number(measurementWaist) : nil,
+            chest: measurementFullCheckIn ? number(measurementChest) : nil,
+            neck: measurementFullCheckIn ? number(measurementNeck) : nil,
+            note: measurementFullCheckIn ? "Haftalık tam ölçüm" : nil
         ))
         try? ctx.save()
         BackupService.shared.exportAsync(from: ctx)

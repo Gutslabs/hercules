@@ -29,6 +29,10 @@ enum CalorieCalculator {
         activity: ActivityLevel,
         goal: Goal,
         manualOffset: Double = 0,
+        manualOffsetMacro: CalorieOffsetMacro = .carbs,
+        manualProteinGrams: Double? = nil,
+        manualCarbsGrams: Double? = nil,
+        manualFatGrams: Double? = nil,
         workoutCalories: Double = 0,
         stepCalories: Double = 0
     ) -> CalorieResult {
@@ -48,20 +52,28 @@ enum CalorieCalculator {
         }
 
         let tdee = bmr * activity.multiplier
-        // Antrenman kalorileri hedefe eklenmez; günlük plan sabit kalır.
-        // Adım kalorisi düşük yoğunluklu günlük hareket bütçesi olarak ayrı tutulur.
-        let goalCalories = max(1200, tdee + goal.calorieAdjustment + manualOffset + stepCalories)
+        // Günlük hedefin tek kaynağı profildir. Antrenman/adım yakımı bilgi olarak
+        // gösterilebilir, ama hedef kaloriyi otomatik şişirmez.
+        _ = workoutCalories
+        _ = stepCalories
+        _ = manualOffset
+        _ = manualOffsetMacro
+        let baseGoalCalories = max(1200, tdee + goal.calorieAdjustment)
 
-        let proteinGrams = lbm * 2.2
+        let automaticProteinGrams = lbm * 2.2
+        let automaticFatGrams = (baseGoalCalories * 0.25) / 9.0
+        let automaticCarbsGrams = max(0, baseGoalCalories - (automaticProteinGrams * 4.0) - (automaticFatGrams * 9.0)) / 4.0
+
+        let proteinGrams = max(0, manualProteinGrams ?? automaticProteinGrams)
+        let fatGrams = max(0, manualFatGrams ?? automaticFatGrams)
+        let carbsGrams = max(0, manualCarbsGrams ?? automaticCarbsGrams)
         let proteinCals = proteinGrams * 4.0
+        let fatCals = fatGrams * 9.0
+        let carbsCals = carbsGrams * 4.0
+        let hasManualMacroTargets = manualProteinGrams != nil || manualCarbsGrams != nil || manualFatGrams != nil
+        let goalCalories = hasManualMacroTargets ? max(1, proteinCals + carbsCals + fatCals) : baseGoalCalories
 
-        let fatCals = goalCalories * 0.25
-        let fatGrams = fatCals / 9.0
-
-        let carbsCals = max(0, goalCalories - proteinCals - fatCals)
-        let carbsGrams = carbsCals / 4.0
-
-        let total = goalCalories
+        let total = max(goalCalories, 1)
         let protein = Macro(
             grams: proteinGrams,
             calories: proteinCals,

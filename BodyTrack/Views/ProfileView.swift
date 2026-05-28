@@ -18,11 +18,17 @@ struct ProfileView: View {
     @State private var targetWeight: Double? = nil
     @State private var manualBodyFat: Double? = nil
     @State private var about: String = ""
+    @State private var supplements: String = UserProfile.defaultSupplements
     @State private var manualCalorieOffset: Double = 0
+    @State private var manualCalorieOffsetMacro: CalorieOffsetMacro = .carbs
+    @State private var manualProteinGrams: Double? = nil
+    @State private var manualCarbsGrams: Double? = nil
+    @State private var manualFatGrams: Double? = nil
 
     @State private var saved = false
     @State private var hasInitialized = false
     @State private var autosaveTask: Task<Void, Never>? = nil
+    @State private var revealContent = false
 
     private var latest: Measurement? { measurements.first }
     private var ageYears: Int {
@@ -35,24 +41,50 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                profileActions
-                hero
-                identityCard
-                aboutCard
-                activityGoalCards
-                calorieGoalCard
-                HealthKitCard()
-                AIProviderCard()
-                BackupCard()
-                Spacer(minLength: 24)
+        GeometryReader { proxy in
+            let compact = proxy.size.width < 980
+            let horizontalPadding = compact ? Spacing.xl : Spacing.xxl
+            let availableWidth = max(0, proxy.size.width - (horizontalPadding * 2))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: compact ? Spacing.xl : Spacing.xxl) {
+                    profileActions(compact: compact)
+                        .profileReveal(revealContent, delay: 0.02)
+                    profileMosaic(compact: compact, availableWidth: availableWidth)
+                        .profileReveal(revealContent, delay: 0.08)
+                    integrationsSection(compact: compact)
+                        .profileReveal(revealContent, delay: 0.14)
+                    Spacer(minLength: 24)
+                }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, compact ? Spacing.xl : Spacing.xxl)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(Spacing.xxl)
         }
-        .background(Palette.background.ignoresSafeArea())
-        .onAppear { initializeFromProfile() }
+        .background(profileBackground)
+        .onAppear {
+            initializeFromProfile()
+            revealContent = true
+        }
         .onChange(of: about) { _, _ in
+            scheduleAutosave()
+        }
+        .onChange(of: supplements) { _, _ in
+            scheduleAutosave()
+        }
+        .onChange(of: manualCalorieOffset) { _, _ in
+            scheduleAutosave()
+        }
+        .onChange(of: manualCalorieOffsetMacro) { _, _ in
+            scheduleAutosave()
+        }
+        .onChange(of: manualProteinGrams) { _, _ in
+            scheduleAutosave()
+        }
+        .onChange(of: manualCarbsGrams) { _, _ in
+            scheduleAutosave()
+        }
+        .onChange(of: manualFatGrams) { _, _ in
             scheduleAutosave()
         }
         .onDisappear {
@@ -61,141 +93,223 @@ struct ProfileView: View {
         }
     }
 
-    private var profileActions: some View {
-        HStack {
-            Spacer()
-            Button { save() } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: saved ? "checkmark.circle.fill" : "checkmark")
-                        .font(.system(size: 12, weight: .semibold))
-                        .symbolEffect(.bounce, value: saved)
-                    Text(saved ? "Kaydedildi" : "Kaydet")
-                        .font(Typography.bodyBold)
-                }
-                .foregroundStyle(saved ? Palette.positive : Palette.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Palette.surfaceElevated)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .strokeBorder(saved ? Palette.positive.opacity(0.45) : Palette.border, lineWidth: 0.5)
-                )
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut("s", modifiers: .command)
-            .help("Profili kaydet (⌘S)")
+    private var profileBackground: some View {
+        ZStack(alignment: .topLeading) {
+            Palette.background.ignoresSafeArea()
+            LinearGradient(
+                colors: [
+                    Palette.surfaceElevated.opacity(0.48),
+                    Palette.background.opacity(0.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .center
+            )
+            .ignoresSafeArea()
+            ProfileBackgroundLines()
+                .stroke(Palette.borderStrong.opacity(0.42), lineWidth: 0.6)
+                .frame(width: 620, height: 340)
+                .offset(x: -92, y: -48)
+                .allowsHitTesting(false)
         }
     }
 
-    /// Kimlik kartı — hero ile tutarlı görünüm, custom Card.
-    private var identityCard: some View {
-        Card(padding: Spacing.lg) {
+    private func profileActions(compact: Bool) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: Spacing.md) {
+                profileTitleBlock
+                Spacer(minLength: Spacing.lg)
+                saveButton
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Kimlik").eyebrow()
-                profileRow(label: "Doğum tarihi") {
-                    DatePicker("", selection: $birthDate, in: ...Date(), displayedComponents: .date)
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                        .controlSize(.small)
-                }
-                Hairline()
-                profileRow(label: "Boy") {
-                    HStack(spacing: 4) {
-                        TextField("", value: $height, format: .number)
-                            .textFieldStyle(.plain)
-                            .multilineTextAlignment(.trailing)
-                            .font(Typography.mono)
-                            .foregroundStyle(Palette.textPrimary)
-                            .frame(width: 60)
-                        Text("cm")
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                }
-                Hairline()
-                profileRow(label: "Hedef ağırlık") {
-                    HStack(spacing: 4) {
-                        TextField("opsiyonel", value: $targetWeight, format: .number)
-                            .textFieldStyle(.plain)
-                            .multilineTextAlignment(.trailing)
-                            .font(Typography.mono)
-                            .foregroundStyle(Palette.textPrimary)
-                            .frame(width: 60)
-                        Text("kg")
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                }
-                Hairline()
-                profileRow(label: "Manuel yağ %") {
-                    HStack(spacing: 4) {
-                        TextField(
-                            latest?.bodyFat.map { "ölçüm: \(Fmt.num($0, digits: 1))" } ?? "opsiyonel",
-                            value: $manualBodyFat,
-                            format: .number
-                        )
-                        .textFieldStyle(.plain)
-                        .multilineTextAlignment(.trailing)
-                        .font(Typography.mono)
-                        .foregroundStyle(Palette.textPrimary)
-                        .frame(width: 60)
-                        Text("%")
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                }
+                profileTitleBlock
+                saveButton
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func profileRow<Trailing: View>(label: String, @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack {
-            Text(label)
+    private var profileTitleBlock: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                ProfileBreathingStatusDot(color: calorieResult == nil ? Palette.warning : Palette.positive)
+                Text(calorieResult == nil ? "Profil kurulumu bekliyor" : "Profil canlı")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+            Text("Profil")
+                .font(Typography.display(44))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Text("Kimlik, hedef ve AI hafızası tek yerde; bu sayfa günlük planın kaynak ayarı gibi çalışır.")
                 .font(Typography.body)
                 .foregroundStyle(Palette.textSecondary)
-            Spacer()
-            trailing()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 560, alignment: .leading)
         }
-        .frame(minHeight: 28)
     }
 
-    /// Aktivite + Hedef seçim kartları — yan yana.
-    private var activityGoalCards: some View {
-        HStack(alignment: .top, spacing: Spacing.md) {
-            Card(padding: Spacing.lg) {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("Aktivite").eyebrow()
-                    Picker("", selection: $activity) {
-                        ForEach(ActivityLevel.allCases) {
-                            Text("\($0.label) · ×\(Fmt.num($0.multiplier, digits: 2))").tag($0)
-                        }
+    private var saveButton: some View {
+        Button { save() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: saved ? "checkmark.circle.fill" : "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .symbolEffect(.bounce, value: saved)
+                Text(saved ? "Kaydedildi" : "Kaydet")
+                    .font(Typography.bodyBold)
+            }
+            .foregroundStyle(saved ? Palette.positive : Palette.background)
+            .padding(.horizontal, 15)
+            .padding(.vertical, 10)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(saved ? Palette.positive.opacity(0.14) : Palette.accent)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(saved ? Palette.positive.opacity(0.5) : Color.white.opacity(0.10), lineWidth: 0.6)
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(ProfilePressButtonStyle())
+        .keyboardShortcut("s", modifiers: .command)
+        .help("Profili kaydet (⌘S)")
+    }
+
+    @ViewBuilder
+    private func profileMosaic(compact: Bool, availableWidth: CGFloat) -> some View {
+        if compact {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                hero
+                identityCard
+                activityGoalCards
+                aboutCard
+                supplementsCard
+                calorieGoalCard
+                HealthKitCard()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            let sideWidth = min(max(availableWidth * 0.30, 360), 520)
+            let planWidth = min(max(availableWidth * 0.36, 500), 680)
+
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    hero
+                        .frame(maxWidth: .infinity, minHeight: 330)
+                        .layoutPriority(1)
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        identityCard
+                        activityGoalCards
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    Text(activity.detail)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: sideWidth)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        aboutCard
+                        supplementsCard
+                        HealthKitCard()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .layoutPriority(1)
+                    calorieGoalCard
+                        .frame(width: planWidth)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func integrationsSection(compact: Bool) -> some View {
+        if compact {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                AIProviderCard()
+                BackupCard()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 420), spacing: Spacing.md, alignment: .top)],
+                alignment: .leading,
+                spacing: Spacing.md
+            ) {
+                AIProviderCard()
+                BackupCard()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var identityCard: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Kimlik").eyebrow()
+                    Text("Temel veriler")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                }
+                Spacer()
+                Text("\(ageYears) yaş")
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 142), spacing: Spacing.md, alignment: .top)],
+                alignment: .leading,
+                spacing: Spacing.md
+            ) {
+                inputTile(label: "Doğum", icon: "calendar") {
+                    DatePicker("", selection: $birthDate, in: ...Date(), displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .colorScheme(.dark)
+                }
+                inputTile(label: "Boy", icon: "ruler") {
+                    NumberField(value: .init(get: { height }, set: { height = $0 ?? 178 }), unit: "cm", digits: 0)
+                }
+                inputTile(label: "Hedef", icon: "target") {
+                    NumberField(value: $targetWeight, unit: "kg", digits: 0, placeholder: "opsiyonel")
+                }
+                inputTile(label: "Yağ", icon: "drop") {
+                    NumberField(
+                        value: $manualBodyFat,
+                        unit: "%",
+                        digits: 1,
+                        placeholder: latest?.bodyFat.map { "ölçüm \(Fmt.num($0, digits: 1))" } ?? "opsiyonel"
+                    )
                 }
             }
-            Card(padding: Spacing.lg) {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("Hedef").eyebrow()
-                    Picker("", selection: $goal) {
-                        ForEach(Goal.allCases) {
-                            Text("\($0.label) · \($0.detail)").tag($0)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    Text(goal.detail)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+
+            if latest == nil && targetWeight == nil {
+                ProfileNudgeRow(
+                    icon: "scalemass",
+                    title: "Kalori hesabı için ağırlık gerekli",
+                    detail: "Ölçüm ekle veya hedef ağırlık alanını doldur."
+                )
+            }
+        }
+        .padding(Spacing.lg)
+        .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
+    }
+
+    private var activityGoalCards: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                ActivityPicker(selection: $activity)
+                GoalPicker(selection: $goal)
+            }
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                ActivityPicker(selection: $activity)
+                GoalPicker(selection: $goal)
             }
         }
     }
@@ -203,67 +317,223 @@ struct ProfileView: View {
     /// Hakkında — kullanıcının kendi geçmişini özetlediği, AI'ya her sohbette
     /// kalıcı context olarak verilen serbest metin.
     private var aboutCard: some View {
-        Card(padding: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack {
-                    HStack(spacing: 5) {
-                        Image(systemName: "person.text.rectangle")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Palette.accent)
-                        Text("Hakkında").eyebrow()
-                    }
-                    Spacer()
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Profilim").eyebrow()
+                    Text("Hakkımda")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: about.isEmpty ? "text.badge.plus" : "checkmark.seal")
+                        .font(.system(size: 10, weight: .semibold))
                     Text(aboutCharCount)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textQuaternary)
+                        .font(Typography.captionBold)
                         .contentTransition(.numericText())
                 }
-                Text("Burada kendinden bahset — kimsin, geçmişin ne, hedefin ne. AI bu metni HER sohbette görür ve sana göre cevap verir. Metin içinde `@Ölçümler`, `@Antrenman` gibi etiket yazarsan o veri de her sohbette inject olur.")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                TextEditor(text: $about)
-                    .scrollContentBackground(.hidden)
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textPrimary)
-                    .frame(minHeight: 140)
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Palette.surfaceElevated)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .strokeBorder(Palette.border, lineWidth: 0.5)
-                    )
-                    .overlay(alignment: .topLeading) {
-                        if about.isEmpty {
-                            Text("ör: 28 yaşındayım, 13 yaşımdan beri kilo problemim var. 16'da 120 kg'dan spora başladım. 22'de 82 kg'a düştüm ama skinny fat'tım. Şimdi 25 yaşında, 88 kg, kas kütlemi koruyarak yağdan kilo vermeye odaklanıyorum.")
-                                .font(Typography.body)
-                                .foregroundStyle(Palette.textQuaternary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 16)
-                                .allowsHitTesting(false)
-                        }
+                .foregroundStyle(about.isEmpty ? Palette.textTertiary : Palette.positive)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill((about.isEmpty ? Palette.textSecondary : Palette.positive).opacity(0.10))
+                )
+            }
+
+            Text("Geçmiş, sakatlık, rutin, beslenme tercihi ve hedeflerini yaz. @Ölçümler, @Antrenman veya @Beslenme etiketleriyle sohbet bağlamını genişletebilirsin.")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextEditor(text: $about)
+                .scrollContentBackground(.hidden)
+                .font(Typography.body)
+                .foregroundStyle(Palette.textPrimary)
+                .frame(minHeight: 178)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .fill(Palette.surfaceElevated.opacity(0.82))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .strokeBorder(Palette.border, lineWidth: 0.5)
+                )
+                .overlay(alignment: .topLeading) {
+                    if about.isEmpty {
+                        Text("ör: 28 yaşındayım, masa başı çalışıyorum, diz hassasiyetim var. Haftada 4 gün ağırlık antrenmanı yapıyorum; hedefim kas kaybetmeden yağ oranını düşürmek.")
+                            .font(Typography.body)
+                            .foregroundStyle(Palette.textQuaternary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 18)
+                            .allowsHitTesting(false)
                     }
-                if !about.isEmpty {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 9))
-                        Text("AI bu bilgiyi her sohbette görüyor")
-                            .font(Typography.caption)
-                    }
-                    .foregroundStyle(Palette.accent)
                 }
+
+            HStack(spacing: Spacing.sm) {
+                contextChip("@Ölçümler")
+                contextChip("@Antrenman")
+                contextChip("@Beslenme")
+                Spacer(minLength: 0)
             }
         }
+        .padding(Spacing.lg)
+        .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
+    }
+
+    /// Supplements — kullanıcının düzenli aldığı destekler, AI'ya kalıcı
+    /// context olarak verilen ayrı profil bilgisi.
+    private var supplementsCard: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Supplements").eyebrow()
+                    Text("Kullandıklarım")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: supplementItems.isEmpty ? "pills" : "pills.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(supplementStatus)
+                        .font(Typography.captionBold)
+                        .contentTransition(.numericText())
+                }
+                .foregroundStyle(supplementItems.isEmpty ? Palette.textTertiary : Palette.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill((supplementItems.isEmpty ? Palette.textSecondary : Palette.accent).opacity(0.10))
+                )
+            }
+
+            if !supplementItems.isEmpty {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 120), spacing: 7, alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 7
+                ) {
+                    ForEach(Array(supplementItems.enumerated()), id: \.offset) { _, item in
+                        supplementChip(item)
+                    }
+                }
+            }
+
+            TextEditor(text: $supplements)
+                .scrollContentBackground(.hidden)
+                .font(Typography.body)
+                .foregroundStyle(Palette.textPrimary)
+                .frame(minHeight: 118)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .fill(Palette.surfaceElevated.opacity(0.82))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .strokeBorder(Palette.border, lineWidth: 0.5)
+                )
+                .overlay(alignment: .topLeading) {
+                    if supplements.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Kreatin\nProtein tozu")
+                            .font(Typography.body)
+                            .foregroundStyle(Palette.textQuaternary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 18)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+            HStack(spacing: Spacing.sm) {
+                Button {
+                    supplements = UserProfile.defaultSupplements
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Kreatin + protein tozu")
+                            .font(Typography.captionBold)
+                    }
+                    .foregroundStyle(Palette.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.045))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Varsayılan supplement listesini doldur")
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(Spacing.lg)
+        .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
+    }
+
+    private var supplementItems: [String] {
+        supplements
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var supplementStatus: String {
+        let count = supplementItems.count
+        if count == 0 { return "boş" }
+        return "\(count) kayıt"
+    }
+
+    private func supplementChip(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.seal")
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(Typography.captionBold)
+                .lineLimit(1)
+        }
+        .foregroundStyle(Palette.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Palette.accent.opacity(0.10))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Palette.accent.opacity(0.28), lineWidth: 0.5)
+        )
     }
 
     private var aboutCharCount: String {
         let chars = about.count
         if chars == 0 { return "boş" }
         return "\(chars) karakter"
+    }
+
+    private func contextChip(_ text: String) -> some View {
+        Text(text)
+            .font(Typography.captionBold)
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.045))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: 0.5)
+            )
     }
 
     // MARK: - Calorie goal card (eski Kalori sayfasından merge)
@@ -281,33 +551,36 @@ struct ProfileView: View {
             bodyFat: bf,
             activity: activity,
             goal: goal,
-            manualOffset: manualCalorieOffset
+            manualOffset: manualCalorieOffset,
+            manualOffsetMacro: manualCalorieOffsetMacro,
+            manualProteinGrams: manualProteinGrams,
+            manualCarbsGrams: manualCarbsGrams,
+            manualFatGrams: manualFatGrams
         )
     }
 
     private var calorieGoalCard: some View {
-        Card(padding: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                HStack(alignment: .firstTextBaseline) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Palette.accent)
-                        Text("Günlük Kalori Hedefi").eyebrow()
-                    }
-                    Spacer()
-                    if let r = calorieResult {
-                        Text(r.formula)
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textQuaternary)
-                    }
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Günlük Plan").eyebrow()
+                    Text("Kalori ve makro hedefi")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
                 }
-
+                Spacer()
                 if let r = calorieResult {
-                    // Büyük hedef rakamı
+                    Text(r.formula)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textQuaternary)
+                }
+            }
+
+            if let r = calorieResult {
+                VStack(alignment: .leading, spacing: Spacing.md) {
                     HStack(alignment: .lastTextBaseline, spacing: 6) {
                         Text("\(Fmt.int(r.goalCalories))")
-                            .font(Typography.display(48))
+                            .font(Typography.display(52))
                             .foregroundStyle(Palette.textPrimary)
                             .contentTransition(.numericText(value: r.goalCalories))
                             .animation(.snappy, value: r.goalCalories)
@@ -316,64 +589,41 @@ struct ProfileView: View {
                             .foregroundStyle(Palette.textTertiary)
                     }
 
-                    Hairline()
-
-                    // Breakdown row: BMR, TDEE, Hedef adj, Manual offset
-                    HStack(spacing: Spacing.lg) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 104), spacing: Spacing.lg, alignment: .leading)],
+                        alignment: .leading,
+                        spacing: Spacing.md
+                    ) {
                         breakdownStat("BMR", "\(Fmt.int(r.bmr)) kcal", tint: Palette.textSecondary)
-                        Divider().frame(height: 30).background(Palette.border)
                         breakdownStat("TDEE", "\(Fmt.int(r.tdee)) kcal", tint: Palette.textSecondary)
-                        Divider().frame(height: 30).background(Palette.border)
                         breakdownStat("Hedef adj", goalAdjString, tint: goalAdjTint)
-                        if manualCalorieOffset != 0 {
-                            Divider().frame(height: 30).background(Palette.border)
-                            breakdownStat("Manuel", manualOffsetDisplay, tint: manualOffsetTint)
-                        }
-                        Spacer()
                     }
-
-                    Hairline()
-
-                    // Macro split
-                    macroRow(r)
-
-                    // Manual offset control
-                    HStack {
-                        Text("Manuel offset")
-                            .font(Typography.body)
-                            .foregroundStyle(Palette.textSecondary)
-                        Spacer()
-                        Text(manualOffsetDisplay)
-                            .font(Typography.mono)
-                            .foregroundStyle(manualOffsetTint)
-                        Stepper(
-                            "",
-                            value: $manualCalorieOffset,
-                            in: -500...500,
-                            step: 50
-                        )
-                        .labelsHidden()
-                        if manualCalorieOffset != 0 {
-                            Button("Sıfırla") { manualCalorieOffset = 0 }
-                                .buttonStyle(.borderless)
-                                .controlSize(.small)
-                        }
-                    }
-
-                    // Extras
-                    HStack(spacing: Spacing.md) {
-                        extraTile(label: "Su", value: "\(Fmt.num(r.water, digits: 1)) L", icon: "drop.fill", tint: Color(red: 0.50, green: 0.74, blue: 0.92))
-                        extraTile(label: "Lif", value: "\(Fmt.int(r.fiber)) g", icon: "leaf.fill", tint: Palette.macroCarbs)
-                        extraTile(label: "Yağsız", value: "\(Fmt.num(r.leanMass, digits: 1)) kg", icon: "figure.strengthtraining.traditional", tint: Palette.accent)
-                    }
-                } else {
-                    // Eksik veri durumu
-                    Text("Hesap için en az ağırlık verisi gerekli. Yeni ölçüm ekle veya hedef ağırlık gir.")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
+                    .padding(.top, 2)
                 }
+
+                Hairline()
+
+                macroTargetControls(r)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 126), spacing: Spacing.md, alignment: .leading)],
+                    alignment: .leading,
+                    spacing: Spacing.md
+                ) {
+                    extraTile(label: "Su", value: "\(Fmt.num(r.water, digits: 1)) L", icon: "drop.fill", tint: Color(red: 0.50, green: 0.74, blue: 0.92))
+                    extraTile(label: "Lif", value: "\(Fmt.int(r.fiber)) g", icon: "leaf.fill", tint: Palette.macroCarbs)
+                    extraTile(label: "Yağsız", value: "\(Fmt.num(r.leanMass, digits: 1)) kg", icon: "figure.strengthtraining.traditional", tint: Palette.accent)
+                }
+            } else {
+                ProfileEmptyState(
+                    icon: "flame",
+                    title: "Kalori hedefi hazır değil",
+                    detail: "En az bir ağırlık verisi gerekli. Ölçüm ekle veya hedef ağırlık alanını doldur."
+                )
             }
         }
+        .padding(Spacing.lg)
+        .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
     }
 
     private func breakdownStat(_ label: String, _ value: String, tint: Color) -> some View {
@@ -386,7 +636,11 @@ struct ProfileView: View {
     }
 
     private func macroRow(_ r: CalorieResult) -> some View {
-        HStack(spacing: Spacing.md) {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 132), spacing: Spacing.md, alignment: .leading)],
+            alignment: .leading,
+            spacing: Spacing.md
+        ) {
             macroTile(label: "Protein", grams: r.protein.grams, percent: r.protein.percent, tint: Palette.macroProtein)
             macroTile(label: "Karbonhidrat", grams: r.carbs.grams, percent: r.carbs.percent, tint: Palette.macroCarbs)
             macroTile(label: "Yağ", grams: r.fat.grams, percent: r.fat.percent, tint: Palette.macroFat)
@@ -407,7 +661,7 @@ struct ProfileView: View {
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
                 Spacer()
-                Text("%\(Fmt.int(percent * 100))")
+                Text("%\(Fmt.int(percent))")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
             }
@@ -422,6 +676,149 @@ struct ProfileView: View {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
+    }
+
+    private var hasManualMacroTargets: Bool {
+        manualProteinGrams != nil || manualCarbsGrams != nil || manualFatGrams != nil
+    }
+
+    private func macroTargetControls(_ r: CalorieResult) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Makro hedefleri").eyebrow()
+                    Text("Kalori hedefi bu üç makrodan hesaplanır.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                Spacer()
+                if hasManualMacroTargets {
+                    Button("Otomatiğe dön") {
+                        manualProteinGrams = nil
+                        manualCarbsGrams = nil
+                        manualFatGrams = nil
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                }
+            }
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 160), spacing: Spacing.md, alignment: .top)],
+                alignment: .leading,
+                spacing: Spacing.md
+            ) {
+                macroTargetStepper(
+                    label: "Protein",
+                    value: $manualProteinGrams,
+                    automatic: r.protein.grams,
+                    caloriesPerGram: 4,
+                    totalCalories: r.goalCalories,
+                    tint: Palette.macroProtein
+                )
+                macroTargetStepper(
+                    label: "Karbonhidrat",
+                    value: $manualCarbsGrams,
+                    automatic: r.carbs.grams,
+                    caloriesPerGram: 4,
+                    totalCalories: r.goalCalories,
+                    tint: Palette.macroCarbs
+                )
+                macroTargetStepper(
+                    label: "Yağ",
+                    value: $manualFatGrams,
+                    automatic: r.fat.grams,
+                    caloriesPerGram: 9,
+                    totalCalories: r.goalCalories,
+                    tint: Palette.macroFat
+                )
+            }
+        }
+    }
+
+    private func macroTargetStepper(
+        label: String,
+        value: Binding<Double?>,
+        automatic: Double,
+        caloriesPerGram: Double,
+        totalCalories: Double,
+        tint: Color
+    ) -> some View {
+        let grams = max(0, value.wrappedValue ?? automatic)
+        let calories = grams * caloriesPerGram
+        let share = totalCalories > 0 ? min(max(calories / totalCalories, 0), 1) : 0
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 5) {
+                Circle().fill(tint).frame(width: 5, height: 5)
+                Text(label).eyebrow()
+                Spacer()
+                Text("\(Fmt.int(calories)) kcal")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.055))
+                    Capsule(style: .continuous)
+                        .fill(tint)
+                        .frame(width: geo.size.width * share)
+                }
+            }
+            .frame(height: 6)
+
+            HStack(spacing: 8) {
+                macroAdjustButton(systemName: "minus", disabled: grams <= 0) {
+                    value.wrappedValue = max(0, round(grams) - 1)
+                }
+
+                HStack(alignment: .lastTextBaseline, spacing: 4) {
+                    Text("\(Fmt.int(grams))")
+                        .font(Typography.hero(24))
+                        .foregroundStyle(Palette.textPrimary)
+                        .contentTransition(.numericText(value: grams))
+                    Text("g")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .frame(maxWidth: .infinity)
+
+                macroAdjustButton(systemName: "plus", disabled: false) {
+                    value.wrappedValue = round(grams) + 1
+                }
+            }
+
+            Text(value.wrappedValue == nil ? "otomatikten başlat" : "%\(Fmt.int(share * 100))")
+                .font(Typography.caption)
+                .foregroundStyle(value.wrappedValue == nil ? Palette.textQuaternary : tint)
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+
+    private func macroAdjustButton(systemName: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(disabled ? 0.035 : 0.075))
+                Image(systemName: systemName)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(disabled ? Palette.textQuaternary : Palette.textPrimary)
+            }
+            .frame(width: 30, height: 30)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
     }
 
     private func extraTile(label: String, value: String, icon: String, tint: Color) -> some View {
@@ -466,80 +863,191 @@ struct ProfileView: View {
         return "\(manualCalorieOffset > 0 ? "+" : "")\(Fmt.int(manualCalorieOffset)) kcal"
     }
 
+    private var manualOffsetControls: some View {
+        HStack(spacing: Spacing.sm) {
+            Text(manualOffsetDisplay)
+                .font(Typography.mono)
+                .foregroundStyle(manualOffsetTint)
+                .contentTransition(.numericText(value: manualCalorieOffset))
+            Stepper(
+                "",
+                value: $manualCalorieOffset,
+                in: -500...500,
+                step: 50
+            )
+            .labelsHidden()
+            if manualCalorieOffset != 0 {
+                Button("Sıfırla") { manualCalorieOffset = 0 }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+            }
+        }
+    }
+
     private var manualOffsetTint: Color {
         if manualCalorieOffset == 0 { return Palette.textTertiary }
         return manualCalorieOffset < 0 ? Palette.positive : Palette.warning
     }
 
+    private var manualOffsetMacroTint: Color {
+        switch manualCalorieOffsetMacro {
+        case .protein: return Palette.macroProtein
+        case .carbs: return Palette.macroCarbs
+        case .fat: return Palette.macroFat
+        }
+    }
+
+    private var manualOffsetSourceDetail: String {
+        guard manualCalorieOffset != 0 else {
+            return "Offset eklenirse \(manualCalorieOffsetMacro.label.lowercased()) gramı değişir."
+        }
+        let grams = abs(manualCalorieOffset) / manualCalorieOffsetMacro.caloriesPerGram
+        let verb = manualCalorieOffset > 0 ? "eklenir" : "düşülür"
+        return "\(Fmt.int(grams)) g \(manualCalorieOffsetMacro.label.lowercased()) \(verb)."
+    }
+
     // MARK: - Hero (büyük üst kart)
 
     private var hero: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(alignment: .center, spacing: Spacing.lg) {
-                // Avatar
-                ZStack {
-                    Circle()
-                        .fill(Palette.surfaceElevated)
-                        .frame(width: 64, height: 64)
-                    Circle()
-                        .strokeBorder(Palette.border, lineWidth: 0.5)
-                        .frame(width: 64, height: 64)
-                    Text(initial)
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundStyle(Palette.textPrimary)
+        VStack(alignment: .leading, spacing: Spacing.xl) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: Spacing.xl) {
+                    profileIdentityBlock
+                    Spacer(minLength: Spacing.xl)
+                    planSummaryBlock
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    TextField("Adın", text: $name)
-                        .textFieldStyle(.plain)
-                        .font(Typography.display(32))
-                        .foregroundStyle(Palette.textPrimary)
-                    Text("\(ageYears) yaş · \(Fmt.int(height)) cm")
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.textSecondary)
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    profileIdentityBlock
+                    planSummaryBlock
                 }
-
-                Spacer()
-
-                SexSwitch(sex: $sex)
             }
 
             Hairline()
 
-            // Mevcut + Hedef stats — büyük, prominent
-            HStack(spacing: Spacing.xl) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 148), spacing: Spacing.xl, alignment: .leading)],
+                alignment: .leading,
+                spacing: Spacing.lg
+            ) {
                 statBlock(
                     accent: Palette.accent,
                     label: "MEVCUT",
                     primary: latest?.weight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "—",
                     secondary: bodyFatLine
                 )
-                Divider().frame(height: 50).background(Palette.border)
                 statBlock(
                     accent: Palette.positive,
                     label: "HEDEF",
                     primary: targetWeight.map { "\(Fmt.int($0)) kg" } ?? "—",
                     secondary: targetRemainingLine
                 )
-                Divider().frame(height: 50).background(Palette.border)
                 statBlock(
                     accent: Palette.warning,
                     label: "İLERLEME",
                     primary: progressLine.value,
                     secondary: progressLine.detail
                 )
-                Spacer()
             }
         }
-        .padding(Spacing.xl)
+        .padding(Spacing.xxl)
+        .background {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                    .fill(Palette.surface.opacity(0.82))
+                ProfileHeroLines()
+                    .stroke(Palette.borderStrong.opacity(0.55), lineWidth: 0.7)
+                    .frame(width: 300, height: 260)
+                    .offset(x: 36, y: -28)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        }
+        .shadow(color: Palette.accent.opacity(0.08), radius: 34, x: 0, y: 22)
+    }
+
+    private var profileIdentityBlock: some View {
+        HStack(alignment: .center, spacing: Spacing.lg) {
+            ProfileAvatar(initial: initial, color: Palette.accent)
+
+            VStack(alignment: .leading, spacing: 9) {
+                TextField("Adın", text: $name)
+                    .textFieldStyle(.plain)
+                    .font(Typography.display(38))
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Spacing.sm) {
+                        profileFact("Yaş", "\(ageYears)")
+                        profileFact("Boy", "\(Fmt.int(height)) cm")
+                        profileFact("Cinsiyet", sex.label)
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        profileFact("Yaş", "\(ageYears)")
+                        profileFact("Boy", "\(Fmt.int(height)) cm")
+                        profileFact("Cinsiyet", sex.label)
+                    }
+                }
+                SexSwitch(sex: $sex)
+            }
+        }
+    }
+
+    private var planSummaryBlock: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(spacing: 8) {
+                ProfileBreathingStatusDot(color: calorieResult == nil ? Palette.warning : Palette.accent)
+                Text(calorieResult == nil ? "Kurulum eksik" : "Plan hesaplandı")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+
+            if let result = calorieResult {
+                HStack(alignment: .lastTextBaseline, spacing: 5) {
+                    Text("\(Fmt.int(result.goalCalories))")
+                        .font(Typography.display(42))
+                        .foregroundStyle(Palette.textPrimary)
+                        .contentTransition(.numericText(value: result.goalCalories))
+                    Text("kcal")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.bottom, 6)
+                }
+                Text("\(activity.label) · \(goal.detail)")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Ağırlık verisi girildiğinde günlük hedef ve makrolar burada canlı hesaplanır.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(Spacing.lg)
+        .frame(maxWidth: 250, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface)
+                .fill(Palette.surfaceElevated.opacity(0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
+    }
+
+    private func profileFact(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textQuaternary)
+            Text(value)
+                .font(Typography.captionBold)
+                .foregroundStyle(Palette.textSecondary)
+        }
     }
 
     private var initial: String {
@@ -589,34 +1097,6 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Inputs
-
-    private var inputsRow: some View {
-        HStack(spacing: Spacing.md) {
-            inputTile(label: "Doğum", icon: "calendar") {
-                DatePicker("", selection: $birthDate, in: ...Date(), displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .colorScheme(.dark)
-            }
-            inputTile(label: "Boy", icon: "ruler") {
-                NumberField(value: .init(get: { height }, set: { height = $0 ?? 178 }), unit: "cm", digits: 0)
-            }
-            inputTile(label: "Hedef Ağırlık", icon: "target") {
-                NumberField(value: $targetWeight, unit: "kg", digits: 0, placeholder: "—")
-            }
-            inputTile(label: "Manuel Yağ %", icon: "drop") {
-                NumberField(
-                    value: $manualBodyFat,
-                    unit: "%",
-                    digits: 1,
-                    placeholder: latest?.bodyFat.map { "ölçüm: \(Fmt.num($0, digits: 1))" } ?? "—"
-                )
-            }
-        }
-    }
-
     private func inputTile<C: View>(label: String, icon: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 5) {
@@ -631,21 +1111,12 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surface)
+                .fill(Color.white.opacity(0.035))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
-    }
-
-    // MARK: - Goals
-
-    private var goalsSection: some View {
-        HStack(spacing: Spacing.md) {
-            ActivityPicker(selection: $activity)
-            GoalPicker(selection: $goal)
-        }
     }
 
     private func initializeFromProfile() {
@@ -661,7 +1132,14 @@ struct ProfileView: View {
         targetWeight = p.targetWeight
         manualBodyFat = p.manualBodyFat
         about = p.about
-        manualCalorieOffset = p.manualCalorieOffset
+        supplements = p.supplements.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? UserProfile.defaultSupplements
+            : p.supplements
+        manualCalorieOffset = 0
+        manualCalorieOffsetMacro = .carbs
+        manualProteinGrams = p.manualProteinGrams
+        manualCarbsGrams = p.manualCarbsGrams
+        manualFatGrams = p.manualFatGrams
     }
 
     private func save() {
@@ -679,7 +1157,14 @@ struct ProfileView: View {
         profile.targetWeight = targetWeight
         profile.manualBodyFat = manualBodyFat
         profile.about = about
-        profile.manualCalorieOffset = manualCalorieOffset
+        profile.supplements = supplements.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? UserProfile.defaultSupplements
+            : supplements
+        profile.manualCalorieOffset = 0
+        profile.manualCalorieOffsetMacro = .carbs
+        profile.manualProteinGrams = manualProteinGrams
+        profile.manualCarbsGrams = manualCarbsGrams
+        profile.manualFatGrams = manualFatGrams
         try? ctx.save()
         saved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
@@ -704,6 +1189,203 @@ struct ProfileView: View {
 
 // MARK: - Reusable
 
+private struct ProfileAvatar: View {
+    let initial: String
+    let color: Color
+    @State private var active = false
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.32), Palette.surfaceElevated],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Circle()
+                    .strokeBorder(Color.white.opacity(active ? 0.18 : 0.08), lineWidth: 0.8)
+                    .scaleEffect(active ? 1.04 : 0.98)
+                Text(initial)
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            .frame(width: 74, height: 74)
+
+            Circle()
+                .fill(Palette.positive)
+                .frame(width: 12, height: 12)
+                .overlay(Circle().strokeBorder(Palette.surface, lineWidth: 2))
+                .offset(x: -4, y: -4)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                active = true
+            }
+        }
+    }
+}
+
+private struct ProfileBreathingStatusDot: View {
+    let color: Color
+    @State private var active = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color.opacity(active ? 0.22 : 0.08))
+                .frame(width: 20, height: 20)
+                .scaleEffect(active ? 1.08 : 0.82)
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
+                active = true
+            }
+        }
+    }
+}
+
+private struct ProfileNudgeRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.warning)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Palette.warning.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textPrimary)
+                Text(detail)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Palette.warning.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+}
+
+private struct ProfileEmptyState: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Palette.warning)
+                .frame(width: 42, height: 42)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .fill(Palette.warning.opacity(0.12))
+                )
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(Typography.titleSmall)
+                    .foregroundStyle(Palette.textPrimary)
+                Text(detail)
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surfaceElevated.opacity(0.58))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+    }
+}
+
+private struct ProfilePressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .offset(y: configuration.isPressed ? 1 : 0)
+            .animation(.spring(response: 0.24, dampingFraction: 0.78), value: configuration.isPressed)
+    }
+}
+
+private struct ProfilePanelModifier: ViewModifier {
+    var cornerRadius: CGFloat
+    var fill: Color
+    var accent: Color
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: 0.5)
+            )
+    }
+}
+
+private struct ProfileHeroLines: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let rowHeight = rect.height / 5
+        for index in 0...5 {
+            let y = CGFloat(index) * rowHeight
+            path.move(to: CGPoint(x: rect.minX + rect.width * 0.12, y: y))
+            path.addCurve(
+                to: CGPoint(x: rect.maxX, y: y + rowHeight * 0.34),
+                control1: CGPoint(x: rect.midX * 0.72, y: y - 24),
+                control2: CGPoint(x: rect.midX * 1.28, y: y + 38)
+            )
+        }
+        return path
+    }
+}
+
+private struct ProfileBackgroundLines: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let columns = 7
+        for index in 0...columns {
+            let x = rect.minX + rect.width * CGFloat(index) / CGFloat(columns)
+            path.move(to: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x + rect.width * 0.18, y: rect.maxY))
+        }
+        let rows = 5
+        for index in 0...rows {
+            let y = rect.minY + rect.height * CGFloat(index) / CGFloat(rows)
+            path.move(to: CGPoint(x: rect.minX, y: y))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y + rect.height * 0.08))
+        }
+        return path
+    }
+}
+
 private struct SexSwitch: View {
     @Binding var sex: Sex
     var body: some View {
@@ -720,7 +1402,7 @@ private struct SexSwitch: View {
                                 .fill(sex == s ? Color.white.opacity(0.08) : Color.clear)
                         )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ProfilePressButtonStyle())
             }
         }
         .padding(3)
@@ -732,6 +1414,22 @@ private struct SexSwitch: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
+    }
+}
+
+private extension View {
+    func profilePanel(
+        cornerRadius: CGFloat = Radius.lg,
+        fill: Color = Palette.surface,
+        accent: Color = Palette.border
+    ) -> some View {
+        modifier(ProfilePanelModifier(cornerRadius: cornerRadius, fill: fill, accent: accent))
+    }
+
+    func profileReveal(_ visible: Bool, delay: Double) -> some View {
+        opacity(visible ? 1 : 0)
+            .offset(y: visible ? 0 : 10)
+            .animation(.spring(response: 0.44, dampingFraction: 0.86).delay(delay), value: visible)
     }
 }
 
@@ -1230,7 +1928,7 @@ struct HealthKitCard: View {
                         Text("Kaydet")
                             .font(Typography.bodyBold)
                     }
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Palette.background)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.accent))
@@ -1693,56 +2391,63 @@ struct BackupCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 8) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 118), spacing: 8, alignment: .leading)],
+                alignment: .leading,
+                spacing: 8
+            ) {
                 Button(action: backupNow) {
-                    Label("Şimdi Yedekle", systemImage: "arrow.up.doc")
+                    backupActionLabel("Yedekle", systemImage: "arrow.up.doc")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
-                .help("⌘⇧B")
+                .help("Şimdi yedekle (⌘⇧B)")
 
                 Button(action: revealInFinder) {
-                    Label("Finder'da Göster", systemImage: "magnifyingglass")
+                    backupActionLabel("Finder", systemImage: "magnifyingglass")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!BackupService.shared.backupExists)
+                .help("Yedek klasörünü Finder'da göster")
 
                 Button(action: selectVaultFolder) {
-                    Label(vaultConfigured ? "Klasörü Değiştir" : "Veri Klasörü Seç", systemImage: "folder.badge.gearshape")
+                    backupActionLabel("Klasör", systemImage: "folder.badge.gearshape")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .help(vaultConfigured ? "Vault klasörünü değiştir" : "Veri klasörü seç")
 
                 Button(action: exportVaultNow) {
-                    Label("Vault'a Yaz", systemImage: "arrow.up.doc.on.clipboard")
+                    backupActionLabel("Vault Yaz", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!vaultConfigured)
-
-                Spacer()
+                .help("Vault klasörüne yaz")
 
                 Button(role: .destructive) {
                     showRestoreConfirm = true
                 } label: {
-                    Label("Geri Yükle", systemImage: "arrow.down.doc")
+                    backupActionLabel("Geri Al", systemImage: "arrow.down.doc")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(Palette.warning)
                 .disabled(!BackupService.shared.backupExists || importing)
+                .help("Local yedekten geri yükle")
 
                 Button(role: .destructive) {
                     showVaultRestoreConfirm = true
                 } label: {
-                    Label("Vault'tan Al", systemImage: "arrow.down.doc.on.clipboard")
+                    backupActionLabel("Vault Al", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(Palette.warning)
                 .disabled(!vaultBackupExists || importing)
+                .help("Vault snapshot'ını içeri al")
             }
 
             if let msg = statusMessage {
@@ -1819,6 +2524,18 @@ struct BackupCard: View {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
+    }
+
+    private func backupActionLabel(_ title: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+            Text(title)
+                .font(Typography.captionBold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private func backupNow() {

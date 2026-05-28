@@ -61,12 +61,13 @@ final class CodexClient: AIClient {
         }()
         input.append(["role": "user", "content": finalUserText])
 
+        let requiresRecipeSearch = AIConfig.requiresRecipeWebSearch(newUserText)
         var body: [String: Any] = [
             "model": model,
             "instructions": AIConfig.systemPrompt,
             "input": input,
             "tools": [Self.webSearchTool],
-            "tool_choice": "auto",
+            "tool_choice": requiresRecipeSearch ? "required" : "auto",
             "store": false,
             "stream": true
         ]

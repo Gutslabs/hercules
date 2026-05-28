@@ -43,8 +43,6 @@
 		A24E00000000000000000061 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000073 /* BackupService.swift */; };
 		A24E00000000000000000062 /* MonthlyGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000074 /* MonthlyGoal.swift */; };
 		A24E00000000000000000063 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000075 /* CalendarView.swift */; };
-		A24E00000000000000000064 /* MealPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000076 /* MealPlan.swift */; };
-		A24E00000000000000000065 /* MealPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000077 /* MealPlanView.swift */; };
 		A24E00000000000000000066 /* UserContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000078 /* UserContextSnapshot.swift */; };
 		A24E00000000000000000067 /* CalorieStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000079 /* CalorieStats.swift */; };
 		A24E00000000000000000068 /* WorkoutLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000007A /* WorkoutLog.swift */; };
@@ -56,6 +54,7 @@
 		A24E0000000000000000006E /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000084 /* MemoryView.swift */; };
 		A24E0000000000000000006F /* ResearchLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000085 /* ResearchLibrary.swift */; };
 		A24E00000000000000000088 /* CoachIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000089 /* CoachIntelligence.swift */; };
+		A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000008B /* AgentDataSnapshot.swift */; };
 		A24E00000000000000000094 /* SeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000093 /* SeedData.swift */; };
 		A24E000000000000000000A0 /* HerculesMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000091 /* HerculesMobileApp.swift */; };
 		A24E000000000000000000A1 /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000092 /* MobileRootView.swift */; };
@@ -68,7 +67,6 @@
 		A24E000000000000000000A8 /* WorkoutSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003F /* WorkoutSession.swift */; };
 		A24E000000000000000000A9 /* StepEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000072 /* StepEntry.swift */; };
 		A24E000000000000000000AA /* MonthlyGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000074 /* MonthlyGoal.swift */; };
-		A24E000000000000000000AB /* MealPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000076 /* MealPlan.swift */; };
 		A24E000000000000000000AC /* WorkoutLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000007A /* WorkoutLog.swift */; };
 		A24E000000000000000000AD /* CalorieCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000025 /* CalorieCalculator.swift */; };
 		A24E000000000000000000AE /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000027 /* Colors.swift */; };
@@ -127,8 +125,6 @@
 		A24E00000000000000000073 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
 		A24E00000000000000000074 /* MonthlyGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthlyGoal.swift; sourceTree = "<group>"; };
 		A24E00000000000000000075 /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
-		A24E00000000000000000076 /* MealPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealPlan.swift; sourceTree = "<group>"; };
-		A24E00000000000000000077 /* MealPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealPlanView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000078 /* UserContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextSnapshot.swift; sourceTree = "<group>"; };
 		A24E00000000000000000079 /* CalorieStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalorieStats.swift; sourceTree = "<group>"; };
 		A24E0000000000000000007A /* WorkoutLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLog.swift; sourceTree = "<group>"; };
@@ -140,6 +136,7 @@
 		A24E00000000000000000084 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000085 /* ResearchLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchLibrary.swift; sourceTree = "<group>"; };
 		A24E00000000000000000089 /* CoachIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachIntelligence.swift; sourceTree = "<group>"; };
+		A24E0000000000000000008B /* AgentDataSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDataSnapshot.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -211,7 +208,6 @@
 				A24E0000000000000000003F /* WorkoutSession.swift */,
 				A24E00000000000000000072 /* StepEntry.swift */,
 				A24E00000000000000000074 /* MonthlyGoal.swift */,
-				A24E00000000000000000076 /* MealPlan.swift */,
 				A24E0000000000000000007A /* WorkoutLog.swift */,
 			);
 			path = Models;
@@ -225,6 +221,7 @@
 				A24E0000000000000000003A /* ChatStore.swift */,
 				A24E00000000000000000078 /* UserContextSnapshot.swift */,
 				A24E00000000000000000079 /* CalorieStats.swift */,
+				A24E0000000000000000008B /* AgentDataSnapshot.swift */,
 				A24E00000000000000000080 /* AgentSkill.swift */,
 				A24E00000000000000000081 /* LocalMemoryProvider.swift */,
 				A24E00000000000000000082 /* PubMedResearchSkill.swift */,
@@ -253,7 +250,6 @@
 				A24E0000000000000000002C /* ChartsView.swift */,
 				A24E00000000000000000075 /* CalendarView.swift */,
 				A24E0000000000000000007B /* WorkoutView.swift */,
-				A24E00000000000000000077 /* MealPlanView.swift */,
 				A24E00000000000000000037 /* RecipesView.swift */,
 				A24E00000000000000000084 /* MemoryView.swift */,
 				A24E0000000000000000002E /* ProfileView.swift */,
@@ -437,8 +433,6 @@
 				A24E00000000000000000061 /* BackupService.swift in Sources */,
 				A24E00000000000000000062 /* MonthlyGoal.swift in Sources */,
 				A24E00000000000000000063 /* CalendarView.swift in Sources */,
-				A24E00000000000000000064 /* MealPlan.swift in Sources */,
-				A24E00000000000000000065 /* MealPlanView.swift in Sources */,
 				A24E00000000000000000066 /* UserContextSnapshot.swift in Sources */,
 				A24E00000000000000000067 /* CalorieStats.swift in Sources */,
 				A24E00000000000000000068 /* WorkoutLog.swift in Sources */,
@@ -450,6 +444,7 @@
 				A24E0000000000000000006E /* MemoryView.swift in Sources */,
 				A24E0000000000000000006F /* ResearchLibrary.swift in Sources */,
 				A24E00000000000000000088 /* CoachIntelligence.swift in Sources */,
+				A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */,
 				A24E00000000000000000094 /* SeedData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -469,7 +464,6 @@
 				A24E000000000000000000A8 /* WorkoutSession.swift in Sources */,
 				A24E000000000000000000A9 /* StepEntry.swift in Sources */,
 				A24E000000000000000000AA /* MonthlyGoal.swift in Sources */,
-				A24E000000000000000000AB /* MealPlan.swift in Sources */,
 				A24E000000000000000000AC /* WorkoutLog.swift in Sources */,
 				A24E000000000000000000AD /* CalorieCalculator.swift in Sources */,
 				A24E000000000000000000AE /* Colors.swift in Sources */,

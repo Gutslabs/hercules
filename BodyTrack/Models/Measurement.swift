@@ -38,6 +38,43 @@ final class Measurement {
         guard let w = weight, let bf = bodyFat else { return nil }
         return w * (bf / 100.0)
     }
+
+    var isFullCheckIn: Bool {
+        bodyFat != nil || waist != nil || chest != nil || neck != nil
+    }
+}
+
+enum MeasurementCadence {
+    static let fullCheckInWeekday = 7 // Saturday in Calendar.current
+
+    static func isFullCheckInDay(_ date: Date = .now, calendar: Calendar = .current) -> Bool {
+        calendar.component(.weekday, from: date) == fullCheckInWeekday
+    }
+
+    static func nextFullCheckIn(from date: Date = .now, calendar: Calendar = .current) -> Date {
+        if isFullCheckInDay(date, calendar: calendar) {
+            return calendar.startOfDay(for: date)
+        }
+
+        var components = DateComponents()
+        components.weekday = fullCheckInWeekday
+
+        return calendar.nextDate(
+            after: date,
+            matching: components,
+            matchingPolicy: .nextTimePreservingSmallerComponents
+        ).map { calendar.startOfDay(for: $0) } ?? calendar.startOfDay(for: date)
+    }
+
+    static func hasFullCheckInThisWeek(_ measurements: [Measurement], from date: Date = .now, calendar: Calendar = .current) -> Bool {
+        guard let weekStart = calendar.dateInterval(of: .weekOfYear, for: date)?.start,
+              let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart)
+        else { return false }
+
+        return measurements.contains { measurement in
+            measurement.isFullCheckIn && measurement.date >= weekStart && measurement.date < weekEnd
+        }
+    }
 }
 
 enum MetricKind: String, CaseIterable, Identifiable {

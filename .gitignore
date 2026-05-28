@@ -9,6 +9,11 @@ xcuserdata/
 *.moved-aside
 *.xccheckout
 *.xcscmblueprint
+*.xcarchive
+*.dSYM/
+*.app
+*.ipa
+*.dmg
 
 # Swift Package Manager
 .build/
@@ -17,3 +22,29 @@ xcuserdata/
 # macOS
 *.swp
 *.lock
+
+# Local agent/editor state
+.claude/
+.codex/
+
+# Secrets, signing material, and local config
+.env
+.env.*
+*.pem
+*.p8
+*.p12
+*.cer
+*.key
+*.mobileprovision
+*.provisionprofile
+codex_auth.json
+
+# Local app data / exports
+*.store
+*.store-shm
+*.store-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+hercules_backup*.json
+HerculesBackup*.json

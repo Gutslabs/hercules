@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 enum AIConfig {
     static let defaultAPIKey = ""
@@ -7,6 +8,27 @@ enum AIConfig {
     static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     static let appReferer = "https://hercules.local"
     static let appTitle = "Hercules"
+
+    static func requiresRecipeWebSearch(_ text: String) -> Bool {
+        let lower = normalizedPromptKey(text)
+        let explicitRecipe = lower.contains("tarif") || lower.contains("recipe")
+        let recipeFoodSignals = [
+            "pankek", "pancake", "bowl", "smoothie", "shake", "waffle",
+            "tatli", "tatlı", "kurabiye", "cookie", "meal prep", "proteinli"
+        ]
+        let recipeIntentSignals = [
+            "oner", "öner", "ekle", "kaydet", "yap", "hazirla", "hazırla",
+            "ver", "bul", "ara", "listele", "nasil", "nasıl", "fikir"
+        ]
+        let hasRecipeFood = recipeFoodSignals.contains { lower.contains($0) }
+        let hasRecipeIntent = recipeIntentSignals.contains { lower.contains($0) }
+        return (explicitRecipe || hasRecipeFood) && (hasRecipeIntent || explicitRecipe)
+    }
+
+    private static func normalizedPromptKey(_ text: String) -> String {
+        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "tr_TR"))
+            .lowercased(with: Locale(identifier: "tr_TR"))
+    }
 
     /// System prompt — her mesajda yeniden hesaplanır, bugünün tarihi gömülür.
     static var systemPrompt: String {
@@ -25,6 +47,7 @@ enum AIConfig {
         - Jeff Nippard / Stronger by Science / evidence-based coaching çizgisinde düşün: önce net karar, sonra neden, sonra pratik uygulama ve takip metriği. Gereksiz akademik essay yazma ama basit tavsiye de verme.
         - Evidence hiyerarşisi: meta-analiz / systematic review / position stand > RCT > mekanizma > anekdot. PubMed/research context geldiyse title/PMID bilgisini kısa kullan; tek çalışma ile kesin hüküm verme.
         - Kullanıcı verisi geldiyse sayılarla konuş: kilo trendi, yağ oranı, günlük/haftalık kalori ortalaması, protein aralığı, adım ortalaması, antrenman frekansı, hedef tarihi.
+        - Context içinde "App hedef kalorisi" veya "App makro hedefi" varsa bunlar tek doğru profil hedefidir. Başka kalori/makro hedefi uydurma; öneri yapacaksan bu hedefe göre yap.
         - Antrenman sorularında volume, frekans, RIR/failure, progressive overload, egzersiz seçimi, teknik sınırlayıcılar, yorgunluk yönetimi ve adherence dengesini birlikte değerlendir.
         - Definasyon/kilo sorularında su/glikojen, log tutarlılığı, hareket/adım, protein, deficit büyüklüğü ve sürdürülebilir kayıp hızını ayır.
         - Spor günlerine otomatik ekstra kalori ekleme veya önermeyi default yapma. Kullanıcının hedef kalorisi sabit kabul edilir; sadece açıkça isterse antrenman gününe özel kalori ayrıştır.
@@ -43,37 +66,41 @@ enum AIConfig {
            {"message": "kısa Türkçe açıklama veya onay sorusu", "actions": [ ... ]}
 
         APP TOOL ŞEMASI:
-        - `tool`: "log_food", "add_recipe", "update_workout_plan", "update_meal_plan"
+        - `tool`: "log_food", "add_recipe", "update_workout_plan"
         - `summary`: Kullanıcıya gösterilecek kısa Türkçe işlem özeti.
         - Yemek kaydı için: {"tool":"log_food","summary":"Bugüne 520 kcal tavuk pilav ekle","name":"Tavuk pilav","grams":300,"calories":520,"protein_g":42,"carbs_g":55,"fat_g":12}
-        - Tarif ekleme için: {"tool":"add_recipe","summary":"Tariflere protein pankek ekle","title":"Protein pankek","category":"breakfast","recipe_summary":"Ucuz, yüksek proteinli kahvaltı.","ingredients":"- 60g yulaf\\n- 2 yumurta\\n- 150g yoğurt","instructions":"1. Malzemeleri karıştır.\\n2. Tavada iki yüzünü pişir.","servings":1,"prep_minutes":12,"calories":520,"protein_g":38,"carbs_g":58,"fat_g":16,"url":"https://..."}; category sadece "breakfast", "dinner", "dessert". URL opsiyonel, ama tarif metni dolu olmalı.
+        - Tarif ekleme için: {"tool":"add_recipe","summary":"Tariflere kaynaklı protein pankek ekle","title":"Protein pankek","category":"breakfast","recipe_summary":"Denenmiş/kaynaklı yüksek proteinli kahvaltı.","ingredients":"- Kaynak tariften derlenen malzemeler","instructions":"1. Kaynak tarifteki adımları özetle.\\n2. Kullanıcı hedefine göre porsiyon/makro notunu ekle.","servings":1,"prep_minutes":12,"calories":520,"protein_g":38,"carbs_g":58,"fat_g":16,"url":"https://gercek-tarif-sayfasi..."}; category sadece "breakfast", "dinner", "dessert". URL ZORUNLU ve gerçek tarif sayfası olmalı; tarif metni web_search ile bulunan kaynaktan derlenmeli.
         - Antrenman planı ad/not/detay için: {"tool":"update_workout_plan","summary":"Salı gününü upper hipertrofi yap","workout_operation":"set_session","weekday":3,"name":"Upper Hipertrofi","duration_minutes":75,"focus":"Göğüs/sırt hacmi, 1-2 RIR","warmup":"5 dk yürüyüş + 2 ramp-up set","progression":"Tüm setlerde üst rep bandı gelirse +2.5 kg","notes":"Definasyonda failure'ı izolasyonlara sakla.","estimated_calories":0}
         - Antrenman planına hareket ekleme için: {"tool":"update_workout_plan","summary":"Salı planına Lat Pulldown ekle","workout_operation":"add_exercise","weekday":3,"exercise_name":"Lat Pulldown","sets":3,"reps":"8-12","rir":"1-2","rest":"2 dk","load":"kontrollü form","source_url":"https://exrx.net/WeightExercises/LatissimusDorsi/CBFrontPulldown","notes":"Alt pozisyonda omuzu kilitleme"}
         - Tüm programı yeniden yazma için tek action kullan ve eski planı arşivlet: {"tool":"update_workout_plan","summary":"Eski planı arşivleyip cut odaklı 3 günlük programı kur","workout_operation":"replace_program","archive_current":true,"program_title":"Cut Hipertrofi V1","program_summary":"Haftada 3 gün, kas koruma + toparlanma odaklı.","program_notes":"Ana liftlerde 1-2 RIR; izolasyonlarda son sette 0-1 RIR olabilir.","days":[{"weekday":3,"name":"Upper A","duration_minutes":70,"estimated_calories":0,"focus":"Göğüs/sırt ana hacim","warmup":"Bench ve row için 2 ramp-up set","progression":"Üst rep bandı tamamlanınca küçük ağırlık artışı","notes":"Dirsek/omuz ağrısı varsa pressing hacmini azalt.","exercises":[{"name":"Incline Bench Press","sets":3,"reps":"6-10","rir":"1-2","rest":"2-3 dk","source_url":"https://exrx.net/WeightExercises/PectoralClavicular/BBInclineBenchPress","notes":"Kontrollü eccentric"},{"name":"Seated Cable Row","sets":3,"reps":"8-12","rir":"1-2","rest":"2 dk","source_url":"https://exrx.net/WeightExercises/BackGeneral/CBStraightBackSeatedRow"}]}]}
         - Sadece mevcut programı arşivleme için: {"tool":"update_workout_plan","summary":"Mevcut antrenman programını arşivle","workout_operation":"archive_program","program_title":"Mayıs programı","program_notes":"Yeni plana geçmeden önce saklandı."}
-        - Yemek planı gün tipi için: {"tool":"update_meal_plan","summary":"Salı gününü tavuk göğsü günü yap","meal_operation":"set_day_type","weekday":3,"day_type":"gogus"}
-        - Yemek planına öğe ekleme için: {"tool":"update_meal_plan","summary":"Salı öğlene 200g tavuk göğsü ekle","meal_operation":"add_item","weekday":3,"meal_slot":"ogle","item_name":"Tavuk göğsü","amount":200,"unit":"g","calories":330,"protein_g":62,"carbs_g":0,"fat_g":7}
+
         - weekday Apple Calendar formatındadır: 1=Pazar, 2=Pazartesi, 3=Salı, 4=Çarşamba, 5=Perşembe, 6=Cuma, 7=Cumartesi.
-        - meal_slot sadece "sabah", "ogle", "ara", "aksam". day_type sadece "gogus", "but", "pirzola", "free".
+
 
         KURALLAR:
         - JSON dışında HİÇBİR ŞEY yazma. Markdown, kod bloğu, açıklama, başlık YOK.
         - message daima dolu olsun. Yemek modunda kısa (1-2 cümle). Onun dışında kafana göre, gerektiği kadar açıkla.
         - JSON içindeki newline'ları \\n olarak escape et — message uzunsa paragraf için \\n\\n kullan.
-        - Top-level calories, protein_g, carbs_g, fat_g sadece YEMEK MODU'nda doldur. `actions` içindeki log_food / update_meal_plan.add_item alanlarında bu makro/kcal değerleri ayrıca kullanılabilir.
+        - Top-level calories, protein_g, carbs_g, fat_g sadece YEMEK MODU'nda doldur. `actions` içindeki log_food alanlarında bu makro/kcal değerleri ayrıca kullanılabilir.
         - `actions` sadece kullanıcı app datasını değiştirmeyi açıkça istediğinde eklenir. Sadece öneri veya sohbet istiyorsa action üretme.
-        - `update_workout_plan` ve `update_meal_plan` ASLA yapılmış gibi konuşma. Bunlar app içinde önce onay bekler. Message içinde doğal şekilde "Bunu şöyle değiştirmeyi öneriyorum, onaylıyor musun?" diye sor.
+        - `update_workout_plan` ASLA yapılmış gibi konuşma. Bunlar app içinde önce onay bekler. Message içinde doğal şekilde "Bunu şöyle değiştirmeyi öneriyorum, onaylıyor musun?" diye sor.
         - Kullanıcı yeni program yazmanı isterse eski programı korumak için `replace_program` action'ında `archive_current:true` kullan. Gün gün yazdığın set/rep/RIR/rest/progression/notlar `days[].exercises[]` ve day/program notlarına dolu gelsin; sadece chat mesajında bırakma.
         - Antrenman hareketlerinde biliyorsan `source_url` ekle. Öncelik: ExRx / güvenilir egzersiz kütüphanesi / iyi teknik anlatımı. Emin değilsen URL uydurma; boş bırak.
         - `log_food` ve `add_recipe` action'ları app tarafından otomatik uygulanır. Bu action'ları üretirken "onaylıyor musun?" diye sorma; işlem gerçekleşmiş gibi kısa ve net konuş.
         - Kullanıcı "şu hareketi ekle" derse `update_workout_plan` içinde `workout_operation:"add_exercise"` kullan; tüm antrenman adını hareket listesine çevirmeye çalışma.
         - `log_food` ve `add_recipe` kullanıcı açıkça "ekle/kaydet" dediyse action olarak yazılabilir.
-        - `add_recipe` üretirken sadece link bırakma; recipe_summary, ingredients ve instructions alanlarını mutlaka doldur. URL sadece kaynak/fikir linki varsa ek alan.
+        - TARİF KURALI SERT: Kullanıcı tarif/yemek tarifi/protein pankek/bowl/yüksek protein tatlı gibi bir tarif isterse web_search ZORUNLU. Asla hafızadan veya tahminle tarif uydurma.
+        - Tarif önerirken ve özellikle `add_recipe` üretirken sadece insanların denediği/bilinen kaynaklardan gelen tarifleri kullan. Öncelik: Nefis Yemek Tarifleri, Yemek.com, güvenilir tarif blogları, ürün markalarının tarif sayfaları, yorumlu/denenmiş tarif sayfaları.
+        - `add_recipe` için `url` zorunludur. Kaynak URL yoksa veya sadece arama motoru linki varsa action üretme; "kaynaklı iyi tarif bulamadım, web'de daha net kaynak lazım" diye söyle.
+        - `add_recipe` üretirken sadece link bırakma; recipe_summary, ingredients ve instructions alanlarını mutlaka web'de bulduğun kaynak tariften derle. Makroları kullanıcı hedefine göre tahmini uyarlayabilirsin ama tarifin malzeme/yapılışını icat etme.
 
         web_search NE ZAMAN:
         - Bilmediğin/emin olmadığın yemek/marka/ürün (ör. lokal restoranlar, yöresel yemekler, yeni çıkmış ürünler).
+        - Tarif/yemek tarifi isteklerinde HER ZAMAN web_search kullan; tek aramayla kaynaklı, denenmiş/yorumlu tarif bul, sonra kullanıcının makro/mikro context'ine uyarla.
+        - Protein tozu, whey bowl, smoothie bowl, yüksek protein tatlı/pankek/yoğurt bowl gibi tarif trendlerinde web_search ZORUNLU; kaynak URL'siz tarif verme.
         - Güncel veri gereken fitness sorusu (yeni supplement çalışmaları, yeni egzersiz teknikleri).
-        - Yaygın bilgiler için aratma — temel yemekler, klasik egzersizler, bilinen makro bilgileri kendi bilginle hızlı cevapla.
+        - Yaygın yemek makroları için aratma — temel yemekler, klasik egzersizler, bilinen makro bilgileri kendi bilginle hızlı cevapla. Ama tarif önerisi/eklemesi bu istisnaya girmez; tarifte arama zorunlu.
         - Tek aramayla yetin, döngüye girme.
 
         KULLANICI HAKKINDA + VERİSİ + AGENT SKILL CONTEXT:
@@ -93,7 +120,7 @@ enum AIConfig {
     }
 }
 
-struct AIFoodResult: Codable, Equatable {
+struct AIFoodResult: Codable, Equatable, Sendable {
     var name: String?
     var grams: Double?
     var calories: Double?
@@ -177,21 +204,21 @@ private struct LossyAIActionList: Decodable {
     }
 }
 
-enum AIAppToolName: String, Codable, Equatable {
+enum AIAppToolName: String, Codable, Equatable, Sendable {
     case logFood = "log_food"
     case addRecipe = "add_recipe"
     case updateWorkoutPlan = "update_workout_plan"
-    case updateMealPlan = "update_meal_plan"
+
 }
 
-enum AIAppActionStatus: String, Codable, Equatable {
+enum AIAppActionStatus: String, Codable, Equatable, Sendable {
     case pending
     case applied
     case rejected
     case failed
 }
 
-struct AIWorkoutExercisePlan: Identifiable, Equatable, Codable {
+struct AIWorkoutExercisePlan: Identifiable, Equatable, Codable, Sendable {
     var id: UUID = UUID()
     var name: String
     var sets: Int?
@@ -264,7 +291,7 @@ struct AIWorkoutExercisePlan: Identifiable, Equatable, Codable {
     }
 }
 
-struct AIWorkoutDayPlan: Identifiable, Equatable, Codable {
+struct AIWorkoutDayPlan: Identifiable, Equatable, Codable, Sendable {
     var id: UUID = UUID()
     var weekday: Int
     var name: String
@@ -337,7 +364,7 @@ struct AIWorkoutDayPlan: Identifiable, Equatable, Codable {
     }
 }
 
-struct AIAppAction: Identifiable, Equatable, Codable {
+struct AIAppAction: Identifiable, Equatable, Codable, Sendable {
     var id: UUID
     var tool: AIAppToolName
     var summary: String?
@@ -375,9 +402,7 @@ struct AIAppAction: Identifiable, Equatable, Codable {
     var programSummary: String?
     var programNotes: String?
     var days: [AIWorkoutDayPlan]?
-    var mealOperation: String?
-    var dayType: String?
-    var mealSlot: String?
+
     var itemName: String?
     var amount: Double?
     var unit: String?
@@ -389,7 +414,7 @@ struct AIAppAction: Identifiable, Equatable, Codable {
     var fatG: Double?
 
     var requiresConfirmation: Bool {
-        tool == .updateWorkoutPlan || tool == .updateMealPlan
+        tool == .updateWorkoutPlan
     }
 
     var displayTitle: String {
@@ -397,7 +422,6 @@ struct AIAppAction: Identifiable, Equatable, Codable {
         case .logFood: return "Kalori ekle"
         case .addRecipe: return "Tarif ekle"
         case .updateWorkoutPlan: return "Antrenman planı"
-        case .updateMealPlan: return "Yemek planı"
         }
     }
 
@@ -421,11 +445,7 @@ struct AIAppAction: Identifiable, Equatable, Codable {
                 return programTitle ?? "Mevcut programı arşivle"
             }
             return "\(weekdayLabel) → \(name ?? "Antrenman")"
-        case .updateMealPlan:
-            if mealOperation == "set_day_type" {
-                return "\(weekdayLabel) → \(dayType ?? "gün tipi")"
-            }
-            return "\(weekdayLabel) \(mealSlot ?? "öğün") → \(itemName ?? "öğe")"
+
         }
     }
 
@@ -465,9 +485,7 @@ struct AIAppAction: Identifiable, Equatable, Codable {
         case programTitle, program_title
         case programSummary, program_summary
         case programNotes, program_notes
-        case mealOperation, meal_operation
-        case dayType, day_type
-        case mealSlot, meal_slot
+
         case itemName, item_name
         case proteinG, protein_g
         case carbsG, carbs_g
@@ -534,12 +552,7 @@ struct AIAppAction: Identifiable, Equatable, Codable {
         programNotes = (try? c.decodeIfPresent(String.self, forKey: .programNotes))
             ?? (try? c.decodeIfPresent(String.self, forKey: .program_notes))
         days = try? c.decodeIfPresent([AIWorkoutDayPlan].self, forKey: .days)
-        mealOperation = (try? c.decodeIfPresent(String.self, forKey: .mealOperation))
-            ?? (try? c.decodeIfPresent(String.self, forKey: .meal_operation))
-        dayType = (try? c.decodeIfPresent(String.self, forKey: .dayType))
-            ?? (try? c.decodeIfPresent(String.self, forKey: .day_type))
-        mealSlot = (try? c.decodeIfPresent(String.self, forKey: .mealSlot))
-            ?? (try? c.decodeIfPresent(String.self, forKey: .meal_slot))
+
         itemName = (try? c.decodeIfPresent(String.self, forKey: .itemName))
             ?? (try? c.decodeIfPresent(String.self, forKey: .item_name))
         proteinG = (try? c.decodeIfPresent(Double.self, forKey: .proteinG))
@@ -587,9 +600,7 @@ struct AIAppAction: Identifiable, Equatable, Codable {
         try c.encodeIfPresent(programSummary, forKey: .programSummary)
         try c.encodeIfPresent(programNotes, forKey: .programNotes)
         try c.encodeIfPresent(days, forKey: .days)
-        try c.encodeIfPresent(mealOperation, forKey: .mealOperation)
-        try c.encodeIfPresent(dayType, forKey: .dayType)
-        try c.encodeIfPresent(mealSlot, forKey: .mealSlot)
+
         try c.encodeIfPresent(itemName, forKey: .itemName)
         try c.encodeIfPresent(amount, forKey: .amount)
         try c.encodeIfPresent(unit, forKey: .unit)
@@ -617,8 +628,8 @@ enum OpenRouterError: LocalizedError {
     }
 }
 
-struct ChatTurn: Identifiable, Equatable, Codable {
-    enum Role: String, Codable { case user, assistant }
+struct ChatTurn: Identifiable, Equatable, Codable, Sendable {
+    enum Role: String, Codable, Sendable { case user, assistant }
     let id: UUID
     let role: Role
     var text: String
@@ -699,7 +710,7 @@ final class OpenRouterClient: AIClient {
         "type": "function",
         "function": [
             "name": "web_search",
-            "description": "Bir yemek/ürünün besin değeri, güncel bir fitness/diyet/supplement bilgisi veya emin olmadığın herhangi bir konu için web araması yap. Temel/yaygın bilgi için kullanma — sadece bilmediğinde veya güncellik gerektiğinde.",
+            "description": "Bir yemek/ürünün besin değeri, güncel bir fitness/diyet/supplement bilgisi veya emin olmadığın herhangi bir konu için web araması yap. Tarif/yemek tarifi isteklerinde ZORUNLU kullan; denenmiş/yorumlu/known kaynak tarif ve gerçek URL bul. Temel/yaygın makro bilgi için kullanma — ama tarif önerisi/eklemesi her zaman kaynaklı olmalı.",
             "parameters": [
                 "type": "object",
                 "properties": [
@@ -753,15 +764,19 @@ final class OpenRouterClient: AIClient {
         messages.append(["role": "user", "content": finalUserText])
 
         var lastSearchQuery: String? = nil
+        let requiresRecipeSearch = AIConfig.requiresRecipeWebSearch(newUserText)
 
         // Tool loop — max 2 iterations to avoid runaway
         for _ in 0..<2 {
+            let toolChoice: Any = (requiresRecipeSearch && lastSearchQuery == nil)
+                ? ["type": "function", "function": ["name": "web_search"]]
+                : "auto"
             let body: [String: Any] = [
-                "model": AIKeyStore.shared.model,
+                "model": AIKeyStore.shared.openRouterModel,
                 "messages": messages,
                 "temperature": 0.2,
                 "tools": [Self.webSearchTool],
-                "tool_choice": "auto"
+                "tool_choice": toolChoice
             ]
 
             let (data, http) = try await postJSON(body: body, key: key)
@@ -826,7 +841,7 @@ final class OpenRouterClient: AIClient {
         let body: [String: Any] = [
             "model": AIConfig.searchModel,
             "messages": [
-                ["role": "system", "content": "Sen kısa ve doğru bilgi veren bir araştırmacısın. Yemek sorgusu ise: porsiyon, kcal, protein, karb, yağ özetini dön. Fitness/sağlık/genel sorgu ise: en güncel ve doğru bilgiyi 3-5 cümlede özetle. Maksimum 6 satır."],
+                ["role": "system", "content": "Sen kısa ve doğru bilgi veren bir araştırmacısın. Tarif/yemek tarifi sorgusu ise ASLA tarif uydurma: web'de bulunan 2-4 gerçek tarif kaynağı ver; başlık, kaynak adı, tam URL, kısa malzeme/yapılış özeti, porsiyon/süre ve varsa kcal/P/K/Y bilgisini dön. Kaynak yoksa 'güvenilir tarif kaynağı bulunamadı' de. Yemek makro sorgusu ise porsiyon, kcal, protein, karb, yağ özetini dön. Fitness/sağlık/genel sorgu ise en güncel ve doğru bilgiyi 3-5 cümlede özetle. Maksimum 8 satır."],
                 ["role": "user", "content": query]
             ],
             "temperature": 0.1
@@ -883,7 +898,7 @@ final class OpenRouterClient: AIClient {
     }
 }
 
-/// Stores provider/key/model in UserDefaults — UI'dan değiştirilebilir.
+/// Stores provider/model in UserDefaults and OpenRouter key in Keychain.
 final class AIKeyStore {
     static let shared = AIKeyStore()
     private let defaults = UserDefaults.standard
@@ -892,6 +907,8 @@ final class AIKeyStore {
     private let keyModelOpenRouter = "hercules.openrouter.model"
     private let keyModelCodex = "hercules.codex.model"
     private let keyReasoning = "hercules.codex.reasoning"
+    private let keychainService = "hercules.openrouter"
+    private let keychainAccount = "api_key"
 
     var provider: AIProvider {
         get {
@@ -905,10 +922,27 @@ final class AIKeyStore {
 
     var apiKey: String {
         get {
+            if let keychainValue = Self.readKeychainPassword(service: keychainService, account: keychainAccount),
+               !keychainValue.isEmpty {
+                return keychainValue
+            }
             let stored = defaults.string(forKey: keyAPI) ?? ""
+            if !stored.isEmpty {
+                Self.writeKeychainPassword(stored, service: keychainService, account: keychainAccount)
+                defaults.removeObject(forKey: keyAPI)
+            }
             return stored.isEmpty ? AIConfig.defaultAPIKey : stored
         }
-        set { defaults.set(newValue, forKey: keyAPI) }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                Self.deleteKeychainPassword(service: keychainService, account: keychainAccount)
+                defaults.removeObject(forKey: keyAPI)
+            } else {
+                Self.writeKeychainPassword(trimmed, service: keychainService, account: keychainAccount)
+                defaults.removeObject(forKey: keyAPI)
+            }
+        }
     }
 
     /// Aktif sağlayıcının modeli — saklanan değer artık listede yoksa default'a düş.
@@ -927,6 +961,17 @@ final class AIKeyStore {
         }
     }
 
+    var openRouterModel: String {
+        get {
+            let stored = defaults.string(forKey: keyModelOpenRouter) ?? ""
+            if !stored.isEmpty && AIProvider.openRouter.availableModels.contains(stored) {
+                return stored
+            }
+            return AIProvider.openRouter.defaultModel
+        }
+        set { defaults.set(newValue, forKey: keyModelOpenRouter) }
+    }
+
     /// Codex intelligence (reasoning) seviyesi. Default: Low (en hızlı).
     var intelligence: IntelligenceLevel {
         get {
@@ -940,7 +985,51 @@ final class AIKeyStore {
     func makeClient() -> AIClient {
         switch provider {
         case .openRouter: return OpenRouterClient()
-        case .codex: return CodexClient()
+        case .codex: return CodexFirstFallbackClient()
         }
+    }
+
+    @discardableResult
+    private static func writeKeychainPassword(_ password: String, service: String, account: String) -> Bool {
+        guard let data = password.data(using: .utf8) else { return false }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        let update: [String: Any] = [
+            kSecValueData as String: data
+        ]
+        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if status == errSecSuccess { return true }
+        if status != errSecItemNotFound { return false }
+
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        return SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess
+    }
+
+    private static func readKeychainPassword(service: String, account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func deleteKeychainPassword(service: String, account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }

@@ -15,7 +15,7 @@ private enum AppToolError: LocalizedError {
     }
 }
 
-struct ChatConversation: Identifiable, Equatable, Codable {
+struct ChatConversation: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var title: String
     var messages: [ChatTurn]
@@ -52,23 +52,46 @@ final class ChatStore {
     @ObservationIgnored private var client: AIClient = AIKeyStore.shared.makeClient()
     @ObservationIgnored private var notificationToken: NSObjectProtocol?
     @ObservationIgnored private var supportRestoreToken: NSObjectProtocol?
+    @ObservationIgnored private var historyWriteTask: Task<Void, Never>?
+    @ObservationIgnored private let historyWriter = HistoryWriter()
+    @ObservationIgnored private var historyWriteSequence = 0
     @ObservationIgnored private let historyURL: URL = ChatStore.makeHistoryURL()
     @ObservationIgnored private let agentRouter: AgentRouter = .shared
 
     private static let historyRetention: TimeInterval = 7 * 24 * 60 * 60
     private static let memoryBackfillKey = "hercules.memory.backfill.v3.signature"
 
-    private struct HistoryPayload: Codable {
+    private struct HistoryPayload: Codable, Sendable {
         var version: Int
         var savedAt: Date
         var currentConversationID: UUID?
         var conversations: [ChatConversation]
     }
 
-    private struct LegacyHistoryPayload: Codable {
+    private struct LegacyHistoryPayload: Codable, Sendable {
         var version: Int
         var savedAt: Date
         var messages: [ChatTurn]
+    }
+
+    private actor HistoryWriter {
+        private var latestSequence = 0
+
+        func persist(payload: HistoryPayload?, url: URL, sequence: Int) {
+            guard sequence >= latestSequence else { return }
+            latestSequence = sequence
+
+            guard let payload else {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            guard let data = try? encoder.encode(payload) else { return }
+            try? data.write(to: url, options: [.atomic])
+        }
     }
 
     private static let encoder: JSONEncoder = {
@@ -110,6 +133,7 @@ final class ChatStore {
         if let token = supportRestoreToken {
             NotificationCenter.default.removeObserver(token)
         }
+        historyWriteTask?.cancel()
     }
 
     /// Sağlayıcı/model değişti, istemciyi yeniden kur.
@@ -175,13 +199,14 @@ final class ChatStore {
         persistHistory()
     }
 
-    func send(userContext: String? = nil, ctx: ModelContext? = nil) async {
+    func send(userContext: String? = nil, skillData: AgentDataSnapshot? = nil, ctx: ModelContext? = nil) async {
         if pruneExpiredConversations() {
             persistHistory()
         }
 
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
+        let requiresRecipeSource = AIConfig.requiresRecipeWebSearch(text)
         ensureCurrentConversation()
         if let ctx, handleInlineApprovalReply(text, ctx: ctx) {
             input = ""
@@ -211,7 +236,7 @@ final class ChatStore {
             query: text,
             appContext: userContext,
             history: historyBeforeSend,
-            modelContext: ctx
+            dataSnapshot: skillData
         )
         let effectiveContext = Self.joinContext(userContext, skillContext)
         lastUsedUserData = (effectiveContext != nil)
@@ -277,15 +302,19 @@ final class ChatStore {
                 }
             )
             flushStreamText(force: true)
-            let assistantText = result.message.isEmpty
+            let rawAssistantText = result.message.isEmpty
                 ? (result.name ?? "—")
                 : result.message
+            let recipeSearchSatisfied = !requiresRecipeSource || searchQuery != nil
+            let assistantText = recipeSearchSatisfied
+                ? rawAssistantText
+                : "Kanka tarif konusunda kaynaksız cevap vermeyi kapattım. Web araması tetiklenmediği için tarif üretmedim; tekrar denediğinde kaynaklı tarif arayacağım."
             if let idx = assistantIdx() {
                 setAssistantTextWithoutAnimation(assistantText)
-                messages[idx].food = result.isFood ? result : nil
-                messages[idx].actions = result.actionList
+                messages[idx].food = (recipeSearchSatisfied && result.isFood) ? result : nil
+                messages[idx].actions = recipeSearchSatisfied ? result.actionList : []
                 messages[idx].searchedFor = searchQuery
-                if let ctx {
+                if let ctx, recipeSearchSatisfied {
                     applyAutomaticActions(in: idx, ctx: ctx)
                 }
             }
@@ -428,7 +457,7 @@ final class ChatStore {
             return "Zaten bugüne eklemiştim kanka; tekrar kalori yazmadım."
         case .addRecipe:
             return "Zaten tariflere eklemiştim kanka; tekrar duplicate oluşturmadım."
-        case .updateWorkoutPlan, .updateMealPlan:
+        case .updateWorkoutPlan:
             return "Bu işlem zaten uygulanmış görünüyor kanka."
         }
     }
@@ -498,6 +527,13 @@ final class ChatStore {
             let title = nonEmpty(action.title ?? action.name, fallback: "")
             guard !title.isEmpty else {
                 throw AppToolError.missing("Tarif başlığı yok")
+            }
+            let sourceURL = recipeSourceURL(for: action, title: title)
+            guard isAcceptableRecipeSourceURL(sourceURL) else {
+                throw AppToolError.missing("Kaynak URL yok; AI tarifleri sadece web'den bulunan gerçek tarif linkiyle eklenebilir")
+            }
+            guard cleaned(action.ingredients) != nil, cleaned(action.instructions) != nil else {
+                throw AppToolError.missing("Kaynaklı tarif detayı eksik; malzeme ve yapılış olmadan eklenmedi")
             }
             let rawCategory = action.category ?? RecipeCategory.dinner.rawValue
             let category = RecipeCategory(rawValue: rawCategory) ?? .dinner
@@ -610,80 +646,6 @@ final class ChatStore {
                 return "\(WorkoutSession.weekdayNames[weekday]) antrenmanı güncellendi"
             }
 
-        case .updateMealPlan:
-            let weekday = try validWeekday(action.weekday)
-            let operation = action.mealOperation ?? "add_item"
-            switch operation {
-            case "set_day_type":
-                guard let raw = action.dayType,
-                      let dayType = MealDayType(rawValue: raw)
-                else {
-                    throw AppToolError.missing("Yemek günü tipi yok")
-                }
-                let overrides = (try? ctx.fetch(FetchDescriptor<MealPlanOverride>())) ?? []
-                for old in overrides where old.weekday == weekday && old.operation == .setDayType {
-                    ctx.delete(old)
-                }
-                ctx.insert(MealPlanOverride(
-                    weekday: weekday,
-                    operation: .setDayType,
-                    dayType: dayType,
-                    note: action.summary,
-                    source: "ai"
-                ))
-                try ctx.save()
-                return "\(WorkoutSession.weekdayNames[weekday]) yemek günü \(dayType.label) oldu"
-
-            case "add_item":
-                guard let rawSlot = action.mealSlot,
-                      let slot = MealSlot(rawValue: rawSlot)
-                else {
-                    throw AppToolError.missing("Öğün bilgisi yok")
-                }
-                let itemName = nonEmpty(action.itemName ?? action.name, fallback: "")
-                guard !itemName.isEmpty else {
-                    throw AppToolError.missing("Eklenecek yemek adı yok")
-                }
-                let amount = action.amount ?? action.grams
-                let unit = action.unit ?? (amount == nil ? nil : "g")
-                let overrides = (try? ctx.fetch(FetchDescriptor<MealPlanOverride>())) ?? []
-                if let existing = overrides.first(where: {
-                    $0.weekday == weekday
-                    && $0.operation == .addItem
-                    && $0.slot == slot
-                    && normalizedKey($0.displayName) == normalizedKey(itemName)
-                }) {
-                    existing.amount = amount ?? existing.amount
-                    existing.unit = unit ?? existing.unit
-                    existing.calories = action.calories ?? existing.calories
-                    existing.protein = action.proteinG ?? existing.protein
-                    existing.carbs = action.carbsG ?? existing.carbs
-                    existing.fat = action.fatG ?? existing.fat
-                    existing.note = action.summary ?? existing.note
-                    existing.source = "ai"
-                    existing.createdAt = .now
-                } else {
-                    ctx.insert(MealPlanOverride(
-                        weekday: weekday,
-                        operation: .addItem,
-                        slot: slot,
-                        itemName: itemName,
-                        amount: amount,
-                        unit: unit,
-                        calories: action.calories,
-                        protein: action.proteinG,
-                        carbs: action.carbsG,
-                        fat: action.fatG,
-                        note: action.summary,
-                        source: "ai"
-                    ))
-                }
-                try ctx.save()
-                return "\(WorkoutSession.weekdayNames[weekday]) \(slot.label.lowercased()) öğününe \(itemName) eklendi"
-
-            default:
-                throw AppToolError.unsupported("Yemek planı işlemi desteklenmiyor: \(operation)")
-            }
         }
     }
 
@@ -905,7 +867,7 @@ final class ChatStore {
     }
 
     private func applyRecipeDetails(from action: AIAppAction, title: String, to recipe: Recipe) {
-        let url = normalizedRecipeURL(action.url, title: title)
+        let url = recipeSourceURL(for: action, title: title)
         if !url.isEmpty {
             recipe.urlString = url
         }
@@ -954,6 +916,32 @@ final class ChatStore {
             return trimmed
         }
         return "https://\(trimmed)"
+    }
+
+    private func recipeSourceURL(for action: AIAppAction, title: String) -> String {
+        normalizedRecipeURL(action.url ?? action.sourceURL, title: title)
+    }
+
+    private func isAcceptableRecipeSourceURL(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = url.host?.lowercased(),
+              !host.isEmpty
+        else { return false }
+
+        let blockedHostFragments = [
+            "google.", "bing.", "duckduckgo.", "search.yahoo.", "yandex.", "perplexity.",
+            "chatgpt.", "openai.", "localhost", "127.0.0.1"
+        ]
+        guard !blockedHostFragments.contains(where: { host.contains($0) }) else {
+            return false
+        }
+        guard !trimmed.contains("...") else {
+            return false
+        }
+        return true
     }
 
     func clear() {
@@ -1140,8 +1128,15 @@ final class ChatStore {
             !conversation.messages.isEmpty || conversation.id == currentConversationID
         }
         let hasSavedConversation = conversationsToPersist.contains { !$0.messages.isEmpty }
+        let url = historyURL
+        historyWriteSequence += 1
+        let sequence = historyWriteSequence
+        historyWriteTask?.cancel()
         if !hasSavedConversation {
-            try? FileManager.default.removeItem(at: historyURL)
+            historyWriteTask = Task(priority: .utility) { [historyWriter] in
+                guard !Task.isCancelled else { return }
+                await historyWriter.persist(payload: nil, url: url, sequence: sequence)
+            }
             return
         }
 
@@ -1151,8 +1146,10 @@ final class ChatStore {
             currentConversationID: currentConversationID,
             conversations: conversationsToPersist
         )
-        guard let data = try? Self.encoder.encode(payload) else { return }
-        try? data.write(to: historyURL, options: [.atomic])
+        historyWriteTask = Task(priority: .utility) { [historyWriter] in
+            guard !Task.isCancelled else { return }
+            await historyWriter.persist(payload: payload, url: url, sequence: sequence)
+        }
     }
 
     private func startBlankConversation() {

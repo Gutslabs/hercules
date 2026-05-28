@@ -1,5 +1,4 @@
 import Foundation
-import SwiftData
 
 enum EvidenceStrength: String {
     case high = "yüksek"
@@ -81,17 +80,18 @@ enum CoachIntelligence {
         )
     ]
 
-    static func buildContext(query: String, ctx: ModelContext) -> String? {
+    static func buildContext(query: String, data: AgentDataSnapshot) -> String? {
         guard AgentQueryClassifier.isCoachQuery(query),
               !AgentQueryClassifier.isLikelyFoodLog(query)
         else { return nil }
 
-        let profile = fetchProfile(ctx)
-        let measurements = fetchMeasurements(ctx)
-        let foods = fetchFoods(ctx)
-        let steps = fetchSteps(ctx)
-        let workoutLogs = fetchWorkoutLogs(ctx)
-        let sessions = fetchWorkoutSessions(ctx)
+        let profile = data.profile
+        let measurements = data.measurements
+        let foods = data.foods
+        let steps = data.steps
+        let workoutLogs = data.workoutLogs
+        let sessions = data.workoutSessions
+        let scope = data.scope
 
         var sections: [String] = []
 
@@ -101,7 +101,8 @@ enum CoachIntelligence {
             foods: foods,
             steps: steps,
             workoutLogs: workoutLogs,
-            sessions: sessions
+            sessions: sessions,
+            scope: scope
         ) {
             sections.append(personal)
         }
@@ -111,7 +112,8 @@ enum CoachIntelligence {
             measurements: measurements,
             foods: foods,
             steps: steps,
-            workoutLogs: workoutLogs
+            workoutLogs: workoutLogs,
+            scope: scope
         )
         if !flags.isEmpty {
             sections.append(flagSection(flags))
@@ -127,7 +129,8 @@ enum CoachIntelligence {
             measurements: measurements,
             foods: foods,
             steps: steps,
-            workoutLogs: workoutLogs
+            workoutLogs: workoutLogs,
+            scope: scope
         ) {
             sections.append(review)
         }
@@ -139,12 +142,13 @@ enum CoachIntelligence {
     // MARK: - Personal model
 
     private static func personalModelSection(
-        profile: UserProfile?,
-        measurements: [Measurement],
-        foods: [FoodEntry],
-        steps: [StepEntry],
-        workoutLogs: [WorkoutLog],
-        sessions: [WorkoutSession]
+        profile: AgentUserProfileSnapshot?,
+        measurements: [AgentMeasurementSnapshot],
+        foods: [AgentFoodSnapshot],
+        steps: [AgentStepSnapshot],
+        workoutLogs: [AgentWorkoutLogSnapshot],
+        sessions: [AgentWorkoutSessionSnapshot],
+        scope: AgentDataScope
     ) -> String? {
         var lines = ["[COACH PERSONAL MODEL — uygulama verisinden hesaplandı]"]
 
@@ -156,6 +160,17 @@ enum CoachIntelligence {
         if let profile, let weight {
             let target = dailyTarget(profile: profile, latestWeight: weight, bodyFat: bodyFat)
             lines.append("- App hedef kalorisi: \(Fmt.int(target.goalCalories)) kcal/gün; BMR \(Fmt.int(target.bmr)) · TDEE \(Fmt.int(target.tdee))")
+            lines.append("- App makro hedefi: P \(Fmt.int(target.protein.grams))g · K \(Fmt.int(target.carbs.grams))g · Y \(Fmt.int(target.fat.grams))g")
+            if profile.manualProteinGrams != nil || profile.manualCarbsGrams != nil || profile.manualFatGrams != nil {
+                lines.append("- Profilde manuel makro hedefi aktif; kalori hedefi bu makroların toplamından hesaplanıyor.")
+            }
+            let supplements = profile.supplements
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !supplements.isEmpty {
+                lines.append("- Supplementler: \(supplements.joined(separator: " · "))")
+            }
         }
 
         if let weight {
@@ -175,30 +190,32 @@ enum CoachIntelligence {
         }
 
         for days in [7, 30] {
+            guard scope.coversFoods(days: days) else { continue }
             let nutrition = nutritionStats(foods: foods, days: days)
             guard nutrition.loggedDays > 0 else { continue }
             lines.append("- Beslenme \(days) gün: \(nutrition.loggedDays)/\(nutrition.totalDays) gün log · ort. \(Fmt.int(nutrition.avgKcal)) kcal · P \(Fmt.int(nutrition.avgProtein))g · K \(Fmt.int(nutrition.avgCarbs))g · Y \(Fmt.int(nutrition.avgFat))g")
         }
 
         for days in [7, 30] {
+            guard scope.coversSteps(days: days) else { continue }
             let step = stepStats(steps: steps, days: days)
             guard step.loggedDays > 0 else { continue }
             lines.append("- Adım \(days) gün: toplam \(Fmt.int(Double(step.totalSteps))) · takvim ort. \(Fmt.int(Double(step.calendarAverage))) adım/gün · loglu gün ort. \(Fmt.int(Double(step.loggedAverage)))")
         }
 
         let workout = workoutStats(logs: workoutLogs, plannedSessions: sessions)
-        if workout.plannedDays > 0 || workout.last30Count > 0 {
+        if workout.plannedDays > 0 || (scope.coversWorkoutLogs(days: 30) && workout.last30Count > 0) {
             lines.append("- Antrenman: plan \(workout.plannedDays) gün/hafta · son 30 gün \(workout.last30Count) seans · gerçek frekans \(String(format: "%.1f", workout.frequencyPerWeek))/hafta")
         }
 
-        if let tdee = calibratedTDEE(measurements: measurements, foods: foods) {
+        if scope.coversFoods(days: 21), let tdee = calibratedTDEE(measurements: measurements, foods: foods) {
             lines.append("- Tahmini gerçek maintenance: \(Fmt.int(tdee.estimate)) kcal/gün (\(tdee.confidence) güven; \(tdee.note))")
         }
 
         return lines.count > 1 ? lines.joined(separator: "\n") : nil
     }
 
-    private static func dailyTarget(profile: UserProfile, latestWeight: Double, bodyFat: Double?) -> CalorieResult {
+    private static func dailyTarget(profile: AgentUserProfileSnapshot, latestWeight: Double, bodyFat: Double?) -> CalorieResult {
         CalorieCalculator.compute(
             weight: latestWeight,
             height: profile.height,
@@ -207,7 +224,11 @@ enum CoachIntelligence {
             bodyFat: bodyFat,
             activity: profile.activity,
             goal: profile.goal,
-            manualOffset: profile.manualCalorieOffset
+            manualOffset: profile.manualCalorieOffset,
+            manualOffsetMacro: profile.manualCalorieOffsetMacro,
+            manualProteinGrams: profile.manualProteinGrams,
+            manualCarbsGrams: profile.manualCarbsGrams,
+            manualFatGrams: profile.manualFatGrams
         )
     }
 
@@ -220,7 +241,7 @@ enum CoachIntelligence {
         return (floor.rounded(), targetLow.rounded(), targetHigh.rounded())
     }
 
-    private static func weightDelta(measurements: [Measurement], days: Int) -> (kg: Double, percentPerWeek: Double)? {
+    private static func weightDelta(measurements: [AgentMeasurementSnapshot], days: Int) -> (kg: Double, percentPerWeek: Double)? {
         guard let latest = measurements.first(where: { $0.weight != nil }),
               let latestWeight = latest.weight
         else { return nil }
@@ -240,7 +261,7 @@ enum CoachIntelligence {
         return (kg, percentPerWeek)
     }
 
-    private static func nutritionStats(foods: [FoodEntry], days: Int) -> (totalDays: Int, loggedDays: Int, avgKcal: Double, avgProtein: Double, avgCarbs: Double, avgFat: Double) {
+    private static func nutritionStats(foods: [AgentFoodSnapshot], days: Int) -> (totalDays: Int, loggedDays: Int, avgKcal: Double, avgProtein: Double, avgCarbs: Double, avgFat: Double) {
         let cal = Calendar.current
         let range = CalorieStats.last(days: days, in: cal)
         let inRange = foods.filter { range.contains($0.date) }
@@ -257,11 +278,11 @@ enum CoachIntelligence {
         )
     }
 
-    private static func stepStats(steps: [StepEntry], days: Int) -> (loggedDays: Int, totalSteps: Int, calendarAverage: Int, loggedAverage: Int) {
+    private static func stepStats(steps: [AgentStepSnapshot], days: Int) -> (loggedDays: Int, totalSteps: Int, calendarAverage: Int, loggedAverage: Int) {
         let cal = Calendar.current
         let start = cal.startOfDay(for: cal.date(byAdding: .day, value: -(days - 1), to: .now) ?? .now)
         let inRange = steps.filter { $0.date >= start }
-        var bestByDay: [Date: StepEntry] = [:]
+        var bestByDay: [Date: AgentStepSnapshot] = [:]
         for entry in inRange {
             let day = cal.startOfDay(for: entry.date)
             if let existing = bestByDay[day] {
@@ -284,7 +305,7 @@ enum CoachIntelligence {
         )
     }
 
-    private static func workoutStats(logs: [WorkoutLog], plannedSessions: [WorkoutSession]) -> (plannedDays: Int, last30Count: Int, frequencyPerWeek: Double) {
+    private static func workoutStats(logs: [AgentWorkoutLogSnapshot], plannedSessions: [AgentWorkoutSessionSnapshot]) -> (plannedDays: Int, last30Count: Int, frequencyPerWeek: Double) {
         let start = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now
         let last30 = logs.filter { $0.date >= start }
         return (
@@ -294,7 +315,7 @@ enum CoachIntelligence {
         )
     }
 
-    private static func calibratedTDEE(measurements: [Measurement], foods: [FoodEntry]) -> (estimate: Double, confidence: String, note: String)? {
+    private static func calibratedTDEE(measurements: [AgentMeasurementSnapshot], foods: [AgentFoodSnapshot]) -> (estimate: Double, confidence: String, note: String)? {
         let cal = Calendar.current
         let lookbackDays = 21
         let start = cal.date(byAdding: .day, value: -lookbackDays, to: .now) ?? .now
@@ -330,18 +351,19 @@ enum CoachIntelligence {
     // MARK: - Decision flags
 
     private static func decisionFlags(
-        profile: UserProfile?,
-        measurements: [Measurement],
-        foods: [FoodEntry],
-        steps: [StepEntry],
-        workoutLogs: [WorkoutLog]
+        profile: AgentUserProfileSnapshot?,
+        measurements: [AgentMeasurementSnapshot],
+        foods: [AgentFoodSnapshot],
+        steps: [AgentStepSnapshot],
+        workoutLogs: [AgentWorkoutLogSnapshot],
+        scope: AgentDataScope
     ) -> [CoachDecisionFlag] {
         var flags: [CoachDecisionFlag] = []
         let latestWeight = measurements.first?.weight
-        let nutrition7 = nutritionStats(foods: foods, days: 7)
-        let step7 = stepStats(steps: steps, days: 7)
+        let nutrition7 = scope.coversFoods(days: 7) ? nutritionStats(foods: foods, days: 7) : nil
+        let step7 = scope.coversSteps(days: 7) ? stepStats(steps: steps, days: 7) : nil
 
-        if nutrition7.loggedDays < 5 {
+        if let nutrition7, nutrition7.loggedDays < 5 {
             flags.append(CoachDecisionFlag(
                 level: "data",
                 title: "Kalori verisi seyrek",
@@ -351,7 +373,7 @@ enum CoachIntelligence {
 
         if let latestWeight {
             let protein = proteinRange(weight: latestWeight, leanMass: measurements.first?.leanMass)
-            if nutrition7.loggedDays >= 3 && nutrition7.avgProtein < protein.floor {
+            if let nutrition7, nutrition7.loggedDays >= 3 && nutrition7.avgProtein < protein.floor {
                 flags.append(CoachDecisionFlag(
                     level: "nutrition",
                     title: "Protein alt bandın altında",
@@ -367,7 +389,7 @@ enum CoachIntelligence {
                             title: "Kayıp hızı agresif olabilir",
                             detail: "14 günlük tempo \(Fmt.signed(delta14.percentPerWeek, digits: 2))%/hafta; performans/recovery düşüyorsa kaloriyi kısmak yerine sabitlemek daha mantıklı."
                         ))
-                    } else if delta14.percentPerWeek > -0.25 && nutrition7.loggedDays >= 5 {
+                    } else if delta14.percentPerWeek > -0.25 && (nutrition7?.loggedDays ?? 0) >= 5 {
                         flags.append(CoachDecisionFlag(
                             level: "cut",
                             title: "Kayıp hızı yavaş",
@@ -378,7 +400,7 @@ enum CoachIntelligence {
             }
         }
 
-        if step7.loggedDays > 0 && step7.calendarAverage < 6000 {
+        if let step7, step7.loggedDays > 0 && step7.calendarAverage < 6000 {
             flags.append(CoachDecisionFlag(
                 level: "activity",
                 title: "Adım düşük/orta",
@@ -387,7 +409,7 @@ enum CoachIntelligence {
         }
 
         let workout = workoutStats(logs: workoutLogs, plannedSessions: [])
-        if workout.last30Count > 0 && workout.frequencyPerWeek < 2.0 {
+        if scope.coversWorkoutLogs(days: 30) && workout.last30Count > 0 && workout.frequencyPerWeek < 2.0 {
             flags.append(CoachDecisionFlag(
                 level: "training",
                 title: "Antrenman frekansı düşük",
@@ -441,57 +463,36 @@ enum CoachIntelligence {
     // MARK: - Weekly review
 
     private static func weeklyReviewSection(
-        profile: UserProfile?,
-        measurements: [Measurement],
-        foods: [FoodEntry],
-        steps: [StepEntry],
-        workoutLogs: [WorkoutLog]
+        profile: AgentUserProfileSnapshot?,
+        measurements: [AgentMeasurementSnapshot],
+        foods: [AgentFoodSnapshot],
+        steps: [AgentStepSnapshot],
+        workoutLogs: [AgentWorkoutLogSnapshot],
+        scope: AgentDataScope
     ) -> String? {
-        let nutrition = nutritionStats(foods: foods, days: 7)
-        let step = stepStats(steps: steps, days: 7)
+        let nutrition = scope.coversFoods(days: 7) ? nutritionStats(foods: foods, days: 7) : nil
+        let step = scope.coversSteps(days: 7) ? stepStats(steps: steps, days: 7) : nil
         let workout = workoutStats(logs: workoutLogs, plannedSessions: [])
-        guard nutrition.loggedDays > 0 || step.loggedDays > 0 || workout.last30Count > 0 else { return nil }
+        guard (nutrition?.loggedDays ?? 0) > 0
+            || (step?.loggedDays ?? 0) > 0
+            || (scope.coversWorkoutLogs(days: 30) && workout.last30Count > 0)
+        else { return nil }
 
         var lines = ["[WEEKLY COACH REVIEW SEED]"]
-        if nutrition.loggedDays > 0 {
+        if let nutrition, nutrition.loggedDays > 0 {
             lines.append("- Bu hafta beslenme: \(nutrition.loggedDays)/7 gün log · \(Fmt.int(nutrition.avgKcal)) kcal/gün · P \(Fmt.int(nutrition.avgProtein))g/gün.")
         }
-        if step.loggedDays > 0 {
+        if let step, step.loggedDays > 0 {
             lines.append("- Bu hafta hareket: \(step.calendarAverage) adım/gün takvim ortalaması.")
         }
         if let delta = weightDelta(measurements: measurements, days: 7) {
             lines.append("- Bu hafta tartı: \(Fmt.signed(delta.kg, digits: 2)) kg.")
         }
-        if workout.last30Count > 0 {
+        if scope.coversWorkoutLogs(days: 30) && workout.last30Count > 0 {
             lines.append("- Antrenman ritmi: son 30 gün \(workout.last30Count) seans; \(String(format: "%.1f", workout.frequencyPerWeek))/hafta.")
         }
         lines.append("- Varsayılan koç kararı: veri çok net değilse büyük plan değişikliği yerine 7 günlük takip, küçük eşik ayarı ve adherence öner.")
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Fetching
-
-    private static func fetchProfile(_ ctx: ModelContext) -> UserProfile? {
-        (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first
-    }
-
-    private static func fetchMeasurements(_ ctx: ModelContext) -> [Measurement] {
-        (try? ctx.fetch(FetchDescriptor<Measurement>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
-    }
-
-    private static func fetchFoods(_ ctx: ModelContext) -> [FoodEntry] {
-        (try? ctx.fetch(FetchDescriptor<FoodEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
-    }
-
-    private static func fetchSteps(_ ctx: ModelContext) -> [StepEntry] {
-        (try? ctx.fetch(FetchDescriptor<StepEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
-    }
-
-    private static func fetchWorkoutLogs(_ ctx: ModelContext) -> [WorkoutLog] {
-        (try? ctx.fetch(FetchDescriptor<WorkoutLog>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
-    }
-
-    private static func fetchWorkoutSessions(_ ctx: ModelContext) -> [WorkoutSession] {
-        (try? ctx.fetch(FetchDescriptor<WorkoutSession>())) ?? []
-    }
 }

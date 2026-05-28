@@ -55,7 +55,7 @@
       "size" : "512x512"
     },
     {
-      "filename" : "icon_1024.png",
+      "filename" : "herculeslogo.png",
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "512x512"
@@ -109,7 +109,7 @@
       "size" : "60x60"
     },
     {
-      "filename" : "icon_1024.png",
+      "filename" : "herculeslogo.png",
       "idiom" : "ios-marketing",
       "scale" : "1x",
       "size" : "1024x1024"

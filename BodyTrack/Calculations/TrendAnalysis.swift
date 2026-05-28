@@ -1,9 +1,12 @@
 import Foundation
 
-struct TrendPoint: Identifiable {
-    let id = UUID()
+struct TrendPoint: Identifiable, Hashable {
     let date: Date
     let value: Double
+
+    var id: Int64 {
+        Int64((date.timeIntervalSinceReferenceDate * 1000).rounded())
+    }
 }
 
 struct LinearFit {

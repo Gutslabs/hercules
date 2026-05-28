@@ -10,6 +10,7 @@ struct CalendarView: View {
 
     @State private var showingSetup = false
     @State private var editing: MonthlyGoal? = nil
+    @State private var editingFoodDate: FoodEntry? = nil
     @State private var showingClearConfirm = false
     @State private var currentMonth: Date = Self.startOfMonth(.now)
     @State private var selectedDay: Date = Calendar.current.startOfDay(for: .now)
@@ -31,7 +32,11 @@ struct CalendarView: View {
             bodyFat: bf,
             activity: profile.activity,
             goal: profile.goal,
-            manualOffset: profile.manualCalorieOffset
+            manualOffset: profile.manualCalorieOffset,
+            manualOffsetMacro: profile.manualCalorieOffsetMacro,
+            manualProteinGrams: profile.manualProteinGrams,
+            manualCarbsGrams: profile.manualCarbsGrams,
+            manualFatGrams: profile.manualFatGrams
         )
         return result.goalCalories
     }
@@ -50,21 +55,22 @@ struct CalendarView: View {
 
     var body: some View {
         let consumedDict = consumedByDay
-        return ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                header
-                statsStrip
-                monthNavBar
-                calendarGridBody(consumed: consumedDict)
-                selectedDayDetail
-                if !goals.isEmpty {
-                    monthlyGoalsStrip
-                } else {
-                    emptyState
+        return GeometryReader { proxy in
+            let contentWidth = proxy.size.width
+            let compact = contentWidth < 860
+            let expansive = contentWidth >= 1500
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: compact ? Spacing.xl : Spacing.xxl) {
+                    header(compact: compact)
+                    statsStrip
+                    calendarDesk(consumed: consumedDict)
+                    Spacer(minLength: 24)
                 }
-                Spacer(minLength: 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, compact ? Spacing.lg : (expansive ? 44 : Spacing.xxl))
+                .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
             }
-            .padding(Spacing.xxl)
         }
         .toolbar {
             if !goals.isEmpty {
@@ -112,6 +118,20 @@ struct CalendarView: View {
                 onCancel: { editing = nil }
             )
         }
+        .sheet(item: $editingFoodDate) { food in
+            FoodDateEditorSheet(
+                food: food,
+                selectedDay: selectedDay,
+                onSave: { newDate in
+                    food.date = newDate
+                    try? ctx.save()
+                    selectedDay = Calendar.current.startOfDay(for: newDate)
+                    currentMonth = Self.startOfMonth(newDate)
+                    editingFoodDate = nil
+                },
+                onCancel: { editingFoodDate = nil }
+            )
+        }
         .alert("Tüm hedefleri sil?", isPresented: $showingClearConfirm) {
             Button("İptal", role: .cancel) { }
             Button("Hepsini Sil", role: .destructive) { clearAll() }
@@ -122,54 +142,108 @@ struct CalendarView: View {
 
     // MARK: - Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Takvim").eyebrow()
-            Text("Aylık Hedefler")
-                .font(Typography.display(40))
+    private func header(compact: Bool) -> some View {
+        Group {
+            if compact {
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    headerCopy
+                    calendarTargetBadge
+                }
+            } else {
+                HStack(alignment: .bottom, spacing: Spacing.xxxl) {
+                    headerCopy
+                    Spacer(minLength: Spacing.xxxl)
+                    calendarTargetBadge
+                        .frame(width: 360)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var headerCopy: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("BESLENME TAKİBİ").eyebrow()
+            Text("Takvim")
+                .font(Typography.display(42))
                 .foregroundStyle(Palette.textPrimary)
-            Text("Her ay için kilo hedefi koy, gidişatı takip et.")
+            Text("Günlük kayıtları, ay içi kalori ritmini ve kilo hedeflerini tek panoda gör.")
                 .font(Typography.body)
                 .foregroundStyle(Palette.textSecondary)
         }
     }
 
+    private var calendarTargetBadge: some View {
+        HStack(spacing: Spacing.md) {
+            Image(systemName: "scope")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Palette.accent.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("GÜNLÜK HEDEF")
+                    .font(Typography.label)
+                    .tracking(0.8)
+                    .foregroundStyle(Palette.textTertiary)
+                Text("\(Fmt.int(dailyTarget)) kcal")
+                    .font(Typography.titleSmall)
+                    .foregroundStyle(Palette.textPrimary)
+                Text(profile == nil || latestMeasurement == nil ? "Profil ve son ölçüm bekleniyor" : "Profildeki hedeften okunuyor")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Palette.surface.opacity(0.84))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.6)
+        )
+    }
+
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.lg) {
-            ZStack {
-                Circle()
-                    .fill(Palette.accent.opacity(0.12))
-                    .frame(width: 80, height: 80)
-                Image(systemName: "calendar.badge.plus")
-                    .font(.system(size: 32, weight: .light))
-                    .foregroundStyle(Palette.accent)
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .fill(Palette.accent.opacity(0.12))
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Palette.accent)
+                }
+                .frame(width: 42, height: 42)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Hedef rotası yok")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("Aylık kilo hedeflerini ekleyince takvimde hedef günleri işaretlenir.")
+                        .font(Typography.body)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineSpacing(3)
+                }
             }
-            VStack(spacing: 6) {
-                Text("Henüz plan yok")
-                    .font(Typography.title)
-                    .foregroundStyle(Palette.textPrimary)
-                Text("12 aylık takvim oluştur, her ayın hedefini belirle.\nÖrnek: 8 Mayıs · 94 kg → 8 Haziran · 90 kg")
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+
             PrimaryButton(title: "Plan Oluştur", systemImage: "wand.and.stars") {
                 showingSetup = true
             }
-            .frame(width: 220)
+            .frame(maxWidth: 220, alignment: .leading)
         }
-        .padding(Spacing.xxxl)
+        .padding(Spacing.lg)
         .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .fill(Palette.surface)
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface.opacity(0.78))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
     }
@@ -182,88 +256,130 @@ struct CalendarView: View {
         let month = CalorieStats.stats(for: CalorieStats.thisMonth(), foods: allFoods, dailyTarget: dailyTarget)
         let last30 = CalorieStats.stats(for: CalorieStats.last(days: 30), foods: allFoods, dailyTarget: dailyTarget)
 
-        return HStack(spacing: Spacing.md) {
-            statCard(
-                eyebrow: "Bugün",
-                primary: "\(Fmt.int(today.totalConsumed)) kcal",
-                secondaryLeft: "/ \(Fmt.int(dailyTarget))",
-                balance: today.netBalance,
-                detail: "hedef günlük"
-            )
-            statCard(
-                eyebrow: "Bu Hafta",
-                primary: "\(Fmt.int(week.totalConsumed)) kcal",
-                secondaryLeft: "\(week.loggedDays) gün",
-                balance: week.netBalance,
-                detail: "ort. \(Fmt.int(week.averageDailyKcal))/gün"
-            )
-            statCard(
-                eyebrow: "Bu Ay",
-                primary: "\(Fmt.int(month.totalConsumed)) kcal",
-                secondaryLeft: "\(month.loggedDays) gün",
-                balance: month.netBalance,
-                detail: "ort. \(Fmt.int(month.averageDailyKcal))/gün"
-            )
-            statCard(
-                eyebrow: "Son 30 Gün",
-                primary: "\(Fmt.signed(last30.averageDailyBalance, digits: 0)) kcal/gün",
-                secondaryLeft: "ort. net",
-                balance: last30.netBalance,
-                detail: "toplam \(Fmt.signed(last30.netBalance, digits: 0))"
-            )
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: Spacing.lg) {
+                todaySpotlight(today)
+                    .frame(width: 390)
+                VStack(spacing: Spacing.md) {
+                    HStack(spacing: Spacing.md) {
+                        periodLine("Bu hafta", stats: week, mode: .total)
+                        periodLine("Bu ay", stats: month, mode: .total)
+                    }
+                    periodLine("Son 30 gün", stats: last30, mode: .average)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                todaySpotlight(today)
+                periodLine("Bu hafta", stats: week, mode: .total)
+                periodLine("Bu ay", stats: month, mode: .total)
+                periodLine("Son 30 gün", stats: last30, mode: .average)
+            }
         }
     }
 
-    private func statCard(
-        eyebrow: String,
-        primary: String,
-        secondaryLeft: String,
-        balance: Double,
-        detail: String
-    ) -> some View {
-        let balanceTint: Color = {
-            if balance > 200 { return Palette.warning }
-            if balance < -200 { return Palette.positive }
-            return Palette.textSecondary
-        }()
-        let balanceLabel: String = {
-            if balance > 0 { return "+\(Fmt.int(balance)) fazla" }
-            if balance < 0 { return "\(Fmt.int(balance)) açık" }
-            return "dengeli"
-        }()
+    private enum PeriodDisplayMode {
+        case total, average
+    }
 
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(eyebrow.uppercased()).eyebrow()
-                Spacer(minLength: 0)
+    private func todaySpotlight(_ stats: CaloriePeriodStats) -> some View {
+        let consumed = stats.totalConsumed
+        let balance = consumed - dailyTarget
+        let remaining = dailyTarget - consumed
+        let progress = dailyTarget > 0 ? min(1, max(0, consumed / dailyTarget)) : 0
+        return VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("BUGÜN").eyebrow()
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(Fmt.int(consumed))")
+                            .font(Typography.hero(38))
+                            .foregroundStyle(targetColor(consumed: consumed, target: dailyTarget))
+                            .contentTransition(.numericText())
+                        Text("kcal")
+                            .font(Typography.body)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(balanceText(balance))
+                        .font(Typography.captionBold)
+                        .foregroundStyle(balanceTint(balance))
+                    Text(remaining >= 0 ? "\(Fmt.int(remaining)) kcal kaldı" : "\(Fmt.int(abs(remaining))) kcal geçti")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
             }
-            Text(primary)
-                .font(Typography.hero(20))
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .contentTransition(.numericText())
-                .animation(.snappy, value: primary)
-            HStack(spacing: 6) {
-                Text(secondaryLeft)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Palette.border)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(targetColor(consumed: consumed, target: dailyTarget))
+                        .frame(width: geo.size.width * progress)
+                }
+            }
+            .frame(height: 4)
+
+            HStack(spacing: Spacing.md) {
+                miniStat(label: "Hedef", value: "\(Fmt.int(dailyTarget))")
+                miniStat(label: "Kayıt", value: "\(stats.loggedDays)")
+                miniStat(label: "Net", value: Fmt.signed(balance, digits: 0))
+            }
+        }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface.opacity(0.86))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.7)
+        )
+        .overlay(alignment: .topLeading) {
+            Capsule(style: .continuous)
+                .fill(Palette.accent)
+                .frame(width: 84, height: 2)
+                .padding(.leading, Spacing.lg)
+        }
+    }
+
+    private func periodLine(_ title: String, stats: CaloriePeriodStats, mode: PeriodDisplayMode) -> some View {
+        let primary = mode == .total
+            ? "\(Fmt.int(stats.totalConsumed)) kcal"
+            : "\(Fmt.signed(stats.averageDailyBalance, digits: 0)) kcal/gün"
+        let subtitle = mode == .total
+            ? "\(stats.loggedDays) gün kayıtlı · ort. \(Fmt.int(stats.averageDailyKcal)) kcal"
+            : "toplam \(Fmt.signed(stats.netBalance, digits: 0)) · \(stats.loggedDays) gün"
+        return HStack(spacing: Spacing.md) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title.uppercased()).eyebrow()
+                Text(primary)
+                    .font(Typography.titleSmall)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Text(subtitle)
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
-                Spacer(minLength: 0)
-                Text(balanceLabel)
-                    .font(Typography.captionBold)
-                    .foregroundStyle(balanceTint)
-                    .contentTransition(.numericText())
-                    .animation(.snappy, value: balanceLabel)
+                    .lineLimit(1)
             }
-            Text(detail)
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textQuaternary)
+            Spacer(minLength: Spacing.sm)
+            Text(balanceText(stats.netBalance))
+                .font(Typography.captionBold)
+                .foregroundStyle(balanceTint(stats.netBalance))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(balanceTint(stats.netBalance).opacity(0.12)))
         }
         .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surface)
+                .fill(Palette.surface.opacity(0.78))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
@@ -271,9 +387,48 @@ struct CalendarView: View {
         )
     }
 
+    private func miniStat(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(Typography.label)
+                .tracking(0.8)
+                .foregroundStyle(Palette.textQuaternary)
+            Text(value)
+                .font(Typography.mono)
+                .foregroundStyle(Palette.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func balanceText(_ balance: Double) -> String {
+        if abs(balance) < 1 { return "dengeli" }
+        return balance > 0 ? "+\(Fmt.int(balance)) fazla" : "\(Fmt.int(balance)) açık"
+    }
+
+    private func balanceTint(_ balance: Double) -> Color {
+        if balance > 200 { return Palette.warning }
+        if balance < -200 { return Palette.positive }
+        return Palette.textSecondary
+    }
+
     // MARK: - Month navigation
 
     private var monthNavBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.md) {
+                monthPickerGroup
+                Spacer()
+                monthActionsGroup
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                monthPickerGroup
+                monthActionsGroup
+            }
+        }
+    }
+
+    private var monthPickerGroup: some View {
         HStack(spacing: Spacing.md) {
             navButton(icon: "chevron.left") { jumpMonth(by: -1) }
             VStack(alignment: .leading, spacing: 2) {
@@ -285,31 +440,12 @@ struct CalendarView: View {
                     .foregroundStyle(Palette.textTertiary)
             }
             navButton(icon: "chevron.right") { jumpMonth(by: 1) }
+        }
+    }
 
-            Spacer()
-
-            // "Bugün"
-            Button {
-                let today = Calendar.current.startOfDay(for: .now)
-                currentMonth = Self.startOfMonth(.now)
-                selectedDay = today
-            } label: {
-                Text("Bugün")
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Palette.surface)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .strokeBorder(Palette.border, lineWidth: 0.5)
-                    )
-            }
-            .buttonStyle(.plain)
-
+    private var monthActionsGroup: some View {
+        HStack(spacing: Spacing.md) {
+            todayButton
             VStack(alignment: .trailing, spacing: 1) {
                 Text("Günlük hedef")
                     .font(Typography.label)
@@ -320,6 +456,34 @@ struct CalendarView: View {
                     .foregroundStyle(Palette.textPrimary)
             }
         }
+    }
+
+    private var todayButton: some View {
+        Button {
+            let today = Calendar.current.startOfDay(for: .now)
+            currentMonth = Self.startOfMonth(.now)
+            selectedDay = today
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "smallcircle.filled.circle")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                Text("Bugün")
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(Palette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func navButton(icon: String, action: @escaping () -> Void) -> some View {
@@ -338,6 +502,52 @@ struct CalendarView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Calendar desk
+
+    private func calendarDesk(consumed: [Date: Double]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: Spacing.xl) {
+                calendarPanel(consumed: consumed)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    selectedDayDetail
+                    if !goals.isEmpty {
+                        monthlyGoalsStrip
+                    } else {
+                        emptyState
+                    }
+                }
+                .frame(width: 390, alignment: .topLeading)
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                calendarPanel(consumed: consumed)
+                selectedDayDetail
+                if !goals.isEmpty {
+                    monthlyGoalsStrip
+                } else {
+                    emptyState
+                }
+            }
+        }
+    }
+
+    private func calendarPanel(consumed: [Date: Double]) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            monthNavBar
+            calendarGridBody(consumed: consumed)
+        }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface.opacity(0.78))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.65)
+        )
     }
 
     // MARK: - Calendar grid
@@ -392,68 +602,206 @@ struct CalendarView: View {
         let p = foods.compactMap(\.protein).reduce(0, +)
         let c = foods.compactMap(\.carbs).reduce(0, +)
         let f = foods.compactMap(\.fat).reduce(0, +)
+        let remaining = dailyTarget - consumed
+        let progress = dailyTarget > 0 ? min(1, max(0, consumed / dailyTarget)) : 0
 
-        return Card(padding: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                HStack(alignment: .firstTextBaseline) {
+        return VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: Spacing.sm) {
+                        Text("SEÇİLİ GÜN").eyebrow()
+                        if Calendar.current.isDateInToday(selectedDay) {
+                            PillTag(text: "BUGÜN", tint: Palette.accent)
+                        }
+                    }
                     Text(Self.fullDayFormatter.string(from: selectedDay))
                         .font(Typography.title)
                         .foregroundStyle(Palette.textPrimary)
-                    if Calendar.current.isDateInToday(selectedDay) {
-                        PillTag(text: "Bugün", tint: Palette.textSecondary)
-                    }
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Text("\(Fmt.int(consumed))")
-                            .font(Typography.hero(26))
-                            .foregroundStyle(targetColor(consumed: consumed, target: dailyTarget))
-                            .contentTransition(.numericText())
-                            .animation(.snappy, value: consumed)
-                        Text("/ \(Fmt.int(dailyTarget)) kcal")
-                            .font(Typography.body)
-                            .foregroundStyle(Palette.textTertiary)
-                    }
+                }
+                Spacer()
+                Image(systemName: "calendar.day.timeline.left")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(Palette.textTertiary)
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text("\(Fmt.int(consumed))")
+                    .font(Typography.hero(36))
+                    .foregroundStyle(targetColor(consumed: consumed, target: dailyTarget))
+                    .contentTransition(.numericText())
+                    .animation(.snappy, value: consumed)
+                Text("/ \(Fmt.int(dailyTarget)) kcal")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textTertiary)
+                Spacer()
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Palette.border)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(targetColor(consumed: consumed, target: dailyTarget))
+                        .frame(width: geo.size.width * progress)
+                }
+            }
+            .frame(height: 4)
+
+            Text(remaining >= 0 ? "\(Fmt.int(remaining)) kcal alan kaldı" : "\(Fmt.int(abs(remaining))) kcal hedef üstü")
+                .font(Typography.captionBold)
+                .foregroundStyle(remaining >= 0 ? Palette.textSecondary : Palette.warning)
+
+            if !foods.isEmpty {
+                HStack(spacing: Spacing.sm) {
+                    macroChip(label: "Protein", value: p, tint: Palette.macroProtein)
+                    macroChip(label: "Karb", value: c, tint: Palette.macroCarbs)
+                    macroChip(label: "Yağ", value: f, tint: Palette.macroFat)
                 }
 
-                if !foods.isEmpty {
-                    HStack(spacing: Spacing.lg) {
-                        macroChip(label: "Protein", value: p, tint: Palette.macroProtein)
-                        macroChip(label: "Karb", value: c, tint: Palette.macroCarbs)
-                        macroChip(label: "Yağ", value: f, tint: Palette.macroFat)
-                        Spacer()
-                    }
-                    Hairline()
-                    VStack(spacing: 6) {
-                        ForEach(foods) { entry in
-                            HStack(spacing: Spacing.md) {
-                                Text(Self.timeFormatter.string(from: entry.date))
-                                    .font(Typography.mono)
-                                    .foregroundStyle(Palette.textTertiary)
-                                    .frame(width: 56, alignment: .leading)
-                                if let g = entry.grams {
-                                    Text("\(Fmt.int(g))g")
-                                        .font(Typography.mono)
-                                        .foregroundStyle(Palette.textSecondary)
-                                        .frame(width: 60, alignment: .leading)
-                                }
+                Hairline()
+
+                VStack(spacing: 8) {
+                    ForEach(foods) { entry in
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            Text(Self.timeFormatter.string(from: entry.date))
+                                .font(Typography.mono)
+                                .foregroundStyle(Palette.textTertiary)
+                                .frame(width: 46, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(entry.name)
-                                    .font(Typography.body)
+                                    .font(Typography.bodyBold)
                                     .foregroundStyle(Palette.textPrimary)
-                                Spacer()
-                                Text("\(Fmt.int(entry.calories)) kcal")
-                                    .font(Typography.mono)
-                                    .foregroundStyle(Palette.textSecondary)
+                                    .lineLimit(2)
+                                foodEntryMeta(entry)
+                            }
+                            .layoutPriority(1)
+                            Spacer(minLength: Spacing.sm)
+                            Text("\(Fmt.int(entry.calories))")
+                                .font(Typography.mono)
+                                .foregroundStyle(Palette.textSecondary)
+                            Text("kcal")
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textQuaternary)
+                            Button {
+                                editingFoodDate = entry
+                            } label: {
+                                Image(systemName: "calendar.badge.clock")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Palette.textTertiary)
+                                    .frame(width: 22, height: 22)
+                                    .background(Circle().fill(Palette.surfaceElevated.opacity(0.75)))
+                                    .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Yemeğin gününü veya saatini değiştir")
+                        }
+                        .contextMenu {
+                            Button {
+                                editingFoodDate = entry
+                            } label: {
+                                Label("Tarih ve Saati Değiştir", systemImage: "calendar.badge.clock")
+                            }
+                            Button {
+                                moveFood(entry, byDays: -1)
+                            } label: {
+                                Label("1 Gün Geri Al", systemImage: "arrow.left")
+                            }
+                            Button {
+                                moveFood(entry, byDays: 1)
+                            } label: {
+                                Label("1 Gün İleri Al", systemImage: "arrow.right")
                             }
                         }
                     }
-                } else {
-                    Text("Bu gün için kayıt yok.")
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.textTertiary)
-                        .padding(.vertical, 6)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Kayıt yok")
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("Bu güne yemek eklenince satır satır burada görünür.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .padding(Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .fill(Palette.surfaceElevated.opacity(0.55))
+                )
             }
         }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface.opacity(0.84))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
+        )
+    }
+
+    @ViewBuilder
+    private func foodEntryMeta(_ entry: FoodEntry) -> some View {
+        let hasMacroData = entry.protein != nil || entry.carbs != nil || entry.fat != nil
+
+        if entry.grams != nil || hasMacroData {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    foodGramText(entry)
+                    if hasMacroData {
+                        foodMacroBit(label: "P", value: entry.protein, tint: Palette.macroProtein)
+                        foodMacroBit(label: "K", value: entry.carbs, tint: Palette.macroCarbs)
+                        foodMacroBit(label: "Y", value: entry.fat, tint: Palette.macroFat)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    foodGramText(entry)
+                    if hasMacroData {
+                        HStack(spacing: 8) {
+                            foodMacroBit(label: "P", value: entry.protein, tint: Palette.macroProtein)
+                            foodMacroBit(label: "K", value: entry.carbs, tint: Palette.macroCarbs)
+                            foodMacroBit(label: "Y", value: entry.fat, tint: Palette.macroFat)
+                        }
+                    }
+                }
+            }
+        } else {
+            Text("Makro yok")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textQuaternary)
+        }
+    }
+
+    @ViewBuilder
+    private func foodGramText(_ entry: FoodEntry) -> some View {
+        if let g = entry.grams {
+            Text("\(Fmt.int(g))g")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+        }
+    }
+
+    private func foodMacroBit(label: String, value: Double?, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(tint)
+                .frame(width: 4, height: 4)
+            Text("\(label) \(value.map { Fmt.int($0) } ?? "-")g")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+        }
+    }
+
+    private func moveFood(_ entry: FoodEntry, byDays days: Int) {
+        guard let newDate = Calendar.current.date(byAdding: .day, value: days, to: entry.date) else { return }
+        entry.date = newDate
+        try? ctx.save()
+        selectedDay = Calendar.current.startOfDay(for: newDate)
+        currentMonth = Self.startOfMonth(newDate)
     }
 
     private func macroChip(label: String, value: Double, tint: Color) -> some View {
@@ -468,32 +816,42 @@ struct CalendarView: View {
     // MARK: - Monthly goals strip
 
     private var monthlyGoalsStrip: some View {
-        Card(padding: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                HStack {
-                    Text("Aylık hedefler").eyebrow()
-                    Spacer()
-                    Text("\(goals.count) hedef")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(Array(goals.enumerated()), id: \.element.id) { idx, g in
-                            GoalChip(
-                                goal: g,
-                                index: idx + 1,
-                                isReached: g.anchorDate <= .now,
-                                currentWeight: currentWeight
-                            ) {
-                                currentMonth = Self.startOfMonth(g.anchorDate)
-                                selectedDay = Calendar.current.startOfDay(for: g.anchorDate)
-                            }
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Hedef rotası").eyebrow()
+                Spacer()
+                Text("\(goals.count) hedef")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(Array(goals.enumerated()), id: \.element.id) { idx, g in
+                        GoalRoadmapRow(
+                            goal: g,
+                            index: idx + 1,
+                            isReached: g.anchorDate <= .now,
+                            currentWeight: currentWeight
+                        ) {
+                            currentMonth = Self.startOfMonth(g.anchorDate)
+                            selectedDay = Calendar.current.startOfDay(for: g.anchorDate)
                         }
                     }
                 }
             }
+            .scrollIndicators(.hidden)
+            .frame(maxHeight: 360)
         }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface.opacity(0.76))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.55)
+        )
     }
 
     private func applyPlan(_ plan: PlanSetupSheet.Plan) {
@@ -654,6 +1012,10 @@ private struct DayCell: View {
         return min(1.0, consumed / target)
     }
 
+    private var hasFood: Bool {
+        consumed > 0
+    }
+
     private var barColor: Color {
         guard target > 0, consumed > 0 else { return Palette.border }
         let r = consumed / target
@@ -663,24 +1025,34 @@ private struct DayCell: View {
         return Palette.accent
     }
 
-    private var consumedColor: Color {
-        guard consumed > 0 else { return Palette.textQuaternary }
-        return Palette.textPrimary
+    private var dayColor: Color {
+        if isToday { return Palette.accent }
+        if inMonth { return Palette.textPrimary }
+        return Palette.textQuaternary
     }
 
     private var borderColor: Color {
-        if isSelected { return Palette.borderStrong }
+        if isSelected { return Palette.accent.opacity(0.62) }
         if isToday { return Palette.accent.opacity(0.55) }
-        return Palette.border
+        if hovering { return Palette.borderStrong }
+        return Palette.border.opacity(inMonth ? 1 : 0.65)
+    }
+
+    private var fillColor: Color {
+        if isSelected { return Palette.surfaceElevated.opacity(0.92) }
+        if hovering { return Palette.surfaceElevated.opacity(0.72) }
+        return Palette.surface.opacity(inMonth ? 0.70 : 0.34)
     }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(alignment: .center, spacing: 6) {
                     Text(dayNumber)
-                        .font(Typography.bodyBold)
-                        .foregroundStyle(isToday ? Palette.accent : (inMonth ? Palette.textPrimary : Palette.textQuaternary))
+                        .font(.system(size: isToday ? 15 : 13, weight: isToday ? .semibold : .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(dayColor)
+
                     if isToday {
                         Text("BUGÜN")
                             .font(.system(size: 8.5, weight: .semibold))
@@ -690,30 +1062,35 @@ private struct DayCell: View {
                             .padding(.vertical, 2)
                             .background(Capsule().fill(Palette.accent.opacity(0.14)))
                     }
-                    Spacer(minLength: 0)
-                    if let g = monthlyGoal {
-                        Button { onGoalTap(g) } label: {
-                            Text("\(Fmt.num(g.targetWeight, digits: 1)) kg")
-                                .font(.system(size: 9.5, weight: .medium))
-                                .foregroundStyle(Palette.textSecondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Palette.surfaceElevated))
-                                .overlay(Capsule().strokeBorder(Palette.border, lineWidth: 0.5))
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
 
                 Spacer(minLength: 0)
 
-                VStack(alignment: .leading, spacing: 3) {
+                if let g = monthlyGoal {
+                    Button { onGoalTap(g) } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "scope")
+                                .font(.system(size: 8.5, weight: .semibold))
+                            Text("\(Fmt.num(g.targetWeight, digits: 1)) kg")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Palette.surfaceElevated.opacity(0.78)))
+                        .overlay(Capsule().strokeBorder(Palette.border, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .lastTextBaseline, spacing: 2) {
-                        if consumed > 0 {
+                        if hasFood {
                             Text("\(Fmt.int(consumed))")
                                 .font(.system(size: 14, weight: .medium, design: .default))
                                 .monospacedDigit()
-                                .foregroundStyle(consumedColor)
+                                .foregroundStyle(Palette.textPrimary)
                         } else {
                             Text("—")
                                 .font(.system(size: 14, weight: .regular))
@@ -734,30 +1111,38 @@ private struct DayCell: View {
                                 .frame(width: max(0, geo.size.width * ratio), height: 2.5)
                         }
                     }
-                    .frame(height: 2.5)
+                        .frame(height: 2.5)
                 }
             }
-            .padding(8)
-            .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? Palette.surfaceElevated : (hovering ? Palette.surface.opacity(0.7) : Palette.surface))
+                    .fill(fillColor)
             )
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    Capsule(style: .continuous)
+                        .fill(Palette.accent)
+                        .frame(width: 2.5)
+                        .padding(.vertical, 10)
+                }
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(borderColor, lineWidth: isToday && !isSelected ? 1.0 : 0.5)
+                    .strokeBorder(borderColor, lineWidth: isSelected || isToday ? 0.85 : 0.5)
             )
             .opacity(inMonth ? 1.0 : 0.45)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .scaleEffect(hovering ? 1.004 : 1)
+        .animation(.easeOut(duration: 0.14), value: hovering)
         .onHover { hovering = $0 }
     }
 }
 
-// MARK: - GoalChip (monthly goal scroller)
-
-private struct GoalChip: View {
+private struct GoalRoadmapRow: View {
     let goal: MonthlyGoal
     let index: Int
     let isReached: Bool
@@ -769,41 +1154,65 @@ private struct GoalChip: View {
         Fmt.monthShort.string(from: goal.anchorDate).uppercased()
     }
 
+    private var deltaText: String? {
+        guard let currentWeight else { return nil }
+        let diff = currentWeight - goal.targetWeight
+        if abs(diff) < 0.05 { return "hedefte" }
+        return diff > 0 ? "−\(Fmt.num(diff, digits: 1)) kg" : "+\(Fmt.num(abs(diff), digits: 1)) kg"
+    }
+
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 8) {
-                Text("\(index). AY")
-                    .font(.system(size: 9, weight: .medium))
-                    .tracking(0.6)
-                    .foregroundStyle(Palette.textQuaternary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(monthLabel)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Palette.textTertiary)
+            HStack(alignment: .center, spacing: Spacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(isReached ? Palette.positive.opacity(0.16) : Palette.surfaceElevated)
+                    Text("\(index)")
+                        .font(Typography.captionBold)
+                        .foregroundStyle(isReached ? Palette.positive : Palette.textSecondary)
+                }
+                .frame(width: 30, height: 30)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Text(monthLabel)
+                            .font(Typography.captionBold)
+                            .foregroundStyle(Palette.textTertiary)
+                        if isReached {
+                            Text("GEÇTİ")
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .tracking(0.6)
+                                .foregroundStyle(Palette.positive)
+                        }
+                    }
                     Text("\(Fmt.num(goal.targetWeight, digits: 1)) kg")
-                        .font(Typography.bodyBold)
+                        .font(Typography.titleSmall)
                         .foregroundStyle(Palette.textPrimary)
                 }
-                if let w = currentWeight {
-                    let diff = w - goal.targetWeight
-                    Text(diff > 0 ? "−\(Fmt.num(diff, digits: 1))" : "+\(Fmt.num(abs(diff), digits: 1))")
-                        .font(Typography.caption)
+
+                Spacer(minLength: Spacing.sm)
+
+                if let deltaText {
+                    Text(deltaText)
+                        .font(Typography.captionBold)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(Spacing.md)
             .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(hovering ? Palette.surfaceElevated : Palette.surface)
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(hovering ? Palette.surfaceElevated.opacity(0.76) : Palette.surface.opacity(0.62))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .strokeBorder(hovering ? Palette.borderStrong : Palette.border, lineWidth: 0.55)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .scaleEffect(hovering ? 1.004 : 1)
+        .animation(.easeOut(duration: 0.16), value: hovering)
         .onHover { hovering = $0 }
     }
 }
@@ -1209,6 +1618,97 @@ struct PlanSetupSheet: View {
                 .font(Typography.monoLarge)
                 .foregroundStyle(Palette.textPrimary)
         }
+    }
+}
+
+// MARK: - Food date editor sheet
+
+struct FoodDateEditorSheet: View {
+    let food: FoodEntry
+    let selectedDay: Date
+    let onSave: (Date) -> Void
+    let onCancel: () -> Void
+
+    @State private var dateInput: Date
+
+    init(
+        food: FoodEntry,
+        selectedDay: Date,
+        onSave: @escaping (Date) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.food = food
+        self.selectedDay = selectedDay
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _dateInput = State(initialValue: food.date)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Yemek") {
+                    LabeledContent("Kayıt") {
+                        Text(food.name)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(2)
+                    }
+                    LabeledContent("Kalori") {
+                        Text("\(Fmt.int(food.calories)) kcal")
+                    }
+                }
+
+                Section("Tarih") {
+                    DatePicker(
+                        "Tarih ve saat",
+                        selection: $dateInput,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                }
+
+                Section("Hızlı düzeltme") {
+                    Button("Seçili güne taşı: \(CalendarView.fullDayFormatter.string(from: selectedDay))") {
+                        dateInput = Self.merged(day: selectedDay, time: dateInput)
+                    }
+                    Button("1 gün geri al") {
+                        shiftDay(-1)
+                    }
+                    Button("1 gün ileri al") {
+                        shiftDay(1)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Yemek Tarihi")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("İptal", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Kaydet") {
+                        onSave(dateInput)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .frame(width: 460, height: 360)
+    }
+
+    private func shiftDay(_ days: Int) {
+        dateInput = Calendar.current.date(byAdding: .day, value: days, to: dateInput) ?? dateInput
+    }
+
+    private static func merged(day: Date, time: Date) -> Date {
+        let cal = Calendar.current
+        let timeParts = cal.dateComponents([.hour, .minute, .second], from: time)
+        let dayStart = cal.startOfDay(for: day)
+        return cal.date(
+            bySettingHour: timeParts.hour ?? 0,
+            minute: timeParts.minute ?? 0,
+            second: timeParts.second ?? 0,
+            of: dayStart
+        ) ?? day
     }
 }
 

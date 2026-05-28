@@ -32,7 +32,6 @@ struct HerculesMobileApp: App {
                 WorkoutPlanOverride.self,
                 StepEntry.self,
                 MonthlyGoal.self,
-                MealPlanOverride.self,
                 WorkoutLog.self,
                 WorkoutExerciseEntry.self,
                 ExerciseSet.self,

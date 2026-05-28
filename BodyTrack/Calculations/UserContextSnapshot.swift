@@ -69,13 +69,13 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
 
     fileprivate var sections: [SnapshotSection] {
         switch self {
-        case .genelBakis: return [.profile, .latestMeasurement, .trend, .todayIntake, .caloriePeriods, .workout, .goals]
+        case .genelBakis: return [.profile, .latestMeasurement, .trend, .todayIntake, .workout, .goals]
         case .olcumler:   return [.latestMeasurement, .trend]
-        case .grafikler:  return [.trend, .latestMeasurement, .caloriePeriods]
+        case .grafikler:  return [.trend, .latestMeasurement]
         case .antrenman:  return [.workout, .workoutLogs]
-        case .takvim:     return [.todayIntake, .caloriePeriods, .goals]
+        case .takvim:     return [.todayIntake, .foodDiary, .goals]
         case .kalori:     return [.profile, .todayIntake, .caloriePeriods]
-        case .yemekPlani: return [.mealPlan]
+        case .yemekPlani: return []
         case .tarifler:   return [.recipes]
         case .profil:     return [.profile, .workout]
         case .hepsi:      return SnapshotSection.allCases
@@ -92,7 +92,7 @@ extension UserContextSnapshot {
 }
 
 private enum SnapshotSection: CaseIterable, Hashable {
-    case profile, latestMeasurement, trend, todayIntake, caloriePeriods, goals, workout, workoutLogs, steps, mealPlan, recipes
+    case profile, latestMeasurement, trend, todayIntake, foodDiary, caloriePeriods, goals, workout, workoutLogs, steps, recipes
 }
 
 enum UserContextSnapshot {
@@ -135,16 +135,31 @@ enum UserContextSnapshot {
         return "[KULLANICI HAKKINDA — kalıcı, kullanıcının kendisi yazdı]\n\(trimmed)"
     }
 
+    /// Kullanıcının düzenli kullandığı supplementler — her sohbette kalıcı
+    /// context olarak AI'ya verilir. Boşsa nil.
+    static func supplementsSection(ctx: ModelContext) -> String? {
+        guard let profile = fetchProfile(ctx: ctx) else { return nil }
+        let trimmed = profile.effectiveSupplements.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let items = trimmed
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !items.isEmpty else { return nil }
+        return "[KULLANICI SUPPLEMENTLERİ — kalıcı profil bilgisi]\n- \(items.joined(separator: "\n- "))"
+    }
+
     /// `aboutSection` + (varsa) mention-based snapshot'ı birleştirir.
     /// **About metnindeki `@etiket`leri de tarar** — kullanıcı bio'sunda
     /// "@Ölçümler'e bak" diye yazdıysa, ölçüm verisi HER sohbette inject olur.
     /// Chat input'taki @ etiketleri ile birleşir.
     static func combined(tags: Set<MentionTag>, ctx: ModelContext) -> String? {
         let about = aboutSection(ctx: ctx)
+        let supplements = supplementsSection(ctx: ctx)
         let aboutMentions = aboutMentionTags(ctx: ctx)
         let allTags = tags.union(aboutMentions)
         let mentionData = allTags.isEmpty ? nil : build(tags: allTags, ctx: ctx)
-        let parts = [about, mentionData].compactMap { $0 }
+        let parts = [about, supplements, mentionData].compactMap { $0 }
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: "\n\n")
     }
@@ -153,14 +168,15 @@ enum UserContextSnapshot {
     /// alakalı profil, ölçüm, kalori, adım ve antrenman verisini otomatik ekler.
     static func coachContext(for query: String, explicitTags tags: Set<MentionTag>, ctx: ModelContext) -> String? {
         let about = aboutSection(ctx: ctx)
+        let supplements = supplementsSection(ctx: ctx)
         let aboutMentions = aboutMentionTags(ctx: ctx)
         let allTags = tags.union(aboutMentions)
 
         var neededSections = Set(allTags.flatMap { $0.sections })
         neededSections.formUnion(inferredSections(for: query))
 
-        let data = neededSections.isEmpty ? nil : buildSnapshot(sections: neededSections, ctx: ctx)
-        let parts = [about, data].compactMap { $0 }
+        let data = neededSections.isEmpty ? nil : buildSnapshot(sections: neededSections, ctx: ctx, query: query)
+        let parts = [about, supplements, data].compactMap { $0 }
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: "\n\n")
     }
@@ -181,9 +197,11 @@ enum UserContextSnapshot {
 
     // MARK: - Internal builder
 
-    private static func buildSnapshot(sections requested: Set<SnapshotSection>, ctx: ModelContext) -> String? {
+    private static func buildSnapshot(sections requested: Set<SnapshotSection>, ctx: ModelContext, query: String? = nil) -> String? {
         var output: [String] = []
-        let measurements = fetchMeasurements(ctx: ctx)
+        let foodScope = query.flatMap { FoodDiaryScope.parse(query: $0) }
+        let shouldFetchMeasurements = !requested.intersection([.latestMeasurement, .trend, .goals, .steps, .caloriePeriods]).isEmpty
+        let measurements = shouldFetchMeasurements ? fetchMeasurements(ctx: ctx, limit: measurementFetchLimit(for: query)) : []
 
         if requested.contains(.profile), let profile = fetchProfile(ctx: ctx) {
             output.append(profileSection(profile))
@@ -198,7 +216,10 @@ enum UserContextSnapshot {
         if requested.contains(.todayIntake), let today = todayIntakeSection(ctx: ctx) {
             output.append(today)
         }
-        if requested.contains(.caloriePeriods), let aggregates = caloriePeriodsSection(ctx: ctx) {
+        if requested.contains(.foodDiary), let diary = foodDiarySection(ctx: ctx, scope: foodScope) {
+            output.append(diary)
+        }
+        if requested.contains(.caloriePeriods), let aggregates = caloriePeriodsSection(ctx: ctx, query: query) {
             output.append(aggregates)
         }
         if requested.contains(.goals),
@@ -208,16 +229,14 @@ enum UserContextSnapshot {
         if requested.contains(.workout), let workout = todaysWorkoutSection(ctx: ctx) {
             output.append(workout)
         }
-        if requested.contains(.workoutLogs), let workoutLogs = workoutLogsSection(ctx: ctx) {
+        if requested.contains(.workoutLogs), let workoutLogs = workoutLogsSection(ctx: ctx, query: query) {
             output.append(workoutLogs)
         }
         if requested.contains(.steps),
            let steps = todaysStepsSection(ctx: ctx, weight: measurements.first?.weight) {
             output.append(steps)
         }
-        if requested.contains(.mealPlan) {
-            output.append(mealPlanTodaySection(ctx: ctx))
-        }
+
         if requested.contains(.recipes), let r = recipesSection(ctx: ctx) {
             output.append(r)
         }
@@ -240,39 +259,310 @@ enum UserContextSnapshot {
     private static func inferredSections(for query: String) -> Set<SnapshotSection> {
         let lower = normalize(query).lowercased()
 
-        if containsAny(lower, ["hepsi", "tumu", "tum veri", "her sey", "all", "everything"]) {
+        if isAllDataRequest(lower) {
             return Set(SnapshotSection.allCases)
         }
 
-        guard AgentQueryClassifier.isCoachQuery(query) else { return [] }
+        let dateScope = FoodDiaryScope.parse(query: query)
+        var sections: Set<SnapshotSection> = []
 
-        var sections: Set<SnapshotSection> = [.profile, .latestMeasurement, .trend, .goals]
+        if let dateScope {
+            if dateScope.isToday {
+                sections.insert(.todayIntake)
+            } else {
+                sections.insert(.foodDiary)
+            }
+            if wantsCaloriePeriodSummary(lower, scope: dateScope) {
+                sections.insert(.caloriePeriods)
+            }
+            if containsAny(lower, ["takvim", "calendar", "hedef", "goal"]) {
+                sections.insert(.goals)
+            }
+        } else {
+            if containsAny(lower, ["bugun", "bugün", "today", "kalan", "remaining"]) {
+                sections.insert(.todayIntake)
+            }
+            if wantsFoodDiary(lower) {
+                sections.insert(.foodDiary)
+            }
+            if wantsCaloriePeriodSummary(lower, scope: nil) {
+                sections.insert(.caloriePeriods)
+            }
+            if containsAny(lower, ["takvim", "calendar", "hedef", "goal"]) {
+                sections.insert(.goals)
+            }
+        }
+
+        guard AgentQueryClassifier.isCoachQuery(query) else { return sections }
+
+        sections.formUnion([.profile, .latestMeasurement, .trend, .goals])
 
         if containsAny(lower, AgentQueryClassifier.trainingSignals) {
             sections.formUnion([.workout, .workoutLogs, .steps])
         }
 
         if containsAny(lower, AgentQueryClassifier.nutritionSignals) {
-            sections.formUnion([.todayIntake, .caloriePeriods, .steps, .mealPlan])
+            sections.insert(.todayIntake)
+            if wantsFoodDiary(lower) || dateScope != nil {
+                sections.insert(.foodDiary)
+            }
+            if wantsCaloriePeriodSummary(lower, scope: dateScope) {
+                sections.insert(.caloriePeriods)
+            }
+            if containsAny(lower, ["cut", "definasyon", "bulk", "tdee", "maintenance", "adim", "step"]) {
+                sections.insert(.steps)
+            }
         }
 
         if containsAny(lower, ["kilo", "yag", "lean", "definasyon", "cut", "bulk", "plato", "hedef", "adim", "step"]) {
-            sections.formUnion([.todayIntake, .caloriePeriods, .steps])
+            sections.insert(.todayIntake)
+            sections.insert(.steps)
+            if wantsCaloriePeriodSummary(lower, scope: dateScope) {
+                sections.insert(.caloriePeriods)
+            }
+        }
+
+        if containsAny(lower, ["takvim", "calendar", "dun", "dunku", "dünkü", "onceki", "önceki", "mayis", "mayıs", "nisan", "haziran"]) {
+            sections.insert(dateScope?.isToday == true ? .todayIntake : .foodDiary)
+            sections.insert(.goals)
+            if wantsCaloriePeriodSummary(lower, scope: dateScope) {
+                sections.insert(.caloriePeriods)
+            }
         }
 
         if containsAny(lower, ["tarif", "recipe", "yemek tarifi"]) {
             sections.formUnion([.recipes])
         }
 
-        if containsAny(lower, ["yemek plani", "meal plan", "ogun", "öğün", "diyet plan"]) {
-            sections.formUnion([.mealPlan])
-        }
+
 
         return sections
     }
 
+    private struct FoodDiaryScope {
+        let start: Date
+        let endExclusive: Date
+        let label: String
+        let isExactDay: Bool
+        let dayCount: Int
+
+        func contains(_ date: Date) -> Bool {
+            date >= start && date < endExclusive
+        }
+
+        var isToday: Bool {
+            isExactDay && Calendar.current.isDateInToday(start)
+        }
+
+        static func parse(query: String, now: Date = .now, calendar cal: Calendar = .current) -> FoodDiaryScope? {
+            let lower = UserContextSnapshot.normalize(query).lowercased()
+
+            if UserContextSnapshot.containsAny(lower, ["evvelsi gun", "evvelki gun", "onceki gun", "önceki gün"]) {
+                return exactDay(offset: -2, label: "evvelsi gün", now: now, cal: cal)
+            }
+            if UserContextSnapshot.containsAny(lower, ["dun", "dunku", "dünkü", "yesterday"]) {
+                return exactDay(offset: -1, label: "dün", now: now, cal: cal)
+            }
+            if UserContextSnapshot.containsAny(lower, ["bugun", "bugünkü", "bugunku", "today"]) {
+                return exactDay(offset: 0, label: "bugün", now: now, cal: cal)
+            }
+            if UserContextSnapshot.containsAny(lower, ["bu hafta", "current week"]) {
+                let start = cal.dateInterval(of: .weekOfYear, for: now)?.start ?? cal.startOfDay(for: now)
+                let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
+                let days = max(1, cal.dateComponents([.day], from: start, to: end).day ?? 1)
+                return FoodDiaryScope(start: start, endExclusive: end, label: "bu hafta", isExactDay: false, dayCount: days)
+            }
+            if UserContextSnapshot.containsAny(lower, ["gecen hafta", "geçen hafta", "previous week"]) {
+                guard let thisWeek = cal.dateInterval(of: .weekOfYear, for: now),
+                      let previousWeekStart = cal.date(byAdding: .weekOfYear, value: -1, to: thisWeek.start),
+                      let previousWeek = cal.dateInterval(of: .weekOfYear, for: previousWeekStart)
+                else { return nil }
+                let days = max(1, cal.dateComponents([.day], from: previousWeek.start, to: previousWeek.end).day ?? 7)
+                return FoodDiaryScope(start: previousWeek.start, endExclusive: previousWeek.end, label: "geçen hafta", isExactDay: false, dayCount: days)
+            }
+
+            if let range = captures(in: lower, pattern: #"\bson\s+(\d+)\s*(gun|hafta|ay)\b"#),
+               let n = Int(range[0]) {
+                let unit = range[1]
+                let days = daysFor(amount: n, unit: unit)
+                return rolling(days: days, label: "son \(n) \(displayUnit(unit))", now: now, cal: cal)
+            }
+
+            if let range = captures(in: lower, pattern: #"\b(\d+)\s*(gunluk|haftalik|aylik)\b"#),
+               let n = Int(range[0]) {
+                let unit = range[1]
+                let days = daysFor(amount: n, unit: unit)
+                return rolling(days: days, label: "\(n) \(displayUnit(unit))", now: now, cal: cal)
+            }
+
+            if UserContextSnapshot.containsAny(lower, ["son ay", "1 ay", "aylik", "aylık"]) {
+                return rolling(days: 30, label: "son 1 ay", now: now, cal: cal)
+            }
+            if UserContextSnapshot.containsAny(lower, ["haftalik", "haftalık"]) {
+                return rolling(days: 7, label: "son 1 hafta", now: now, cal: cal)
+            }
+            if UserContextSnapshot.containsAny(lower, ["bu ay", "current month"]) {
+                let start = cal.dateInterval(of: .month, for: now)?.start ?? cal.startOfDay(for: now)
+                let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
+                let days = max(1, cal.dateComponents([.day], from: start, to: end).day ?? 1)
+                return FoodDiaryScope(start: start, endExclusive: end, label: "bu ay", isExactDay: false, dayCount: days)
+            }
+            if UserContextSnapshot.containsAny(lower, ["gecen ay", "geçen ay", "previous month"]) {
+                guard let thisMonth = cal.dateInterval(of: .month, for: now),
+                      let previousMonthStart = cal.date(byAdding: .month, value: -1, to: thisMonth.start),
+                      let previousMonth = cal.dateInterval(of: .month, for: previousMonthStart)
+                else { return nil }
+                let days = max(1, cal.dateComponents([.day], from: previousMonth.start, to: previousMonth.end).day ?? 1)
+                return FoodDiaryScope(start: previousMonth.start, endExclusive: previousMonth.end, label: "geçen ay", isExactDay: false, dayCount: days)
+            }
+
+            if let iso = captures(in: lower, pattern: #"\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b"#),
+               let year = Int(iso[0]), let month = Int(iso[1]), let day = Int(iso[2]),
+               let date = date(year: year, month: month, day: day, cal: cal) {
+                return exactDay(date: date, label: Fmt.dateLong.string(from: date), cal: cal)
+            }
+
+            if let numeric = captures(in: lower, pattern: #"\b(\d{1,2})[./-](\d{1,2})(?:[./-](20\d{2}))?\b"#),
+               let day = Int(numeric[0]), let month = Int(numeric[1]) {
+                let year = Int(numeric[2]) ?? cal.component(.year, from: now)
+                if let date = date(year: year, month: month, day: day, cal: cal) {
+                    return exactDay(date: date, label: Fmt.dateLong.string(from: date), cal: cal)
+                }
+            }
+
+            if let textual = captures(in: lower, pattern: #"\b(\d{1,2})\s+(ocak|subat|mart|nisan|mayis|haziran|temmuz|agustos|eylul|ekim|kasim|aralik)(?:\s+(20\d{2}))?\b"#),
+               let day = Int(textual[0]), let month = monthNumber(textual[1]) {
+                let year = Int(textual[2]) ?? cal.component(.year, from: now)
+                if let date = date(year: year, month: month, day: day, cal: cal) {
+                    return exactDay(date: date, label: Fmt.dateLong.string(from: date), cal: cal)
+                }
+            }
+
+            if let monthOnly = captures(in: lower, pattern: #"\b(ocak|subat|mart|nisan|mayis|haziran|temmuz|agustos|eylul|ekim|kasim|aralik)(?:\s+(20\d{2}))?\b"#),
+               let month = monthNumber(monthOnly[0]) {
+                let year = Int(monthOnly[1]) ?? cal.component(.year, from: now)
+                return monthScope(year: year, month: month, monthName: monthOnly[0], cal: cal)
+            }
+
+            return nil
+        }
+
+        private static func exactDay(offset: Int, label: String, now: Date, cal: Calendar) -> FoodDiaryScope? {
+            guard let date = cal.date(byAdding: .day, value: offset, to: now) else { return nil }
+            return exactDay(date: date, label: label, cal: cal)
+        }
+
+        private static func exactDay(date: Date, label: String, cal: Calendar) -> FoodDiaryScope {
+            let start = cal.startOfDay(for: date)
+            let end = cal.date(byAdding: .day, value: 1, to: start) ?? date
+            return FoodDiaryScope(start: start, endExclusive: end, label: label, isExactDay: true, dayCount: 1)
+        }
+
+        private static func rolling(days: Int, label: String, now: Date, cal: Calendar) -> FoodDiaryScope {
+            let clampedDays = max(1, min(days, 120))
+            let todayStart = cal.startOfDay(for: now)
+            let start = cal.date(byAdding: .day, value: -(clampedDays - 1), to: todayStart) ?? todayStart
+            let end = cal.date(byAdding: .day, value: 1, to: todayStart) ?? now
+            return FoodDiaryScope(start: start, endExclusive: end, label: label, isExactDay: false, dayCount: clampedDays)
+        }
+
+        private static func monthScope(year: Int, month: Int, monthName: String, cal: Calendar) -> FoodDiaryScope? {
+            guard let date = date(year: year, month: month, day: 1, cal: cal),
+                  let interval = cal.dateInterval(of: .month, for: date)
+            else { return nil }
+            let days = max(1, cal.dateComponents([.day], from: interval.start, to: interval.end).day ?? 1)
+            return FoodDiaryScope(
+                start: interval.start,
+                endExclusive: interval.end,
+                label: "\(monthName) \(year)",
+                isExactDay: false,
+                dayCount: days
+            )
+        }
+
+        private static func daysFor(amount: Int, unit: String) -> Int {
+            if unit.contains("hafta") { return amount * 7 }
+            if unit.contains("ay") { return amount * 30 }
+            return amount
+        }
+
+        private static func displayUnit(_ unit: String) -> String {
+            if unit.contains("hafta") { return "hafta" }
+            if unit.contains("ay") { return "ay" }
+            return "gün"
+        }
+
+        private static func date(year: Int, month: Int, day: Int, cal: Calendar) -> Date? {
+            guard (1...12).contains(month), (1...31).contains(day) else { return nil }
+            return cal.date(from: DateComponents(calendar: cal, year: year, month: month, day: day))
+        }
+
+        private static func monthNumber(_ normalizedMonth: String) -> Int? {
+            [
+                "ocak": 1, "subat": 2, "mart": 3, "nisan": 4, "mayis": 5, "haziran": 6,
+                "temmuz": 7, "agustos": 8, "eylul": 9, "ekim": 10, "kasim": 11, "aralik": 12
+            ][normalizedMonth]
+        }
+
+        private static func captures(in text: String, pattern: String) -> [String]? {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+            guard let match = regex.firstMatch(in: text, range: nsRange) else { return nil }
+            return (1..<match.numberOfRanges).map { index in
+                let range = match.range(at: index)
+                guard range.location != NSNotFound, let swiftRange = Range(range, in: text) else { return "" }
+                return String(text[swiftRange])
+            }
+        }
+    }
+
     private static func containsAny(_ lowercasedText: String, _ needles: [String]) -> Bool {
         AgentQueryClassifier.containsAny(lowercasedText, needles)
+    }
+
+    static func requestedFoodInterval(for query: String, now: Date = .now, calendar cal: Calendar = .current) -> DateInterval? {
+        guard let scope = FoodDiaryScope.parse(query: query, now: now, calendar: cal) else { return nil }
+        return DateInterval(start: scope.start, end: scope.endExclusive)
+    }
+
+    private static func isAllDataRequest(_ lower: String) -> Bool {
+        containsAny(lower, ["hepsi", "tumu", "tum veri", "her sey", "all", "everything"])
+    }
+
+    private static func wantsFoodDiary(_ lower: String) -> Bool {
+        containsAny(lower, [
+            "yemek gunlugu", "yemek günlüğü", "ne yedim", "neler yedim", "yediklerim",
+            "ogunler", "öğünler", "log", "kayitlar", "kayıtlar", "takvim", "calendar",
+            "dun", "dunku", "dünkü", "onceki", "önceki"
+        ])
+    }
+
+    private static func wantsCaloriePeriodSummary(_ lower: String, scope: FoodDiaryScope?) -> Bool {
+        if isAllDataRequest(lower) { return true }
+        if containsAny(lower, [
+            "ortalama", "average", "ozet", "özet", "toplam", "total", "acik", "açık",
+            "fazla", "deficit", "surplus", "denge", "balance", "tempo", "hiz", "hız",
+            "gidiyor", "plato", "tdee", "maintenance", "hedefe", "ulasir", "ulaşır"
+        ]) {
+            return true
+        }
+        if containsAny(lower, [
+            "bu hafta", "gecen hafta", "geçen hafta", "son 7", "7 gun", "7 gün",
+            "son 14", "14 gun", "14 gün", "son 30", "30 gun", "30 gün",
+            "son 90", "90 gun", "90 gün", "bu ay", "gecen ay", "geçen ay",
+            "aylik", "aylık", "haftalik", "haftalık"
+        ]) {
+            return true
+        }
+        guard let scope else { return false }
+        return !scope.isExactDay && scope.dayCount >= 7
+    }
+
+    private static func measurementFetchLimit(for query: String?) -> Int? {
+        guard let query else { return nil }
+        let lower = normalize(query).lowercased()
+        if isAllDataRequest(lower) { return nil }
+        return 180
     }
 
     // MARK: - Sections
@@ -287,8 +577,20 @@ enum UserContextSnapshot {
         if let target = p.targetWeight {
             lines.append("- Hedef kilo: \(Fmt.num(target, digits: 1)) kg")
         }
-        if p.manualCalorieOffset != 0 {
-            lines.append("- Manuel kalori offset: \(Fmt.signed(p.manualCalorieOffset, digits: 0)) kcal/gün")
+        let supplements = p.effectiveSupplements
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !supplements.isEmpty {
+            lines.append("- Supplementler: \(supplements.joined(separator: " · "))")
+        }
+        let manualMacros = [
+            p.manualProteinGrams.map { "P \(Fmt.int($0))g" },
+            p.manualCarbsGrams.map { "K \(Fmt.int($0))g" },
+            p.manualFatGrams.map { "Y \(Fmt.int($0))g" },
+        ].compactMap { $0 }
+        if !manualMacros.isEmpty {
+            lines.append("- Manuel makro hedefi: \(manualMacros.joined(separator: " · "))")
         }
         return lines.joined(separator: "\n")
     }
@@ -337,6 +639,10 @@ enum UserContextSnapshot {
             let delta = latest.1 - w30.1
             lines.append("- 30 gün önce: \(Fmt.num(w30.1, digits: 1)) kg (\(Fmt.signed(delta, digits: 2)) kg fark)")
         }
+        if let w90 = closest(daysAgo: 90), abs(w90.0.timeIntervalSince(latest.0)) > 45 * 86_400 {
+            let delta = latest.1 - w90.1
+            lines.append("- 90 gün önce: \(Fmt.num(w90.1, digits: 1)) kg (\(Fmt.signed(delta, digits: 2)) kg fark)")
+        }
 
         // Weekly pace over recorded range
         if let oldest = withWeight.last, oldest.0 < latest.0 {
@@ -350,8 +656,9 @@ enum UserContextSnapshot {
 
     private static func todayIntakeSection(ctx: ModelContext) -> String? {
         let cal = Calendar.current
-        let foods = (try? ctx.fetch(FetchDescriptor<FoodEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
-        let todays = foods.filter { cal.isDateInToday($0.date) }
+        let start = cal.startOfDay(for: .now)
+        let end = cal.date(byAdding: .day, value: 1, to: start) ?? .now
+        let todays = fetchFoods(ctx: ctx, start: start, endExclusive: end, limit: 120)
         guard !todays.isEmpty else { return nil }
 
         let kcal = todays.reduce(0) { $0 + $1.calories }
@@ -372,16 +679,95 @@ enum UserContextSnapshot {
         return lines.joined(separator: "\n")
     }
 
-    /// Haftalık + aylık + son 30 gün toplam tüketim, ortalama ve net açık.
-    /// AI bunu "cut hızı uygun mu / hedefe ulaşır mıyım" sorularında kullanır.
-    private static func caloriePeriodsSection(ctx: ModelContext) -> String? {
-        let foods = (try? ctx.fetch(FetchDescriptor<FoodEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+    /// Son kayıtlı yemek günleri. @Takvim/date sorularında AI ekranı değil bu
+    /// snapshot'ı gördüğü için geçmiş günleri burada açıkça veriyoruz.
+    private static func foodDiarySection(ctx: ModelContext, scope: FoodDiaryScope? = nil) -> String? {
+        let cal = Calendar.current
+        let foods: [FoodEntry]
+        if let scope {
+            foods = fetchFoods(ctx: ctx, start: scope.start, endExclusive: scope.endExclusive)
+        } else {
+            foods = fetchFoods(ctx: ctx, limit: 350)
+        }
         guard !foods.isEmpty else { return nil }
-        guard let target = computeDailyTarget(ctx: ctx) else { return nil }
 
-        let week  = CalorieStats.stats(for: CalorieStats.thisWeek(),  foods: foods, dailyTarget: target)
-        let month = CalorieStats.stats(for: CalorieStats.thisMonth(), foods: foods, dailyTarget: target)
-        let last30 = CalorieStats.stats(for: CalorieStats.last(days: 30), foods: foods, dailyTarget: target)
+        let scopedFoods = foods
+
+        let grouped = Dictionary(grouping: scopedFoods) { cal.startOfDay(for: $0.date) }
+        let days = scope == nil ? Array(grouped.keys.sorted(by: >).prefix(14)) : grouped.keys.sorted(by: >)
+
+        let sectionTitle = scope.map { "[YEMEK GÜNLÜĞÜ — \($0.label)]" } ?? "[YEMEK GÜNLÜĞÜ — son kayıtlı günler]"
+        var lines: [String] = [sectionTitle]
+        lines.append("AI talimatı: Kullanıcı 'dün', 'dünkü', '24 Mayıs', '1 aylık', '3 aylık', 'takvime bak' gibi bir tarih/aralık söylerse bu bölümdeki satırları esas al.")
+
+        if let scope {
+            let kcal = scopedFoods.reduce(0) { $0 + $1.calories }
+            let p = scopedFoods.compactMap(\.protein).reduce(0, +)
+            let c = scopedFoods.compactMap(\.carbs).reduce(0, +)
+            let f = scopedFoods.compactMap(\.fat).reduce(0, +)
+            let loggedDays = grouped.count
+            let avgLogged = loggedDays > 0 ? kcal / Double(loggedDays) : 0
+            let avgCalendar = kcal / Double(max(1, scope.dayCount))
+            lines.append("- Kapsam: \(Fmt.dateLong.string(from: scope.start)) → \(Fmt.dateLong.string(from: scope.endExclusive.addingTimeInterval(-1)))")
+            lines.append("- Toplam: \(Fmt.int(kcal)) kcal · P \(Fmt.int(p))g · C \(Fmt.int(c))g · Y \(Fmt.int(f))g · \(scopedFoods.count) öğün")
+            lines.append("- Ortalama: kayıtlı gün \(Fmt.int(avgLogged)) kcal/gün · takvim günü \(Fmt.int(avgCalendar)) kcal/gün · \(loggedDays)/\(scope.dayCount) gün kayıtlı")
+        }
+
+        guard !days.isEmpty else {
+            if let scope {
+                lines.append("- Bu aralıkta yemek kaydı yok: \(Fmt.dateLong.string(from: scope.start)) → \(Fmt.dateLong.string(from: scope.endExclusive.addingTimeInterval(-1)))")
+                return lines.joined(separator: "\n")
+            }
+            return nil
+        }
+
+        for day in days {
+            guard let entries = grouped[day]?.sorted(by: { $0.date < $1.date }), !entries.isEmpty else { continue }
+            let kcal = entries.reduce(0) { $0 + $1.calories }
+            let p = entries.compactMap(\.protein).reduce(0, +)
+            let c = entries.compactMap(\.carbs).reduce(0, +)
+            let f = entries.compactMap(\.fat).reduce(0, +)
+
+            var label = Fmt.dateLong.string(from: day)
+            if cal.isDateInToday(day) {
+                label += " (bugün)"
+            } else if let yesterday = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: .now)),
+                      cal.isDate(day, inSameDayAs: yesterday) {
+                label += " (dün)"
+            }
+
+            lines.append("- \(label): \(Fmt.int(kcal)) kcal · P \(Fmt.int(p))g · C \(Fmt.int(c))g · Y \(Fmt.int(f))g")
+            for entry in entries {
+                let gramStr = entry.grams.map { "\(Fmt.int($0))g " } ?? ""
+                let time = Fmt.timeShort.string(from: entry.date)
+                let pStr = entry.protein.map { " · P\(Fmt.int($0))" } ?? ""
+                let cStr = entry.carbs.map { " · C\(Fmt.int($0))" } ?? ""
+                let fStr = entry.fat.map { " · Y\(Fmt.int($0))" } ?? ""
+                lines.append("  · \(time) — \(gramStr)\(entry.name) → \(Fmt.int(entry.calories)) kcal\(pStr)\(cStr)\(fStr)")
+            }
+        }
+
+        return lines.count > 2 ? lines.joined(separator: "\n") : nil
+    }
+
+    private struct CaloriePeriodRequest {
+        let label: String
+        let range: DateInterval
+        let includePaceEstimate: Bool
+    }
+
+    /// Sadece kullanıcının ima ettiği periyotları üretir. Böylece "bu ay" denmeden
+    /// aylık veri prompt'a taşınmaz, ama açık aralık istekleri tam çalışır.
+    private static func caloriePeriodsSection(ctx: ModelContext, query: String?) -> String? {
+        let requests = caloriePeriodRequests(for: query)
+        guard !requests.isEmpty else { return nil }
+
+        let fetchStart = requests.map(\.range.start).min() ?? CalorieStats.last(days: 30).start
+        let fetchEnd = requests.map(\.range.end).max() ?? CalorieStats.last(days: 30).end
+        let foods = fetchFoods(ctx: ctx, start: fetchStart, endExclusive: fetchEnd)
+        guard !foods.isEmpty else { return nil }
+        guard let dailyResult = computeDailyResult(ctx: ctx) else { return nil }
+        let target = dailyResult.goalCalories
 
         func line(_ label: String, _ s: CaloriePeriodStats) -> String {
             let balanceLabel: String = {
@@ -394,24 +780,111 @@ enum UserContextSnapshot {
 
         var lines: [String] = [
             "[KALORİ ÖZETİ (günlük hedef: \(Fmt.int(target)) kcal)]",
-            line("Bu hafta", week),
-            line("Bu ay", month),
-            line("Son 30 gün", last30),
+            "- Hedef makrolar: P \(Fmt.int(dailyResult.protein.grams))g · K \(Fmt.int(dailyResult.carbs.grams))g · Y \(Fmt.int(dailyResult.fat.grams))g",
         ]
-        // ortalama günlük net (son 30 gün) — kilo verme/alma hızını tahmin etmek için
-        if last30.loggedDays >= 7 {
-            let dailyAvg = last30.averageDailyBalance
-            let weekly = dailyAvg * 7
-            let kgPerWeek = weekly / 7700.0  // ~7700 kcal = 1 kg yağ
-            lines.append("- 30 gün ortalama günlük net: \(Fmt.signed(dailyAvg, digits: 0)) kcal → tahmini \(Fmt.signed(kgPerWeek, digits: 2)) kg/hafta")
+
+        for request in requests {
+            let stats = CalorieStats.stats(for: request.range, foods: foods, dailyTarget: target)
+            lines.append(line(request.label, stats))
+            if request.includePaceEstimate, stats.loggedDays >= 7 {
+                let dailyAvg = stats.averageDailyBalance
+                let weekly = dailyAvg * 7
+                let kgPerWeek = weekly / 7700.0  // ~7700 kcal = 1 kg yağ
+                lines.append("- \(request.label) ortalama günlük net: \(Fmt.signed(dailyAvg, digits: 0)) kcal → tahmini \(Fmt.signed(kgPerWeek, digits: 2)) kg/hafta")
+            }
         }
         return lines.joined(separator: "\n")
     }
 
+    private static func caloriePeriodRequests(for query: String?) -> [CaloriePeriodRequest] {
+        guard let query else {
+            return [
+                CaloriePeriodRequest(label: "Bu hafta", range: CalorieStats.thisWeek(), includePaceEstimate: false),
+                CaloriePeriodRequest(label: "Bu ay", range: CalorieStats.thisMonth(), includePaceEstimate: false),
+                CaloriePeriodRequest(label: "Son 30 gün", range: CalorieStats.last(days: 30), includePaceEstimate: true),
+                CaloriePeriodRequest(label: "Son 90 gün", range: CalorieStats.last(days: 90), includePaceEstimate: false),
+            ]
+        }
+
+        let lower = normalize(query).lowercased()
+        if isAllDataRequest(lower) {
+            return [
+                CaloriePeriodRequest(label: "Bu hafta", range: CalorieStats.thisWeek(), includePaceEstimate: false),
+                CaloriePeriodRequest(label: "Bu ay", range: CalorieStats.thisMonth(), includePaceEstimate: false),
+                CaloriePeriodRequest(label: "Son 30 gün", range: CalorieStats.last(days: 30), includePaceEstimate: true),
+                CaloriePeriodRequest(label: "Son 90 gün", range: CalorieStats.last(days: 90), includePaceEstimate: false),
+            ]
+        }
+
+        var requests: [CaloriePeriodRequest] = []
+        func append(_ request: CaloriePeriodRequest) {
+            guard !requests.contains(where: { $0.label == request.label }) else { return }
+            requests.append(request)
+        }
+
+        if containsAny(lower, ["bu hafta", "current week", "haftalik", "haftalık", "son 7", "7 gun", "7 gün"]) {
+            append(CaloriePeriodRequest(label: "Bu hafta", range: CalorieStats.thisWeek(), includePaceEstimate: false))
+        }
+        if containsAny(lower, ["gecen hafta", "geçen hafta", "previous week"]) {
+            if let previousWeek = previousWeekRange() {
+                append(CaloriePeriodRequest(label: "Geçen hafta", range: previousWeek, includePaceEstimate: false))
+            }
+        }
+        if containsAny(lower, ["bu ay", "current month"]) {
+            append(CaloriePeriodRequest(label: "Bu ay", range: CalorieStats.thisMonth(), includePaceEstimate: false))
+        }
+        if containsAny(lower, ["gecen ay", "geçen ay", "previous month"]) {
+            if let previousMonth = previousMonthRange() {
+                append(CaloriePeriodRequest(label: "Geçen ay", range: previousMonth, includePaceEstimate: false))
+            }
+        }
+        if containsAny(lower, ["son 90", "90 gun", "90 gün", "3 ay", "uc ay", "üç ay"]) {
+            append(CaloriePeriodRequest(label: "Son 90 gün", range: CalorieStats.last(days: 90), includePaceEstimate: false))
+        }
+        if containsAny(lower, ["son 30", "30 gun", "30 gün", "son ay", "1 ay", "aylik", "aylık"]) {
+            append(CaloriePeriodRequest(label: "Son 30 gün", range: CalorieStats.last(days: 30), includePaceEstimate: true))
+        }
+        if requests.isEmpty,
+           let scope = FoodDiaryScope.parse(query: query),
+           !scope.isExactDay,
+           wantsCaloriePeriodSummary(lower, scope: scope) {
+            append(CaloriePeriodRequest(
+                label: scope.label.capitalized(with: Locale(identifier: "tr_TR")),
+                range: DateInterval(start: scope.start, end: scope.endExclusive),
+                includePaceEstimate: scope.dayCount >= 21
+            ))
+        }
+        if requests.isEmpty, wantsCaloriePeriodSummary(lower, scope: nil) {
+            append(CaloriePeriodRequest(label: "Bu hafta", range: CalorieStats.thisWeek(), includePaceEstimate: false))
+            append(CaloriePeriodRequest(label: "Son 30 gün", range: CalorieStats.last(days: 30), includePaceEstimate: true))
+        }
+        return requests
+    }
+
+    private static func previousWeekRange(cal: Calendar = .current) -> DateInterval? {
+        var weekCal = cal
+        weekCal.firstWeekday = 2
+        guard let thisWeek = weekCal.dateInterval(of: .weekOfYear, for: .now),
+              let previousStart = weekCal.date(byAdding: .weekOfYear, value: -1, to: thisWeek.start)
+        else { return nil }
+        return weekCal.dateInterval(of: .weekOfYear, for: previousStart)
+    }
+
+    private static func previousMonthRange(cal: Calendar = .current) -> DateInterval? {
+        guard let thisMonth = cal.dateInterval(of: .month, for: .now),
+              let previousStart = cal.date(byAdding: .month, value: -1, to: thisMonth.start)
+        else { return nil }
+        return cal.dateInterval(of: .month, for: previousStart)
+    }
+
     /// Profil + son ölçümden günlük hedefi türet — CalorieCalculator ile.
     private static func computeDailyTarget(ctx: ModelContext) -> Double? {
+        computeDailyResult(ctx: ctx)?.goalCalories
+    }
+
+    private static func computeDailyResult(ctx: ModelContext) -> CalorieResult? {
         guard let profile = fetchProfile(ctx: ctx) else { return nil }
-        let measurements = fetchMeasurements(ctx: ctx)
+        let measurements = fetchMeasurements(ctx: ctx, limit: 1)
         guard let weight = measurements.first?.weight else { return nil }
         let bf = measurements.first?.bodyFat ?? profile.manualBodyFat
         let result = CalorieCalculator.compute(
@@ -422,9 +895,13 @@ enum UserContextSnapshot {
             bodyFat: bf,
             activity: profile.activity,
             goal: profile.goal,
-            manualOffset: profile.manualCalorieOffset
+            manualOffset: profile.manualCalorieOffset,
+            manualOffsetMacro: profile.manualCalorieOffsetMacro,
+            manualProteinGrams: profile.manualProteinGrams,
+            manualCarbsGrams: profile.manualCarbsGrams,
+            manualFatGrams: profile.manualFatGrams
         )
-        return result.goalCalories
+        return result
     }
 
     private static func goalsSection(ctx: ModelContext, latestWeight: Double?) -> String? {
@@ -516,9 +993,11 @@ enum UserContextSnapshot {
     }
 
     /// Antrenman logları — gerçek seanslar (haftalık template'ten farklı).
-    /// Bu hafta + bu ay özet + son 5 seansın detayı (hareketler dahil).
-    private static func workoutLogsSection(ctx: ModelContext) -> String? {
-        let logs = (try? ctx.fetch(FetchDescriptor<WorkoutLog>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+    private static func workoutLogsSection(ctx: ModelContext, query: String?) -> String? {
+        let lower = query.map { normalize($0).lowercased() } ?? ""
+        let wantsAllTime = isAllDataRequest(lower) || containsAny(lower, ["tum zaman", "tüm zaman", "all time"])
+        let start = wantsAllTime ? nil : Calendar.current.date(byAdding: .day, value: -30, to: .now)
+        let logs = fetchWorkoutLogs(ctx: ctx, start: start)
         guard !logs.isEmpty else { return nil }
 
         let cal = Calendar.current
@@ -526,19 +1005,18 @@ enum UserContextSnapshot {
         var weekCal = cal
         weekCal.firstWeekday = 2
         let weekRange = weekCal.dateInterval(of: .weekOfYear, for: now)
-        let monthRange = cal.dateInterval(of: .month, for: now)
         let thirtyAgo = cal.date(byAdding: .day, value: -30, to: now) ?? now
 
         let weekLogs  = logs.filter { weekRange?.contains($0.date) ?? false }
-        let monthLogs = logs.filter { monthRange?.contains($0.date) ?? false }
         let last30    = logs.filter { $0.date >= thirtyAgo }
 
         var lines: [String] = ["[ANTRENMAN LOGLARI]"]
         lines.append("- Bu hafta: \(weekLogs.count) seans · \(weekLogs.map(\.durationMinutes).reduce(0, +)) dk · \(Fmt.int(weekLogs.map(\.estimatedCalories).reduce(0, +))) kcal")
-        lines.append("- Bu ay: \(monthLogs.count) seans · \(monthLogs.map(\.durationMinutes).reduce(0, +)) dk")
         let freqPerWeek = Double(last30.count) / (30.0 / 7.0)
         lines.append("- Son 30 gün: \(last30.count) seans · ort. \(String(format: "%.1f", freqPerWeek)) seans/hafta")
-        lines.append("- Toplam (tüm zamanlar): \(logs.count) seans · \(logs.map(\.durationMinutes).reduce(0, +) / 60) saat")
+        if wantsAllTime {
+            lines.append("- Toplam (tüm zamanlar): \(logs.count) seans · \(logs.map(\.durationMinutes).reduce(0, +) / 60) saat")
+        }
 
         // Son 5 seansın detayı
         lines.append("- Son seanslar:")
@@ -562,8 +1040,14 @@ enum UserContextSnapshot {
 
     private static func todaysStepsSection(ctx: ModelContext, weight: Double?) -> String? {
         let cal = Calendar.current
-        let steps = (try? ctx.fetch(FetchDescriptor<StepEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
-        guard let today = steps.first(where: { cal.isDateInToday($0.date) }) else { return nil }
+        let start = cal.startOfDay(for: .now)
+        let end = cal.date(byAdding: .day, value: 1, to: start) ?? .now
+        let descriptor = FetchDescriptor<StepEntry>(
+            predicate: #Predicate { $0.date >= start && $0.date < end },
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        let steps = (try? ctx.fetch(descriptor)) ?? []
+        guard let today = steps.first else { return nil }
         var lines: [String] = ["[ADIM (bugün)]"]
         var line = "- \(Fmt.int(Double(today.steps))) adım"
         if let w = weight {
@@ -603,65 +1087,7 @@ enum UserContextSnapshot {
         return lines.joined(separator: "\n")
     }
 
-    private static func mealPlanTodaySection(ctx: ModelContext) -> String {
-        let weekday = Calendar.current.component(.weekday, from: .now)
-        let overrides = (try? ctx.fetch(FetchDescriptor<MealPlanOverride>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
-        let dayType = MealPlanOverride.dayTypeOverride(for: weekday, in: overrides) ?? MealLibrary.dayType(for: weekday)
-        let template = MealLibrary.template(for: dayType)
-        let todaysOverrides = overrides.filter { $0.weekday == weekday }
-        let customItems = todaysOverrides.filter { $0.operation == .addItem }
 
-        // Aktif deficit seviyesini AppStorage'dan oku (kullanıcı MealPlan view'da seçtiyse)
-        let deficitRaw = UserDefaults.standard.string(forKey: "mealplan.deficit") ?? DeficitLevel.maintain.rawValue
-        let deficit = DeficitLevel(rawValue: deficitRaw) ?? .maintain
-        let customTotals = customItems.reduce(Macros.zero) { $0 + $1.macros }
-        let totals = template.totals(deficit: deficit.factor) + customTotals
-
-        let wd = Weekday(rawValue: weekday)?.long ?? "Bugün"
-        var lines: [String] = ["[YEMEK PLANI — \(wd) (\(dayType.label) günü)]"]
-        lines.append("- \(dayType.headline)")
-
-        if deficit != .maintain {
-            lines.append("- Aktif DEFICIT: \(deficit.label) (\(deficit.deltaKcal) kcal) — porsiyonlar bu orana göre kısılmış halde aşağıda.")
-        }
-
-        lines.append("- Bugünkü hedef toplam: ~\(Fmt.int(totals.kcal)) kcal · P \(Fmt.int(totals.p))g · C \(Fmt.int(totals.c))g · Y \(Fmt.int(totals.f))g")
-
-        // Öğün öğün döküm
-        lines.append("- Öğünler (tüm gramlar çiğ ağırlık):")
-        for meal in template.meals {
-            let mealCustomItems = customItems.filter { $0.slot == meal.slot }
-            let mealTotals = meal.totals(deficit: deficit.factor) + mealCustomItems.reduce(Macros.zero) { $0 + $1.macros }
-            var mealLine = "  · \(meal.slot.label) (~\(Fmt.int(mealTotals.kcal)) kcal):"
-            var items = meal.items.map { item -> String in
-                let amount = item.amount(deficit: deficit.factor)
-                let amountStr: String
-                if item.unit == "adet" || item.unit == "tabak" {
-                    amountStr = "\(Int(amount.rounded())) \(item.unit)"
-                } else {
-                    // 5g'a yuvarla
-                    let rounded = (amount / 5.0).rounded() * 5.0
-                    amountStr = "\(Int(rounded)) \(item.unit)"
-                }
-                return "\(amountStr) \(item.name)"
-            }
-            items.append(contentsOf: mealCustomItems.map { item in
-                let amount = item.amountText.isEmpty ? "" : "\(item.amountText) "
-                let kcal = item.calories.map { " (~\(Fmt.int($0)) kcal)" } ?? ""
-                return "\(amount)\(item.displayName)\(kcal) [AI düzenleme]"
-            })
-            mealLine += " " + items.joined(separator: " + ")
-            lines.append(mealLine)
-        }
-
-        // Haftalık rotasyon — AI "yarın ne yiyeceğim" gibi soruları yanıtlayabilsin
-        lines.append("- Haftalık rotasyon: " + Weekday.orderedTrWeek.map {
-            let override = MealPlanOverride.dayTypeOverride(for: $0.rawValue, in: overrides)
-            return "\($0.short)=\((override ?? MealLibrary.dayType(for: $0.rawValue)).short)"
-        }.joined(separator: " · "))
-
-        return lines.joined(separator: "\n")
-    }
 
     // MARK: - Fetch helpers
 
@@ -669,7 +1095,59 @@ enum UserContextSnapshot {
         (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first
     }
 
-    private static func fetchMeasurements(ctx: ModelContext) -> [Measurement] {
-        (try? ctx.fetch(FetchDescriptor<Measurement>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+    private static func fetchMeasurements(ctx: ModelContext, limit: Int? = nil) -> [Measurement] {
+        var descriptor = FetchDescriptor<Measurement>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        if let limit {
+            descriptor.fetchLimit = limit
+        }
+        return (try? ctx.fetch(descriptor)) ?? []
+    }
+
+    private static func fetchFoods(
+        ctx: ModelContext,
+        start: Date? = nil,
+        endExclusive: Date? = nil,
+        limit: Int? = nil
+    ) -> [FoodEntry] {
+        var descriptor: FetchDescriptor<FoodEntry>
+        if let start, let endExclusive {
+            descriptor = FetchDescriptor<FoodEntry>(
+                predicate: #Predicate { $0.date >= start && $0.date < endExclusive },
+                sortBy: [SortDescriptor(\.date, order: .reverse)]
+            )
+        } else if let start {
+            descriptor = FetchDescriptor<FoodEntry>(
+                predicate: #Predicate { $0.date >= start },
+                sortBy: [SortDescriptor(\.date, order: .reverse)]
+            )
+        } else if let endExclusive {
+            descriptor = FetchDescriptor<FoodEntry>(
+                predicate: #Predicate { $0.date < endExclusive },
+                sortBy: [SortDescriptor(\.date, order: .reverse)]
+            )
+        } else {
+            descriptor = FetchDescriptor<FoodEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        }
+
+        if let limit {
+            descriptor.fetchLimit = limit
+        }
+        return (try? ctx.fetch(descriptor)) ?? []
+    }
+
+    private static func fetchWorkoutLogs(ctx: ModelContext, start: Date? = nil, limit: Int? = nil) -> [WorkoutLog] {
+        var descriptor: FetchDescriptor<WorkoutLog>
+        if let start {
+            descriptor = FetchDescriptor<WorkoutLog>(
+                predicate: #Predicate { $0.date >= start },
+                sortBy: [SortDescriptor(\.date, order: .reverse)]
+            )
+        } else {
+            descriptor = FetchDescriptor<WorkoutLog>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        }
+        if let limit {
+            descriptor.fetchLimit = limit
+        }
+        return (try? ctx.fetch(descriptor)) ?? []
     }
 }

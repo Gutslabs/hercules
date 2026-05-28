@@ -67,21 +67,28 @@ struct WorkoutView: View {
         // Tüm subviews tek dict precompute'unu paylaşır — render başına 1 scan.
         let exact = exactLogByDay
         let tplsByWeekday = templateLogByWeekday
-        return ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.xl) {
-                    header
-                    monthNavBar
-                    calendarGrid(exact: exact, templatesByWeekday: tplsByWeekday) { date in
-                        focusProgramDay(for: date, proxy: proxy)
+        return GeometryReader { geometry in
+            let contentWidth = geometry.size.width
+            let compact = contentWidth < 980
+            let expansive = contentWidth >= 1500
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: compact ? Spacing.lg : Spacing.xl) {
+                        header(compact: compact)
+                        workoutCalendarSection(exact: exact, templatesByWeekday: tplsByWeekday) { date in
+                            focusProgramDay(for: date, proxy: proxy)
+                        }
+                        activeProgramSection(compact: compact, expansive: expansive)
+                            .id("active-program")
+                        workoutTermsSection(compact: compact)
+                        statsStrip(exact: exact, templatesByWeekday: tplsByWeekday, compact: compact)
+                        Spacer(minLength: 24)
                     }
-                    activeProgramSection
-                        .id("active-program")
-                    workoutTermsSection
-                    statsStrip(exact: exact, templatesByWeekday: tplsByWeekday)
-                    Spacer(minLength: 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, compact ? Spacing.lg : (expansive ? 44 : Spacing.xxl))
+                    .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
                 }
-                .padding(Spacing.xxl)
             }
         }
         .toolbar {
@@ -149,57 +156,133 @@ struct WorkoutView: View {
 
     // MARK: Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func header(compact: Bool) -> some View {
+        Group {
+            if compact {
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    headerCopy(maxTextWidth: nil)
+                    headerSignals(compact: true)
+                }
+            } else {
+                HStack(alignment: .bottom, spacing: Spacing.xxxl) {
+                    headerCopy(maxTextWidth: 560)
+                    Spacer(minLength: Spacing.xxxl)
+                    headerSignals(compact: false)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func headerCopy(maxTextWidth: CGFloat?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Antrenman").eyebrow()
             Text("Seans Takvimi")
-                .font(Typography.display(40))
+                .font(Typography.display(42))
                 .foregroundStyle(Palette.textPrimary)
-            Text("Yaptığın antrenmanları gün gün kaydet, haftalık tempoyu gör.")
+            Text("Günlük log, aktif program ve teknik notlar tek yerde. Takvimden güne dokun, program kartına ak.")
                 .font(Typography.body)
                 .foregroundStyle(Palette.textSecondary)
+                .frame(maxWidth: maxTextWidth, alignment: .leading)
         }
     }
 
-    private var activeProgramSection: some View {
+    private func headerSignals(compact: Bool) -> some View {
+        HStack(spacing: 0) {
+            WorkoutHeaderSignal(
+                icon: "calendar",
+                label: "Bu ay",
+                value: "\(logsInCurrentMonth.count)",
+                detail: "seans"
+            )
+            WorkoutHeaderDivider()
+            WorkoutHeaderSignal(
+                icon: "list.clipboard",
+                label: "Aktif",
+                value: "\(activeProgramWeekdays.count)",
+                detail: "gün"
+            )
+            WorkoutHeaderDivider()
+            WorkoutHeaderSignal(
+                icon: "archivebox",
+                label: "Arşiv",
+                value: "\(archivedPrograms.count)",
+                detail: "plan"
+            )
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+        .frame(maxWidth: compact ? .infinity : 430, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(Palette.surface.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
+        )
+    }
+
+    private func workoutCalendarSection(
+        exact: [Date: WorkoutLog],
+        templatesByWeekday: [Int: WorkoutLog],
+        onSelectProgramDay: @escaping (Date) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            monthNavBar
+            calendarGrid(exact: exact, templatesByWeekday: templatesByWeekday, onSelectProgramDay: onSelectProgramDay)
+        }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .fill(Palette.surface.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
+        )
+    }
+
+    private func activeProgramSection(compact: Bool, expansive: Bool) -> some View {
         let programWeekdays = activeProgramWeekdays
         let activeDays = programWeekdays.compactMap { weekday in templates.first(where: { $0.weekday == weekday }) }
         let totalExercises = activeDays.reduce(0) { $0 + $1.templateExercises.count }
         let totalMinutes = activeDays.reduce(0) { $0 + $1.durationMinutes }
+        let totalCalories = activeDays.reduce(0) { $0 + $1.estimatedCalories }
+        let maxColumns = compact ? 1 : (expansive ? 3 : 2)
+        let columnCount = max(1, min(programWeekdays.count, maxColumns))
+        let columns = Array(
+            repeating: GridItem(.flexible(minimum: compact ? 240 : 280), spacing: Spacing.md, alignment: .top),
+            count: columnCount
+        )
 
-        return VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(alignment: .center, spacing: Spacing.md) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "list.clipboard")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Palette.accent)
-                        Text("Aktif Program").eyebrow()
+        return VStack(alignment: .leading, spacing: Spacing.lg) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: Spacing.md) {
+                    activeProgramTitle(
+                        dayCount: programWeekdays.count,
+                        exerciseCount: totalExercises + planOverrides.count,
+                        totalMinutes: totalMinutes
+                    )
+
+                    Spacer()
+
+                    activeProgramSummary(totalMinutes: totalMinutes, totalCalories: totalCalories)
+                    activeProgramActions(hasProgram: !programWeekdays.isEmpty)
+                }
+
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    activeProgramTitle(
+                        dayCount: programWeekdays.count,
+                        exerciseCount: totalExercises + planOverrides.count,
+                        totalMinutes: totalMinutes
+                    )
+                    HStack(alignment: .center, spacing: Spacing.md) {
+                        activeProgramSummary(totalMinutes: totalMinutes, totalCalories: totalCalories)
+                        Spacer(minLength: Spacing.md)
+                        activeProgramActions(hasProgram: !programWeekdays.isEmpty)
                     }
-                    Text("\(programWeekdays.count) gün · \(totalExercises + planOverrides.count) hareket · \(totalMinutes) dk/hafta")
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.textSecondary)
                 }
-
-                Spacer()
-
-                Button {
-                    archiveActiveProgram()
-                } label: {
-                    Label("Arşivle", systemImage: "archivebox")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(programWeekdays.isEmpty)
-
-                Button {
-                    showingArchives = true
-                } label: {
-                    Label("Arşiv", systemImage: "clock.arrow.circlepath")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(archivedPrograms.isEmpty)
             }
 
             if programWeekdays.isEmpty {
@@ -212,7 +295,7 @@ struct WorkoutView: View {
                             .fill(Palette.surfaceElevated.opacity(0.45))
                     )
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Spacing.md), count: 3), spacing: Spacing.md) {
+                LazyVGrid(columns: columns, spacing: Spacing.md) {
                     ForEach(programWeekdays, id: \.self) { weekday in
                         WorkoutProgramDayCard(
                             weekday: weekday,
@@ -232,13 +315,61 @@ struct WorkoutView: View {
         }
         .padding(Spacing.lg)
         .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface)
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .fill(Palette.surface.opacity(0.74))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
         )
+    }
+
+    private func activeProgramTitle(dayCount: Int, exerciseCount: Int, totalMinutes: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Aktif Program").eyebrow()
+            Text("Haftalık reçete")
+                .font(Typography.title)
+                .foregroundStyle(Palette.textPrimary)
+            Text("\(dayCount) gün · \(exerciseCount) hareket · \(totalMinutes) dk/hafta")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textSecondary)
+        }
+    }
+
+    private func activeProgramSummary(totalMinutes: Int, totalCalories: Double) -> some View {
+        HStack(spacing: 0) {
+            ProgramSummaryDatum(label: "Süre", value: "\(totalMinutes)", unit: "dk")
+            WorkoutHeaderDivider(height: 30)
+            ProgramSummaryDatum(label: "Yakım", value: "\(Fmt.int(totalCalories))", unit: "kcal")
+            WorkoutHeaderDivider(height: 30)
+            ProgramSummaryDatum(label: "AI", value: "\(planOverrides.count)", unit: "ekleme")
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Palette.surfaceElevated.opacity(0.46))
+        )
+    }
+
+    private func activeProgramActions(hasProgram: Bool) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Button {
+                archiveActiveProgram()
+            } label: {
+                Label("Arşivle", systemImage: "archivebox")
+            }
+            .buttonStyle(WorkoutMiniButtonStyle())
+            .disabled(!hasProgram)
+
+            Button {
+                showingArchives = true
+            } label: {
+                Label("Arşiv", systemImage: "clock.arrow.circlepath")
+            }
+            .buttonStyle(WorkoutMiniButtonStyle())
+            .disabled(archivedPrograms.isEmpty)
+        }
     }
 
     private var activeProgramWeekdays: [Int] {
@@ -280,15 +411,26 @@ struct WorkoutView: View {
         }
     }
 
-    private var workoutTermsSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(spacing: 6) {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.accent)
-                Text("Terimler").eyebrow()
+    private func workoutTermsSection(compact: Bool) -> some View {
+        let gridMinimum: CGFloat = compact ? 230 : 280
+
+        return VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Terimler").eyebrow()
+                    Text("Programı okuma sözlüğü")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                }
+                Spacer()
+                Text("AI plan yazarken aynı dili kullansın diye kısa referans.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Spacing.md), count: 4), spacing: Spacing.md) {
+
+            LazyVGrid(columns: [
+                GridItem(.adaptive(minimum: gridMinimum), spacing: Spacing.md)
+            ], spacing: Spacing.md) {
                 WorkoutTermCard(term: "RIR", detail: "Reps in reserve. Set bitince tankta kaç temiz tekrar kaldı demek. RIR 2 = iki tekrar daha çıkarırdın.")
                 WorkoutTermCard(term: "4×6-10", detail: "4 set yap. Her sette hedef tekrar aralığı 6 ile 10. Tüm setlerde üst banda yaklaşırsan ağırlık artır.")
                 WorkoutTermCard(term: "Rest 2-3 dk", detail: "Setler arası dinlenme. Ana liftlerde performans düşmesin diye daha uzun, izolasyonda daha kısa olabilir.")
@@ -297,12 +439,12 @@ struct WorkoutView: View {
         }
         .padding(Spacing.lg)
         .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface)
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .fill(Palette.surface.opacity(0.68))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.55)
         )
     }
 
@@ -422,7 +564,8 @@ struct WorkoutView: View {
 
     private func statsStrip(
         exact: [Date: WorkoutLog],
-        templatesByWeekday: [Int: WorkoutLog]
+        templatesByWeekday: [Int: WorkoutLog],
+        compact: Bool
     ) -> some View {
         let cal = Calendar.current
         let now = Date()
@@ -458,32 +601,93 @@ struct WorkoutView: View {
             date = next
         }
 
-        return HStack(spacing: Spacing.md) {
-            statCard(
-                eyebrow: "Bu Hafta",
-                primary: "\(weekSessions) seans",
-                secondaryLeft: "\(weekMin) dk",
-                detail: "\(Fmt.int(weekKcal)) kcal yakım"
-            )
-            statCard(
-                eyebrow: "Bu Ay",
-                primary: "\(monthSessions) seans",
-                secondaryLeft: "\(monthMin) dk",
-                detail: "ay başından beri"
-            )
-            statCard(
-                eyebrow: "Son 30 Gün",
-                primary: "\(last30Sess) seans",
-                secondaryLeft: String(format: "%.1f /hafta", Double(last30Sess) / (30.0 / 7.0)),
-                detail: "ortalama frekans"
-            )
-            statCard(
-                eyebrow: "Kayıt",
-                primary: "\(logs.count) log",
-                secondaryLeft: "\(uniqueWeekdaysWithLog) gün/hafta",
-                detail: "template tabanı"
-            )
+        return VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Tempo").eyebrow()
+                    Text("Gerçek seans ritmi")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                }
+                Spacer()
+                Text(String(format: "son 30 gün %.1f seans/hafta", Double(last30Sess) / (30.0 / 7.0)))
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+
+            Hairline()
+
+            if compact {
+                VStack(spacing: Spacing.md) {
+                    statDatum(
+                        eyebrow: "Bu Hafta",
+                        primary: "\(weekSessions)",
+                        unit: "seans",
+                        secondary: "\(weekMin) dk · \(Fmt.int(weekKcal)) kcal"
+                    )
+                    Hairline()
+                    statDatum(
+                        eyebrow: "Bu Ay",
+                        primary: "\(monthSessions)",
+                        unit: "seans",
+                        secondary: "\(monthMin) dk ay başından beri"
+                    )
+                    Hairline()
+                    statDatum(
+                        eyebrow: "Son 30 Gün",
+                        primary: "\(last30Sess)",
+                        unit: "seans",
+                        secondary: String(format: "%.1f /hafta", Double(last30Sess) / (30.0 / 7.0))
+                    )
+                    Hairline()
+                    statDatum(
+                        eyebrow: "Kayıt",
+                        primary: "\(logs.count)",
+                        unit: "log",
+                        secondary: "\(uniqueWeekdaysWithLog) gün/hafta temeli"
+                    )
+                }
+            } else {
+                HStack(spacing: 0) {
+                    statDatum(
+                        eyebrow: "Bu Hafta",
+                        primary: "\(weekSessions)",
+                        unit: "seans",
+                        secondary: "\(weekMin) dk · \(Fmt.int(weekKcal)) kcal"
+                    )
+                    WorkoutHeaderDivider(height: 42)
+                    statDatum(
+                        eyebrow: "Bu Ay",
+                        primary: "\(monthSessions)",
+                        unit: "seans",
+                        secondary: "\(monthMin) dk ay başından beri"
+                    )
+                    WorkoutHeaderDivider(height: 42)
+                    statDatum(
+                        eyebrow: "Son 30 Gün",
+                        primary: "\(last30Sess)",
+                        unit: "seans",
+                        secondary: String(format: "%.1f /hafta", Double(last30Sess) / (30.0 / 7.0))
+                    )
+                    WorkoutHeaderDivider(height: 42)
+                    statDatum(
+                        eyebrow: "Kayıt",
+                        primary: "\(logs.count)",
+                        unit: "log",
+                        secondary: "\(uniqueWeekdaysWithLog) gün/hafta temeli"
+                    )
+                }
+            }
         }
+        .padding(Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .fill(Palette.surface.opacity(0.68))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                .strokeBorder(Palette.borderStrong, lineWidth: 0.55)
+        )
     }
 
     /// Haftanın kaç farklı gününde bir log var (template tabanı = haftalık tempo).
@@ -493,31 +697,25 @@ struct WorkoutView: View {
         return weekdays.count
     }
 
-    private func statCard(eyebrow: String, primary: String, secondaryLeft: String, detail: String) -> some View {
+    private func statDatum(eyebrow: String, primary: String, unit: String, secondary: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(eyebrow.uppercased()).eyebrow()
-            Text(primary)
-                .font(Typography.hero(20))
-                .foregroundStyle(Palette.textPrimary)
-                .contentTransition(.numericText())
-                .animation(.snappy, value: primary)
-            Text(secondaryLeft)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(primary)
+                    .font(Typography.hero(24))
+                    .foregroundStyle(Palette.textPrimary)
+                    .contentTransition(.numericText())
+                    .animation(.snappy, value: primary)
+                Text(unit)
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+            Text(secondary)
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textTertiary)
-            Text(detail)
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textQuaternary)
+                .lineLimit(1)
         }
-        .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
     }
 
     // MARK: Month nav
@@ -542,21 +740,9 @@ struct WorkoutView: View {
                 currentMonth = Self.startOfMonth(.now)
                 selectedDay = today
             } label: {
-                Text("Bugün")
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Palette.surface)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .strokeBorder(Palette.border, lineWidth: 0.5)
-                    )
+                Label("Bugün", systemImage: "scope")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WorkoutMiniButtonStyle())
         }
     }
 
@@ -575,7 +761,7 @@ struct WorkoutView: View {
                         .strokeBorder(Palette.border, lineWidth: 0.5)
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkoutIconButtonStyle())
     }
 
     // MARK: Grid
@@ -944,6 +1130,114 @@ private struct CreateDate: Identifiable {
     var id: TimeInterval { date.timeIntervalSince1970 }
 }
 
+// MARK: - Workout design atoms
+
+private struct WorkoutHeaderSignal: View {
+    let icon: String
+    let label: String
+    let value: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Palette.accentSoft)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Palette.accent.opacity(0.16), lineWidth: 0.5)
+                )
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label.uppercased())
+                    .font(Typography.label)
+                    .tracking(0.8)
+                    .foregroundStyle(Palette.textQuaternary)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(value)
+                        .font(Typography.monoLarge)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(detail)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+            .frame(minWidth: 70, alignment: .leading)
+        }
+    }
+}
+
+private struct WorkoutHeaderDivider: View {
+    var height: CGFloat = 38
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.borderStrong)
+            .frame(width: 0.5, height: height)
+            .padding(.horizontal, Spacing.md)
+    }
+}
+
+private struct ProgramSummaryDatum: View {
+    let label: String
+    let value: String
+    let unit: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased())
+                .font(Typography.label)
+                .tracking(0.8)
+                .foregroundStyle(Palette.textQuaternary)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value)
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textPrimary)
+                Text(unit)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+        }
+        .frame(minWidth: 66, alignment: .leading)
+    }
+}
+
+private struct WorkoutMiniButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Typography.captionBold)
+            .foregroundStyle(isEnabled ? Palette.textSecondary : Palette.textQuaternary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(configuration.isPressed ? Palette.surfaceElevated.opacity(0.78) : Palette.surfaceElevated.opacity(0.52))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(Palette.borderStrong, lineWidth: 0.55)
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(isEnabled ? 1 : 0.45)
+            .animation(.spring(response: 0.18, dampingFraction: 0.78), value: configuration.isPressed)
+    }
+}
+
+private struct WorkoutIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.16, dampingFraction: 0.72), value: configuration.isPressed)
+    }
+}
+
 // MARK: - Active program board
 
 private struct WorkoutTermCard: View {
@@ -951,20 +1245,27 @@ private struct WorkoutTermCard: View {
     let detail: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: Spacing.md) {
             Text(term)
-                .font(Typography.bodyBold)
-                .foregroundStyle(Palette.textPrimary)
+                .font(Typography.mono)
+                .foregroundStyle(Palette.accent)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(Palette.accentSoft)
+                )
+
             Text(detail)
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.md)
-        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surfaceElevated.opacity(0.45))
+                .fill(Palette.surfaceElevated.opacity(0.36))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
@@ -983,40 +1284,32 @@ private struct WorkoutProgramDayCard: View {
     @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                VStack(alignment: .leading, spacing: 7) {
                     Text(WorkoutSession.weekdayNames[weekday])
-                        .font(Typography.bodyBold)
-                        .foregroundStyle(session == nil ? Palette.textTertiary : Palette.textPrimary)
+                        .font(Typography.captionBold)
+                        .foregroundStyle(session == nil ? Palette.textTertiary : Palette.accent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(session == nil ? Color.white.opacity(0.045) : Palette.accentSoft))
+
                     Text(session?.name ?? "Serbest / Dinlenme")
-                        .font(Typography.caption)
-                        .foregroundStyle(session == nil ? Palette.textQuaternary : Palette.textSecondary)
-                        .lineLimit(1)
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(session == nil ? Palette.textTertiary : Palette.textPrimary)
+                        .lineLimit(2)
                 }
-                Spacer()
-                Button(action: onEdit) {
-                    Image(systemName: session == nil ? "plus" : "pencil")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Palette.textSecondary)
-                        .frame(width: 24, height: 24)
-                        .background(Circle().fill(Palette.surfaceElevated))
-                }
-                .buttonStyle(.plain)
-                .help(session == nil ? "Güne plan ekle" : "Planı düzenle")
-                if let session {
-                    Button {
-                        onDelete(session)
-                    } label: {
-                        Image(systemName: "archivebox")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Palette.textTertiary)
-                            .frame(width: 24, height: 24)
-                            .background(Circle().fill(Palette.surfaceElevated))
+
+                Spacer(minLength: Spacing.md)
+
+                HStack(spacing: 6) {
+                    iconAction(systemName: session == nil ? "plus" : "pencil", help: session == nil ? "Güne plan ekle" : "Planı düzenle", action: onEdit)
+                    if let session {
+                        iconAction(systemName: "archivebox", help: "Bu günü aktif plandan kaldır") {
+                            onDelete(session)
+                        }
+                        .opacity(hovering ? 1 : 0.28)
                     }
-                    .buttonStyle(.plain)
-                    .help("Bu günü aktif plandan kaldır")
-                    .opacity(hovering ? 1 : 0.2)
                 }
             }
 
@@ -1036,42 +1329,23 @@ private struct WorkoutProgramDayCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let warmup = session.warmup, !warmup.isEmpty {
+                    labelBlock("Isınma", warmup)
+                }
+
                 let exercises = session.sortedTemplateExercises
                 if !exercises.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(exercises) { exercise in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text("\(exercise.order + 1).")
-                                        .font(Typography.mono)
-                                        .foregroundStyle(Palette.textQuaternary)
-                                        .frame(width: 20, alignment: .leading)
-                                    Text(exercise.name)
-                                        .font(Typography.captionBold)
-                                        .foregroundStyle(Palette.textPrimary)
-                                        .lineLimit(1)
-                                    if let sourceURL = exercise.sourceURL,
-                                       let url = URL(string: sourceURL) {
-                                        Link(destination: url) {
-                                            Image(systemName: "link")
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundStyle(Palette.textTertiary)
-                                                .frame(width: 18, height: 18)
-                                                .background(Circle().fill(Color.white.opacity(0.05)))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .help("Hareket kaynağını aç")
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                Text(exercise.prescriptionText)
-                                    .font(Typography.caption)
-                                    .foregroundStyle(Palette.textTertiary)
-                                    .lineLimit(2)
-                                    .padding(.leading, 26)
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(exercises.enumerated()), id: \.offset) { index, exercise in
+                            exerciseRow(exercise)
+                            if index < exercises.count - 1 {
+                                Hairline()
+                                    .padding(.leading, 30)
+                                    .padding(.vertical, 7)
                             }
                         }
                     }
+                    .padding(.top, 2)
                 } else {
                     emptyLine("Hareket reçetesi yok")
                 }
@@ -1080,6 +1354,10 @@ private struct WorkoutProgramDayCard: View {
                     Hairline()
                     labelBlock("Progression", progression)
                 }
+
+                if let notes = session.notes, !notes.isEmpty {
+                    labelBlock("Not", notes)
+                }
             } else if !legacyOverrides.isEmpty {
                 labelBlock("Eski AI eklemeleri", legacyOverrides.map { "+ \($0.exerciseName) · \($0.prescriptionText)" }.joined(separator: "\n"))
             } else {
@@ -1087,20 +1365,75 @@ private struct WorkoutProgramDayCard: View {
                 emptyLine("Plan yok")
             }
         }
-        .padding(Spacing.md)
-        .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
+        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, minHeight: 300, alignment: .topLeading)
         .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(isHighlighted ? Palette.accent.opacity(0.12) : (hovering ? Palette.surfaceElevated.opacity(0.7) : Palette.surfaceElevated.opacity(0.52)))
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(isHighlighted ? Palette.accent.opacity(0.11) : (hovering ? Palette.surfaceElevated.opacity(0.68) : Palette.surfaceElevated.opacity(0.44)))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(isHighlighted ? Palette.accent.opacity(0.95) : Palette.border, lineWidth: isHighlighted ? 1.2 : 0.5)
         )
-        .shadow(color: isHighlighted ? Palette.accent.opacity(0.18) : .clear, radius: 18, x: 0, y: 8)
+        .shadow(color: isHighlighted ? Palette.accent.opacity(0.12) : .clear, radius: 18, x: 0, y: 8)
         .contentShape(Rectangle())
         .onTapGesture(perform: onEdit)
         .onHover { hovering = $0 }
+    }
+
+    private func iconAction(systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Palette.textSecondary)
+                .frame(width: 26, height: 26)
+                .background(
+                    Circle().fill(Palette.surface.opacity(0.86))
+                )
+                .overlay(
+                    Circle().strokeBorder(Palette.borderStrong, lineWidth: 0.55)
+                )
+        }
+        .buttonStyle(WorkoutIconButtonStyle())
+        .help(help)
+    }
+
+    private func exerciseRow(_ exercise: WorkoutTemplateExercise) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text("\(exercise.order + 1).")
+                .font(Typography.mono)
+                .foregroundStyle(Palette.textQuaternary)
+                .frame(width: 22, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(exercise.name)
+                        .font(Typography.captionBold)
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+
+                    if let sourceURL = exercise.sourceURL,
+                       let url = URL(string: sourceURL) {
+                        Link(destination: url) {
+                            Image(systemName: "link")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Palette.accent)
+                                .frame(width: 18, height: 18)
+                                .background(Circle().fill(Palette.accentSoft))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Hareket kaynağını aç")
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Text(exercise.prescriptionText)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(2)
+            }
+        }
     }
 
     private func smallMetric(_ text: String) -> some View {

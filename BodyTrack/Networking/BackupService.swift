@@ -12,6 +12,10 @@ import SwiftData
 //   6 — eklendi: tarif içerikleri, malzemeler, yapılış ve makro özeti
 //   7 — eklendi: tek tık kalori presetleri
 //   8 — eklendi: detaylı antrenman programı, template hareketleri ve program arşivi
+//   9 — eklendi: profil manuel makro hedefleri
+//   10 — eklendi: manuel kalori offset makro kaynağı
+//   11 — eklendi: tarif favorileri
+//   12 — eklendi: profil supplement listesi
 //
 // Eski v1 backup'ları okumaya devam ediyoruz — eksik alanlar nil/default kalır.
 
@@ -29,8 +33,6 @@ private struct HerculesBackup: Codable {
     let recipes: [RecipeSnapshot]
     let steps: [StepSnapshot]
     let monthlyGoals: [MonthlyGoalSnapshot]?
-    /// v4+: Yemek planı üstüne gelen AI/user override'ları.
-    let mealPlanOverrides: [MealPlanOverrideSnapshot]?
     /// v2+: gerçek antrenman log'ları (her log'un exercise+set'leri nested).
     let workoutLogs: [WorkoutLogSnapshot]?
     /// v3+: Application Support/Hercules altındaki JSON state dosyaları.
@@ -49,8 +51,14 @@ private struct ProfileSnapshot: Codable {
     let targetWeight: Double?
     let manualBodyFat: Double?
     let manualCalorieOffset: Double
+    let manualCalorieOffsetMacro: String?
+    let manualProteinGrams: Double?
+    let manualCarbsGrams: Double?
+    let manualFatGrams: Double?
     /// v2+: AI'a sürekli enjekte edilen "hakkında" metni.
     let about: String?
+    /// v12+: AI'a kalıcı profil bilgisi olarak verilen supplement listesi.
+    let supplements: String?
 }
 
 private struct MeasurementSnapshot: Codable {
@@ -129,6 +137,7 @@ private struct RecipeSnapshot: Codable {
     let title: String
     let urlString: String
     let category: String
+    let isFavorite: Bool?
     let summary: String?
     let ingredientsText: String?
     let instructionsText: String?
@@ -156,22 +165,6 @@ private struct MonthlyGoalSnapshot: Codable {
     let note: String?
 }
 
-private struct MealPlanOverrideSnapshot: Codable {
-    let weekday: Int
-    let operationRaw: String
-    let dayTypeRaw: String?
-    let slotRaw: String?
-    let itemName: String?
-    let amount: Double?
-    let unit: String?
-    let calories: Double?
-    let protein: Double?
-    let carbs: Double?
-    let fat: Double?
-    let note: String?
-    let source: String
-    let createdAt: Date
-}
 
 // MARK: - v2 workout log snapshots
 
@@ -225,7 +218,6 @@ private struct VaultManifest: Codable {
         let recipes: Int
         let steps: Int
         let monthlyGoals: Int
-        let mealPlanOverrides: Int
         let workoutLogs: Int
         let supportFiles: Int
         let preferences: Int
@@ -283,10 +275,7 @@ final class BackupService {
     ]
 
     private static let preferenceKeys = [
-        "mealplan.deficit",
-        "mealplan.selectedWeekday",
         "hercules.ai.provider",
-        "hercules.openrouter.api_key",
         "hercules.codex.model",
         "hercules.codex.reasoning",
         "hercules.openrouter.model"
@@ -425,13 +414,23 @@ final class BackupService {
         let stepCount = (try? ctx.fetchCount(FetchDescriptor<StepEntry>())) ?? 0
         let archiveCount = (try? ctx.fetchCount(FetchDescriptor<WorkoutProgramArchive>())) ?? 0
         let workoutOverrideCount = (try? ctx.fetchCount(FetchDescriptor<WorkoutPlanOverride>())) ?? 0
-        let mealOverrideCount = (try? ctx.fetchCount(FetchDescriptor<MealPlanOverride>())) ?? 0
         let profile = (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first
         let hasProfileData = {
             guard let profile else { return false }
             let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let about = profile.about.trimmingCharacters(in: .whitespacesAndNewlines)
-            return !name.isEmpty || !about.isEmpty || profile.targetWeight != nil || profile.manualBodyFat != nil
+            let supplements = profile.supplements.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasCustomSupplements = !supplements.isEmpty && supplements != UserProfile.defaultSupplements
+            return !name.isEmpty
+                || !about.isEmpty
+                || hasCustomSupplements
+                || profile.targetWeight != nil
+                || profile.manualBodyFat != nil
+                || profile.manualCalorieOffset != 0
+                || profile.manualCalorieOffsetMacro != .carbs
+                || profile.manualProteinGrams != nil
+                || profile.manualCarbsGrams != nil
+                || profile.manualFatGrams != nil
         }()
         let presets = (try? ctx.fetch(FetchDescriptor<FoodPreset>())) ?? []
         let hasCustomPreset = presets.contains { !FoodPresetSeed.defaultPresetIDs.contains($0.presetID) }
@@ -445,8 +444,7 @@ final class BackupService {
             goalCount +
             stepCount +
             archiveCount +
-            workoutOverrideCount +
-            mealOverrideCount
+            workoutOverrideCount
         ) > 0 || hasProfileData || hasCustomPreset || hasSupportFiles()
     }
 
@@ -549,7 +547,12 @@ final class BackupService {
                 targetWeight: p.targetWeight,
                 manualBodyFat: p.manualBodyFat,
                 manualCalorieOffset: p.manualCalorieOffset,
-                about: p.about
+                manualCalorieOffsetMacro: p.manualCalorieOffsetMacro.rawValue,
+                manualProteinGrams: p.manualProteinGrams,
+                manualCarbsGrams: p.manualCarbsGrams,
+                manualFatGrams: p.manualFatGrams,
+                about: p.about,
+                supplements: p.effectiveSupplements
             )
         }()
 
@@ -562,11 +565,10 @@ final class BackupService {
         let recipes = (try? ctx.fetch(FetchDescriptor<Recipe>())) ?? []
         let steps = (try? ctx.fetch(FetchDescriptor<StepEntry>())) ?? []
         let monthlyGoals = (try? ctx.fetch(FetchDescriptor<MonthlyGoal>())) ?? []
-        let mealPlanOverrides = (try? ctx.fetch(FetchDescriptor<MealPlanOverride>())) ?? []
         let workoutLogs = (try? ctx.fetch(FetchDescriptor<WorkoutLog>(sortBy: [SortDescriptor(\.date)]))) ?? []
 
         return HerculesBackup(
-            version: 8,
+            version: 12,
             exportedAt: .now,
             profile: profileData,
             measurements: measurements.map {
@@ -643,6 +645,7 @@ final class BackupService {
                     title: $0.title,
                     urlString: $0.urlString,
                     category: $0.category.rawValue,
+                    isFavorite: $0.isFavorite,
                     summary: $0.summary,
                     ingredientsText: $0.ingredientsText,
                     instructionsText: $0.instructionsText,
@@ -667,24 +670,6 @@ final class BackupService {
             },
             monthlyGoals: monthlyGoals.map {
                 MonthlyGoalSnapshot(anchorDate: $0.anchorDate, targetWeight: $0.targetWeight, note: $0.note)
-            },
-            mealPlanOverrides: mealPlanOverrides.map {
-                MealPlanOverrideSnapshot(
-                    weekday: $0.weekday,
-                    operationRaw: $0.operationRaw,
-                    dayTypeRaw: $0.dayTypeRaw,
-                    slotRaw: $0.slotRaw,
-                    itemName: $0.itemName,
-                    amount: $0.amount,
-                    unit: $0.unit,
-                    calories: $0.calories,
-                    protein: $0.protein,
-                    carbs: $0.carbs,
-                    fat: $0.fat,
-                    note: $0.note,
-                    source: $0.source,
-                    createdAt: $0.createdAt
-                )
             },
             workoutLogs: workoutLogs.map { log in
                 let exs = log.exercises.sorted { $0.order < $1.order }.map { ex in
@@ -989,11 +974,17 @@ final class BackupService {
             guard let profile = backup.profile else { return 0 }
             let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let about = (profile.about ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let supplements = (profile.supplements ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasCustomSupplements = !supplements.isEmpty && supplements != UserProfile.defaultSupplements
             var score = 0
             if !name.isEmpty { score += 1 }
             if !about.isEmpty { score += 1 }
+            if hasCustomSupplements { score += 1 }
             if profile.targetWeight != nil { score += 1 }
             if profile.manualBodyFat != nil { score += 1 }
+            let offsetMacro = profile.manualCalorieOffsetMacro.flatMap(CalorieOffsetMacro.init(rawValue:)) ?? .carbs
+            if profile.manualCalorieOffset != 0 || offsetMacro != .carbs { score += 1 }
+            if profile.manualProteinGrams != nil || profile.manualCarbsGrams != nil || profile.manualFatGrams != nil { score += 1 }
             return score
         }()
 
@@ -1007,7 +998,6 @@ final class BackupService {
             + backup.recipes.count * 3
             + backup.steps.count
             + (backup.monthlyGoals?.count ?? 0)
-            + (backup.mealPlanOverrides?.count ?? 0)
             + (backup.workoutPlanOverrides?.count ?? 0)
             + (backup.workoutLogs?.count ?? 0) * 3
             + (backup.workoutArchives?.count ?? 0) * 2
@@ -1058,7 +1048,6 @@ final class BackupService {
                 recipes: backup.recipes.count,
                 steps: backup.steps.count,
                 monthlyGoals: backup.monthlyGoals?.count ?? 0,
-                mealPlanOverrides: backup.mealPlanOverrides?.count ?? 0,
                 workoutLogs: backup.workoutLogs?.count ?? 0,
                 supportFiles: backup.supportFiles?.count ?? 0,
                 preferences: backup.preferences?.count ?? 0
@@ -1076,7 +1065,6 @@ final class BackupService {
                 "recipes",
                 "steps",
                 "monthly-goals",
-                "meal-plan-overrides",
                 "chat-history",
                 "agent-memory",
                 "research-library",
@@ -1269,7 +1257,6 @@ final class BackupService {
             ((try? ctx.fetch(FetchDescriptor<Recipe>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<StepEntry>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<MonthlyGoal>())) ?? []).forEach { ctx.delete($0) }
-            ((try? ctx.fetch(FetchDescriptor<MealPlanOverride>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<WorkoutLog>())) ?? []).forEach { ctx.delete($0) }
             ((try? ctx.fetch(FetchDescriptor<UserProfile>())) ?? []).forEach { ctx.delete($0) }
         }
@@ -1288,7 +1275,14 @@ final class BackupService {
             p.targetWeight = ps.targetWeight
             p.manualBodyFat = ps.manualBodyFat
             p.manualCalorieOffset = ps.manualCalorieOffset
+            p.manualCalorieOffsetMacro = ps.manualCalorieOffsetMacro.flatMap(CalorieOffsetMacro.init(rawValue:)) ?? .carbs
+            p.manualProteinGrams = ps.manualProteinGrams
+            p.manualCarbsGrams = ps.manualCarbsGrams
+            p.manualFatGrams = ps.manualFatGrams
             p.about = ps.about ?? ""
+            p.supplements = (ps.supplements ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? UserProfile.defaultSupplements
+                : (ps.supplements ?? UserProfile.defaultSupplements)
         }
 
         for m in backup.measurements {
@@ -1407,6 +1401,7 @@ final class BackupService {
                 title: r.title,
                 urlString: r.urlString,
                 category: RecipeCategory(rawValue: r.category) ?? .dinner,
+                isFavorite: r.isFavorite ?? false,
                 summary: r.summary,
                 ingredientsText: r.ingredientsText,
                 instructionsText: r.instructionsText,
@@ -1431,24 +1426,6 @@ final class BackupService {
         }
         for g in (backup.monthlyGoals ?? []) {
             ctx.insert(MonthlyGoal(anchorDate: g.anchorDate, targetWeight: g.targetWeight, note: g.note))
-        }
-        for m in (backup.mealPlanOverrides ?? []) {
-            ctx.insert(MealPlanOverride(
-                weekday: m.weekday,
-                operation: MealPlanOverrideOperation(rawValue: m.operationRaw) ?? .addItem,
-                dayType: m.dayTypeRaw.flatMap(MealDayType.init(rawValue:)),
-                slot: m.slotRaw.flatMap(MealSlot.init(rawValue:)),
-                itemName: m.itemName,
-                amount: m.amount,
-                unit: m.unit,
-                calories: m.calories,
-                protein: m.protein,
-                carbs: m.carbs,
-                fat: m.fat,
-                note: m.note,
-                source: m.source,
-                createdAt: m.createdAt
-            ))
         }
         // v2: WorkoutLog + nested exercise/set restore. v1 backup'ında bu alan
         // yok (nil) — bu durumda log'lar restore edilmez (kullanıcı kaybetmemiş gibi davranır).

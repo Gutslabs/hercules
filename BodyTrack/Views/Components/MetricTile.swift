@@ -8,6 +8,7 @@ struct MetricTile: View {
     var lowerIsBetter: Bool = false
     var sparkline: [TrendPoint] = []
     var accent: Color = Palette.accent
+    @State private var hovering = false
 
     private var deltaColor: Color {
         guard let d = delta else { return Palette.textTertiary }
@@ -58,12 +59,21 @@ struct MetricTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surface)
+                .fill(Palette.surface.opacity(0.82))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
+                .strokeBorder(hovering ? accent.opacity(0.34) : Palette.border, lineWidth: 0.5)
         )
+        .overlay(alignment: .topLeading) {
+            Rectangle()
+                .fill(accent.opacity(hovering ? 0.72 : 0.42))
+                .frame(width: 42, height: 1)
+                .padding(.leading, Spacing.lg)
+        }
+        .scaleEffect(hovering ? 1.01 : 1)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: hovering)
+        .onHover { hovering = $0 }
     }
 }
 

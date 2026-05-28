@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum RecipeCategory: String, Codable, CaseIterable, Identifiable {
+enum RecipeCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     case breakfast, dinner, dessert
 
     var id: String { rawValue }
@@ -28,6 +28,7 @@ final class Recipe {
     var title: String
     var urlString: String
     var category: RecipeCategory
+    var isFavorite: Bool = false
     var summary: String?
     var ingredientsText: String?
     var instructionsText: String?
@@ -43,6 +44,7 @@ final class Recipe {
         title: String,
         urlString: String,
         category: RecipeCategory,
+        isFavorite: Bool = false,
         summary: String? = nil,
         ingredientsText: String? = nil,
         instructionsText: String? = nil,
@@ -57,6 +59,7 @@ final class Recipe {
         self.title = title
         self.urlString = urlString
         self.category = category
+        self.isFavorite = isFavorite
         self.summary = summary
         self.ingredientsText = ingredientsText
         self.instructionsText = instructionsText
