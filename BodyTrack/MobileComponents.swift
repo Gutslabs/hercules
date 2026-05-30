@@ -7,7 +7,7 @@ enum MobileTab: Hashable, CaseIterable {
     case nutrition
     case workout
     case measurements
-    case sync
+    case profile
 
     var title: String {
         switch self {
@@ -15,7 +15,7 @@ enum MobileTab: Hashable, CaseIterable {
         case .nutrition: return "Yemek"
         case .workout: return "Antrenman"
         case .measurements: return "Ölçümler"
-        case .sync: return "Senkron"
+        case .profile: return "Profil"
         }
     }
 
@@ -25,7 +25,7 @@ enum MobileTab: Hashable, CaseIterable {
         case .nutrition: return "Yemek"
         case .workout: return "Antrenman"
         case .measurements: return "Ölçüm"
-        case .sync: return "Sync"
+        case .profile: return "Profil"
         }
     }
 
@@ -35,7 +35,7 @@ enum MobileTab: Hashable, CaseIterable {
         case .nutrition: return "Beslenme"
         case .workout: return "Program"
         case .measurements: return "Takip"
-        case .sync: return "Vault"
+        case .profile: return "Hesap"
         }
     }
 
@@ -45,7 +45,7 @@ enum MobileTab: Hashable, CaseIterable {
         case .nutrition: return "fork.knife"
         case .workout: return "dumbbell.fill"
         case .measurements: return "chart.line.uptrend.xyaxis"
-        case .sync: return "externaldrive.connected.to.line.below"
+        case .profile: return "person.crop.circle"
         }
     }
 }

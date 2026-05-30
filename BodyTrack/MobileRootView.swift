@@ -23,6 +23,9 @@ struct MobileRootView: View {
     @State private var statusMessage: String? = nil
     @State private var saveErrors = SaveErrorReporter.shared
     @State private var openRouterKey = ""
+    @State private var showProfileEditor = false
+    @State private var showRecipeEditor = false
+    @State private var recipeToEdit: Recipe?
     @State private var isWorking = false
     @State private var refreshTick = UUID()
 
@@ -88,6 +91,21 @@ struct MobileRootView: View {
             measurementForm
                 .presentationDetents([.medium, .large])
         }
+        .sheet(isPresented: $showProfileEditor) {
+            if let profile = profiles.first {
+                MobileProfileEditor(profile: profile) {
+                    ctx.saveOrReport()
+                    refreshTick = UUID()
+                }
+            }
+        }
+        .sheet(isPresented: $showRecipeEditor) {
+            MobileRecipeEditor(
+                existing: recipeToEdit,
+                onSave: { fields in applyRecipeFields(fields, to: recipeToEdit) },
+                onDelete: recipeToEdit.map { recipe in { deleteRecipe(recipe) } }
+            )
+        }
         .onAppear {
             restoreIfNewer()
             openRouterKey = AIKeyStore.shared.apiKey
@@ -112,8 +130,8 @@ struct MobileRootView: View {
             mobilePage { workoutPage }
         case .measurements:
             mobilePage { measurementsPage }
-        case .sync:
-            mobilePage { syncPage }
+        case .profile:
+            mobilePage { profilePage }
         }
     }
 
@@ -357,12 +375,60 @@ struct MobileRootView: View {
         return "Bugün hızlı tartı yeterli. Sıradaki tam ölçüm: \(Fmt.dateLong.string(from: nextFull))."
     }
 
-    private var syncPage: some View {
+    private var profilePage: some View {
         VStack(alignment: .leading, spacing: 14) {
+            profileSummaryCard
+            mobileAICard
             syncNowButton
             syncPanel
-            mobileAICard
             dataPanel
+        }
+    }
+
+    private var profileSummaryCard: some View {
+        MobileCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Profil")
+                            .font(Typography.label)
+                            .foregroundStyle(Palette.textQuaternary)
+                            .textCase(.uppercase)
+                        Text(profileName.isEmpty ? "İsimsiz" : profileName)
+                            .font(Typography.hero(24))
+                            .foregroundStyle(Palette.textPrimary)
+                        if let p = profiles.first {
+                            Text("\(p.goal.label) · \(p.activity.label)")
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        showProfileEditor = true
+                    } label: {
+                        Label("Düzenle", systemImage: "pencil")
+                            .font(Typography.captionBold)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                if let p = profiles.first {
+                    HStack(spacing: 10) {
+                        heroStat("Yaş", value: "\(p.age)", systemImage: "calendar")
+                        heroStat("Boy", value: "\(Fmt.int(p.height)) cm", systemImage: "ruler")
+                        heroStat("Hedef", value: p.targetWeight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "—", systemImage: "target")
+                    }
+                    if let plan = calorieResult {
+                        HStack(spacing: 10) {
+                            metric("Günlük", value: Fmt.int(plan.goalCalories), unit: "kcal")
+                            metric("Protein", value: Fmt.int(plan.protein.grams), unit: "g")
+                            metric("Karb", value: Fmt.int(plan.carbs.grams), unit: "g")
+                            metric("Yağ", value: Fmt.int(plan.fat.grams), unit: "g")
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -805,23 +871,59 @@ struct MobileRootView: View {
     private var recipeCard: some View {
         MobileCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Tarifler")
-                    .font(Typography.titleSmall)
+                HStack {
+                    Text("Tarifler")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                    Spacer()
+                    Text("\(recipes.count)")
+                        .font(Typography.captionBold)
+                        .foregroundStyle(Palette.textTertiary)
+                    Button {
+                        recipeToEdit = nil
+                        showRecipeEditor = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.plain)
                     .foregroundStyle(Palette.textPrimary)
+                    .background(Circle().fill(Palette.surfaceElevated))
+                    .accessibilityLabel("Tarif ekle")
+                }
                 if recipes.isEmpty {
-                    emptyText("Tarif kaydı yok.")
+                    emptyText("Tarif kaydı yok. + ile ekle ya da AI koçtan iste.")
                 } else {
-                    ForEach(recipes.prefix(8), id: \.persistentModelID) { recipe in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(recipe.title)
-                                .font(Typography.bodyBold)
-                                .foregroundStyle(Palette.textPrimary)
-                            Text(recipe.summary ?? recipe.category.rawValue)
-                                .font(Typography.caption)
-                                .foregroundStyle(Palette.textTertiary)
-                                .lineLimit(2)
+                    ForEach(recipes.prefix(10), id: \.persistentModelID) { recipe in
+                        Button {
+                            recipeToEdit = recipe
+                            showRecipeEditor = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: recipe.category.icon)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Palette.accent)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(recipe.title)
+                                        .font(Typography.bodyBold)
+                                        .foregroundStyle(Palette.textPrimary)
+                                        .lineLimit(1)
+                                    Text(recipe.summary?.nilIfBlank ?? recipe.category.label)
+                                        .font(Typography.caption)
+                                        .foregroundStyle(Palette.textTertiary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Palette.textQuaternary)
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -1548,6 +1650,31 @@ struct MobileRootView: View {
         showAddFood = false
     }
 
+    private func applyRecipeFields(_ f: RecipeFields, to existing: Recipe?) {
+        let recipe = existing ?? Recipe(title: f.title, urlString: f.url, category: f.category)
+        recipe.title = f.title
+        recipe.category = f.category
+        recipe.urlString = f.url
+        recipe.summary = f.summary
+        recipe.ingredientsText = f.ingredients
+        recipe.instructionsText = f.instructions
+        recipe.calories = f.calories
+        recipe.protein = f.protein
+        recipe.carbs = f.carbs
+        recipe.fat = f.fat
+        if existing == nil { ctx.insert(recipe) }
+        ctx.saveOrReport()
+        BackupService.shared.exportAsync(from: ctx)
+        refreshTick = UUID()
+    }
+
+    private func deleteRecipe(_ recipe: Recipe) {
+        ctx.delete(recipe)
+        ctx.saveOrReport()
+        BackupService.shared.exportAsync(from: ctx)
+        refreshTick = UUID()
+    }
+
     @MainActor
     private func estimateFoodWithAI() async {
         let raw = aiFoodInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1715,5 +1842,227 @@ struct MobileRootView: View {
             }
         }
         perform()
+    }
+}
+
+/// Mobil profil editörü — kişisel bilgi, hedef, manuel makro ve supplement.
+/// Sayı alanları string ayna ile tutulur (opsiyonel Double bağlama kolaylığı için).
+struct MobileProfileEditor: View {
+    @Bindable var profile: UserProfile
+    var onDone: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var heightStr = ""
+    @State private var targetStr = ""
+    @State private var bodyFatStr = ""
+    @State private var proteinStr = ""
+    @State private var carbsStr = ""
+    @State private var fatStr = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Kişisel") {
+                    TextField("İsim", text: $profile.name)
+                    DatePicker("Doğum tarihi", selection: $profile.birthDate, displayedComponents: .date)
+                    Picker("Cinsiyet", selection: $profile.sex) {
+                        ForEach(Sex.allCases) { Text($0.label).tag($0) }
+                    }
+                    numberRow("Boy (cm)", text: $heightStr, prompt: "ör: 180")
+                }
+                Section("Hedef") {
+                    Picker("Mod", selection: $profile.goal) {
+                        ForEach(Goal.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Aktivite", selection: $profile.activity) {
+                        ForEach(ActivityLevel.allCases) { Text($0.label).tag($0) }
+                    }
+                    numberRow("Hedef kilo (kg)", text: $targetStr, prompt: "opsiyonel")
+                    numberRow("Yağ % (manuel)", text: $bodyFatStr, prompt: "opsiyonel")
+                }
+                Section {
+                    numberRow("Protein (g)", text: $proteinStr, prompt: "oto")
+                    numberRow("Karbonhidrat (g)", text: $carbsStr, prompt: "oto")
+                    numberRow("Yağ (g)", text: $fatStr, prompt: "oto")
+                } header: {
+                    Text("Manuel Makro Hedefi")
+                } footer: {
+                    Text("Boş bırakırsan profil + aktiviteye göre otomatik hesaplanır.")
+                }
+                Section("Supplementler") {
+                    TextField("Her satıra bir supplement", text: $profile.supplements, axis: .vertical)
+                        .lineLimit(3...8)
+                }
+            }
+            .navigationTitle("Profil")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("İptal") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Kaydet") { save() }
+                }
+            }
+            .onAppear {
+                heightStr = profile.height > 0 ? Fmt.num(profile.height, digits: 0) : ""
+                targetStr = profile.targetWeight.map { Fmt.num($0, digits: 1) } ?? ""
+                bodyFatStr = profile.manualBodyFat.map { Fmt.num($0, digits: 1) } ?? ""
+                proteinStr = profile.manualProteinGrams.map { Fmt.num($0, digits: 0) } ?? ""
+                carbsStr = profile.manualCarbsGrams.map { Fmt.num($0, digits: 0) } ?? ""
+                fatStr = profile.manualFatGrams.map { Fmt.num($0, digits: 0) } ?? ""
+            }
+        }
+    }
+
+    private func numberRow(_ label: String, text: Binding<String>, prompt: String) -> some View {
+        LabeledContent(label) {
+            TextField(prompt, text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func parse(_ s: String) -> Double? {
+        let t = s.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : Double(t)
+    }
+
+    private func save() {
+        if let h = parse(heightStr) { profile.height = h }
+        profile.targetWeight = parse(targetStr)
+        profile.manualBodyFat = parse(bodyFatStr)
+        profile.manualProteinGrams = parse(proteinStr)
+        profile.manualCarbsGrams = parse(carbsStr)
+        profile.manualFatGrams = parse(fatStr)
+        onDone()
+        dismiss()
+    }
+}
+
+struct RecipeFields {
+    var title: String
+    var category: RecipeCategory
+    var summary: String?
+    var ingredients: String?
+    var instructions: String?
+    var url: String
+    var calories: Double?
+    var protein: Double?
+    var carbs: Double?
+    var fat: Double?
+}
+
+/// Mobil tarif editörü (oluştur + düzenle). Sayı alanları string ayna ile tutulur.
+struct MobileRecipeEditor: View {
+    let existing: Recipe?
+    var onSave: (RecipeFields) -> Void
+    var onDelete: (() -> Void)?
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var category: RecipeCategory = .dinner
+    @State private var summary = ""
+    @State private var ingredients = ""
+    @State private var instructions = ""
+    @State private var url = ""
+    @State private var calories = ""
+    @State private var protein = ""
+    @State private var carbs = ""
+    @State private var fat = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Tarif") {
+                    TextField("Başlık", text: $title)
+                    Picker("Kategori", selection: $category) {
+                        ForEach(RecipeCategory.allCases) { Label($0.label, systemImage: $0.icon).tag($0) }
+                    }
+                    TextField("Kaynak URL (opsiyonel)", text: $url)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Section("Özet") {
+                    TextField("Kısa özet", text: $summary, axis: .vertical).lineLimit(2...4)
+                }
+                Section("Malzemeler") {
+                    TextField("Her satıra bir malzeme", text: $ingredients, axis: .vertical).lineLimit(3...12)
+                }
+                Section("Yapılış") {
+                    TextField("Adımlar", text: $instructions, axis: .vertical).lineLimit(3...14)
+                }
+                Section("Makro (opsiyonel, porsiyon başı)") {
+                    numberRow("Kalori", $calories)
+                    numberRow("Protein (g)", $protein)
+                    numberRow("Karbonhidrat (g)", $carbs)
+                    numberRow("Yağ (g)", $fat)
+                }
+                if let onDelete {
+                    Section {
+                        Button("Tarifi Sil", role: .destructive) {
+                            onDelete()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle(existing == nil ? "Yeni Tarif" : "Tarifi Düzenle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("İptal") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Kaydet") { commit() }
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear(perform: populate)
+        }
+    }
+
+    private func numberRow(_ label: String, _ text: Binding<String>) -> some View {
+        LabeledContent(label) {
+            TextField("opsiyonel", text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func populate() {
+        guard let r = existing else { return }
+        title = r.title
+        category = r.category
+        summary = r.summary ?? ""
+        ingredients = r.ingredientsText ?? ""
+        instructions = r.instructionsText ?? ""
+        url = r.urlString
+        calories = r.calories.map { Fmt.num($0, digits: 0) } ?? ""
+        protein = r.protein.map { Fmt.num($0, digits: 0) } ?? ""
+        carbs = r.carbs.map { Fmt.num($0, digits: 0) } ?? ""
+        fat = r.fat.map { Fmt.num($0, digits: 0) } ?? ""
+    }
+
+    private func parse(_ s: String) -> Double? {
+        let t = s.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : Double(t)
+    }
+
+    private func commit() {
+        onSave(RecipeFields(
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            category: category,
+            summary: summary.nilIfBlank,
+            ingredients: ingredients.nilIfBlank,
+            instructions: instructions.nilIfBlank,
+            url: url.trimmingCharacters(in: .whitespacesAndNewlines),
+            calories: parse(calories),
+            protein: parse(protein),
+            carbs: parse(carbs),
+            fat: parse(fat)
+        ))
+        dismiss()
     }
 }
