@@ -230,6 +230,7 @@ struct MobileRootView: View {
             sectionHeader("Yemek", action: "Ekle", systemImage: "plus") {
                 showAddFood = true
             }
+            nutritionSummaryCard
             foodAIEstimatorCard
             foodQuickAddCard
             todayFoodCard
@@ -240,14 +241,54 @@ struct MobileRootView: View {
 
     private var workoutPage: some View {
         VStack(alignment: .leading, spacing: 14) {
+            workoutWeekStrip
             summaryStrip([
                 ("Gün", "\(activeWorkouts.count)"),
                 ("Hareket", "\(activeWorkouts.reduce(0) { $0 + $1.sortedTemplateExercises.count })"),
                 ("Arşiv", "\(archives.count)")
             ])
-            ForEach(activeWorkouts, id: \.persistentModelID) { workout in
+            if activeWorkouts.isEmpty {
                 MobileCard {
-                    workoutContent(workout, compact: false)
+                    emptyText("Aktif program yok. Mac'tan ya da AI koçtan program ekleyebilirsin.")
+                }
+            } else {
+                ForEach(activeWorkouts, id: \.persistentModelID) { workout in
+                    MobileCard {
+                        workoutContent(workout, compact: false)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Haftalık gün şeridi: bugünü vurgular, antrenman olan günleri nokta ile işaretler.
+    private var workoutWeekStrip: some View {
+        let today = Calendar.current.component(.weekday, from: .now)
+        return MobileCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Bu hafta")
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.textQuaternary)
+                    .textCase(.uppercase)
+                HStack(spacing: 6) {
+                    ForEach([2, 3, 4, 5, 6, 7, 1], id: \.self) { wd in
+                        let has = activeWorkouts.contains { $0.weekday == wd }
+                        let isToday = wd == today
+                        VStack(spacing: 6) {
+                            Text(WorkoutSession.weekdayShortName(wd))
+                                .font(Typography.label)
+                                .foregroundStyle(isToday ? Palette.textPrimary : Palette.textTertiary)
+                            Circle()
+                                .fill(has ? Palette.accent : Palette.borderStrong)
+                                .frame(width: 7, height: 7)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.sm)
+                                .fill(isToday ? Palette.surfaceElevated : .clear)
+                        )
+                    }
                 }
             }
         }
@@ -260,7 +301,7 @@ struct MobileRootView: View {
                 showAddMeasurement = true
             }
             measurementCadenceCard
-            latestMeasurementCard
+            measurementHeroCard
             MobileCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Son kayıtlar")
@@ -527,6 +568,37 @@ struct MobileRootView: View {
         .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
     }
 
+    /// Yemek sekmesi başında bugünkü kalori/makro özeti (Dashboard hero'sunun kompakt hali).
+    private var nutritionSummaryCard: some View {
+        MobileCard {
+            if let plan = calorieResult {
+                HStack(spacing: 16) {
+                    MobileProgressRing(progress: todayCalories / max(1, plan.goalCalories), lineWidth: 10, size: 108) {
+                        VStack(spacing: 0) {
+                            Text(Fmt.int(todayCalories))
+                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .foregroundStyle(Palette.textPrimary)
+                            Text("/ \(Fmt.int(plan.goalCalories))")
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 9) {
+                        heroMacroBar("Protein", todayProtein, plan.protein.grams, Palette.accent)
+                        heroMacroBar("Karb", todayCarbs, plan.carbs.grams, Palette.warning)
+                        heroMacroBar("Yağ", todayFat, plan.fat.grams, Palette.positive)
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    metric("Bugün", value: Fmt.int(todayCalories), unit: "kcal")
+                    metric("Protein", value: Fmt.int(todayProtein), unit: "g")
+                    metric("Öğün", value: "\(todayFoods.count)", unit: "")
+                }
+            }
+        }
+    }
+
     private var todayFoodCard: some View {
         MobileCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -771,6 +843,73 @@ struct MobileRootView: View {
                 }
             }
         }
+    }
+
+    /// Ölçüm sekmesi hero'su: büyük kilo + önceki ölçüme göre delta + mini trend + yağ/bel/hedef.
+    private var measurementHeroCard: some View {
+        let weights = measurements.compactMap { $0.weight }                    // DESC
+        let series = Array(measurements.prefix(24).reversed().compactMap { $0.weight })  // eski→yeni
+        return MobileCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Son Ölçüm")
+                            .font(Typography.label)
+                            .foregroundStyle(Palette.textQuaternary)
+                            .textCase(.uppercase)
+                        if let date = measurements.first?.date {
+                            Text(date, style: .date)
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                    Spacer()
+                    icon("scalemass", color: Palette.accent)
+                }
+
+                if let m = measurements.first {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(m.weight.map { Fmt.num($0, digits: 1) } ?? "—")
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .foregroundStyle(Palette.textPrimary)
+                        Text("kg")
+                            .font(Typography.body)
+                            .foregroundStyle(Palette.textTertiary)
+                        Spacer()
+                        if weights.count >= 2 {
+                            deltaBadge(weights[0] - weights[1], unit: "kg")
+                        }
+                    }
+
+                    if series.count >= 2 {
+                        MobileSparkline(values: series, tint: Palette.accent)
+                            .frame(height: 46)
+                    }
+
+                    HStack(spacing: 10) {
+                        heroStat("Yağ", value: m.bodyFat.map { "\(Fmt.num($0, digits: 1))%" } ?? "—", systemImage: "drop.triangle")
+                        heroStat("Bel", value: m.waist.map { "\(Fmt.num($0, digits: 1)) cm" } ?? "—", systemImage: "ruler")
+                        heroStat("Hedef", value: profiles.first?.targetWeight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "—", systemImage: "target")
+                    }
+                } else {
+                    emptyText("Henüz ölçüm yok. Sağ üstteki Ekle ile başla.")
+                }
+            }
+        }
+    }
+
+    private func deltaBadge(_ delta: Double, unit: String) -> some View {
+        let flat = abs(delta) < 0.05
+        return HStack(spacing: 3) {
+            Image(systemName: flat ? "minus" : (delta < 0 ? "arrow.down.right" : "arrow.up.right"))
+                .font(.system(size: 10, weight: .bold))
+            Text("\(Fmt.num(abs(delta), digits: 1)) \(unit)")
+                .font(Typography.captionBold)
+        }
+        .foregroundStyle(flat ? Palette.textTertiary : Palette.accent)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Palette.surfaceElevated))
     }
 
     private var latestMeasurementCard: some View {

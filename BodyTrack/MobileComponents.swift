@@ -80,6 +80,41 @@ extension String {
     }
 }
 
+/// Hafif çizgi grafik (Swift Charts gerektirmez) — ölçüm/kilo trendi için.
+/// values: eskiden yeniye sıralı.
+struct MobileSparkline: View {
+    let values: [Double]
+    var tint: Color = Palette.accent
+
+    var body: some View {
+        GeometryReader { geo in
+            if values.count >= 2, let lo = values.min(), let hi = values.max() {
+                let range = max(hi - lo, 0.0001)
+                let pts: [CGPoint] = values.enumerated().map { i, v in
+                    CGPoint(
+                        x: geo.size.width * CGFloat(i) / CGFloat(values.count - 1),
+                        y: geo.size.height * (1 - CGFloat((v - lo) / range))
+                    )
+                }
+                ZStack {
+                    Path { p in
+                        p.move(to: CGPoint(x: pts[0].x, y: geo.size.height))
+                        pts.forEach { p.addLine(to: $0) }
+                        p.addLine(to: CGPoint(x: pts[pts.count - 1].x, y: geo.size.height))
+                        p.closeSubpath()
+                    }
+                    .fill(LinearGradient(colors: [tint.opacity(0.22), tint.opacity(0.0)], startPoint: .top, endPoint: .bottom))
+                    Path { p in
+                        p.move(to: pts[0])
+                        pts.dropFirst().forEach { p.addLine(to: $0) }
+                    }
+                    .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                }
+            }
+        }
+    }
+}
+
 /// Mac kalitesinde dairesel ilerleme halkası (kalori/makro hedefleri için).
 /// progress > 1 olunca (hedefi aştın) renk uyarıya döner.
 struct MobileProgressRing<Center: View>: View {
