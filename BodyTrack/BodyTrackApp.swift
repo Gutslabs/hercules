@@ -40,6 +40,13 @@ struct BodyTrackApp: App {
             // 3) AppDelegate'e container'ı paylaş — quit'te yedek alacak
             #if os(macOS)
             AppDelegate.sharedContainer = container
+            // 4) Embedding modeli zaten indirildiyse launch'ta arka planda RAM'e ısıt —
+            //    her sohbet (Hafıza ekranını açmaya gerek kalmadan) semantic retrieval
+            //    kullansın. Diskte yoksa DOKUNMAZ (2.4GB indirmeyi tetiklemez).
+            Task {
+                await EmbeddingService.shared.warmUpIfDownloaded()
+                await MemoryManager.shared.embedPendingMemories()
+            }
             #endif
         } catch {
             fatalError("ModelContainer init failed: \(error)")

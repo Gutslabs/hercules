@@ -72,6 +72,15 @@ actor EmbeddingService {
         await ensureModel() != nil
     }
 
+    /// Model DİSKTE hazırsa RAM'e yükle; yoksa hiçbir şey yapma (indirme TETİKLEMEZ).
+    /// App launch'ta arka planda çağrılır — semantic retrieval, Hafıza ekranı açılmasa
+    /// bile her sohbette hazır olsun. Model henüz inmemişse sessizce atlar.
+    func warmUpIfDownloaded() async {
+        guard bundle == nil, !loadFailed else { return }
+        guard Self.folderHasModel(Self.localModelFolder()) else { return }
+        _ = await ensureModel()
+    }
+
     /// Model HAZIRSA query'yi (Qwen3 instruct prefix ile) embed et; değilse nil.
     func embedQueryIfAvailable(_ query: String) async -> [Float]? {
         guard bundle != nil else { return nil }
