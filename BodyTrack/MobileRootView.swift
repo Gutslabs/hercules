@@ -22,6 +22,7 @@ struct MobileRootView: View {
     @State private var showAddMeasurement = false
     @State private var statusMessage: String? = nil
     @State private var saveErrors = SaveErrorReporter.shared
+    @State private var openRouterKey = ""
     @State private var isWorking = false
     @State private var refreshTick = UUID()
 
@@ -89,6 +90,7 @@ struct MobileRootView: View {
         }
         .onAppear {
             restoreIfNewer()
+            openRouterKey = AIKeyStore.shared.apiKey
         }
         .onChange(of: scenePhase) { _, newPhase in
             // Aktive olunca OTOMATİK restore YOK — bellekteki düzenlemeleri ezebilir.
@@ -316,9 +318,108 @@ struct MobileRootView: View {
 
     private var syncPage: some View {
         VStack(alignment: .leading, spacing: 14) {
+            syncNowButton
             syncPanel
+            mobileAICard
             dataPanel
         }
+    }
+
+    private var syncNowButton: some View {
+        Button {
+            syncNow()
+        } label: {
+            HStack(spacing: 8) {
+                if isWorking {
+                    ProgressView().controlSize(.small).tint(.white)
+                } else {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                Text(isWorking ? "Senkronize ediliyor..." : "Şimdi Senkronize Et")
+                    .font(Typography.body)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(isWorking)
+    }
+
+    /// Mobilde AI sağlayıcı: OpenRouter API key (Codex/Terminal telefonda yok).
+    /// Key girilince yemek tahmini bu istemciyle çalışır (makeClient() taze okur).
+    private var mobileAICard: some View {
+        MobileCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    icon("sparkles", color: aiKeyConfigured ? Palette.positive : Palette.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AI Sağlayıcı — OpenRouter")
+                            .font(Typography.titleSmall)
+                            .foregroundStyle(Palette.textPrimary)
+                        Text(aiKeyConfigured ? "Bağlı — yemek AI hazır" : "API key gir, yemek tahmini çalışsın")
+                            .font(Typography.caption)
+                            .foregroundStyle(aiKeyConfigured ? Palette.positive : Palette.textTertiary)
+                    }
+                    Spacer(minLength: 0)
+                    if aiKeyConfigured {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Palette.positive)
+                    }
+                }
+                HStack(spacing: 8) {
+                    Image(systemName: "key")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.textTertiary)
+                    SecureField("sk-or-...", text: $openRouterKey)
+                        .textFieldStyle(.plain)
+                        .font(Typography.mono)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onChange(of: openRouterKey) { _, value in
+                            AIKeyStore.shared.apiKey = value
+                            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                AIKeyStore.shared.provider = .openRouter
+                            }
+                        }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
+                .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
+
+                Text("openrouter.ai/keys adresinden API key al. Telefonda Codex/Terminal gerekmez.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var aiKeyConfigured: Bool {
+        !openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Tek dokunuşla iki-yönlü senkron: önce vault daha yeni/zenginse çek (Mac verisi),
+    /// sonra yerel veriyi vault'a yaz (Mac sonra çekebilsin). Vault yoksa klasör seçtirir.
+    private func syncNow() {
+        guard vaultConfigured else {
+            statusMessage = "Önce iCloud Drive/Hercules klasörünü seç."
+            showVaultImporter = true
+            return
+        }
+        isWorking = true
+        statusMessage = "Senkronize ediliyor..."
+        BackupService.shared.restoreFromVaultIfNewer(into: ctx)
+        FoodPresetSeed.upsertDefaults(ctx)
+        do {
+            _ = try BackupService.shared.exportToVault(from: ctx)
+            statusMessage = "Senkronize edildi ✓"
+        } catch {
+            // emptyStore / richerVault → zaten güncel demektir
+            statusMessage = "Güncel ✓"
+        }
+        isWorking = false
+        refreshTick = UUID()
     }
 
     private var heroCard: some View {

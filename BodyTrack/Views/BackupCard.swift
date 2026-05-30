@@ -76,6 +76,20 @@ struct BackupCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Button(action: syncNow) {
+                HStack(spacing: 7) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Şimdi Senkronize Et")
+                        .font(Typography.captionBold)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(importing)
+            .help("Mobil/diğer cihazların verisini çek + kendi verini yaz (iki yönlü)")
+
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 118), spacing: 8, alignment: .leading)],
                 alignment: .leading,
@@ -293,6 +307,20 @@ struct BackupCard: View {
         } catch {
             statusMessage = "Vault hata: \(error.localizedDescription)"
         }
+        refreshInfo()
+    }
+
+    /// Tek dokunuşla iki-yönlü senkron: diğer cihazların (mobil) yazdığı daha yeni
+    /// veriyi vault + iCloud'dan çek, sonra yerel veriyi tüm hedeflere yaz.
+    private func syncNow() {
+        importing = true
+        defer { importing = false }
+        BackupService.shared.restoreFromVaultIfNewer(into: ctx)
+        BackupService.shared.restoreFromICloudIfNewer(into: ctx)
+        FoodPresetSeed.upsertDefaults(ctx)
+        _ = BackupService.shared.export(from: ctx)
+        if vaultConfigured { try? BackupService.shared.exportToVault(from: ctx) }
+        statusMessage = "✓ Senkronize edildi"
         refreshInfo()
     }
 
