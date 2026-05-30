@@ -424,8 +424,8 @@ struct MobileRootView: View {
 
     private var heroCard: some View {
         MobileCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Bugün")
                             .font(Typography.label)
@@ -438,13 +438,93 @@ struct MobileRootView: View {
                     Spacer()
                     icon("bolt.heart", color: Palette.accent)
                 }
+
+                if let plan = calorieResult {
+                    HStack(spacing: 18) {
+                        MobileProgressRing(progress: todayCalories / max(1, plan.goalCalories)) {
+                            VStack(spacing: 1) {
+                                Text(Fmt.int(max(0, plan.goalCalories - todayCalories)))
+                                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Palette.textPrimary)
+                                Text("kcal kaldı")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(Palette.textTertiary)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 11) {
+                            heroMacroBar("Protein", todayProtein, plan.protein.grams, Palette.accent)
+                            heroMacroBar("Karb", todayCarbs, plan.carbs.grams, Palette.warning)
+                            heroMacroBar("Yağ", todayFat, plan.fat.grams, Palette.positive)
+                        }
+                    }
+                    Text("\(Fmt.int(todayCalories)) / \(Fmt.int(plan.goalCalories)) kcal alındı · \(plan.formula)")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                } else {
+                    HStack(spacing: 10) {
+                        metric("Kalori", value: Fmt.int(todayCalories), unit: "kcal")
+                        metric("Protein", value: Fmt.int(todayProtein), unit: "g")
+                        metric("Adım", value: Fmt.int(Double(todaySteps)), unit: "")
+                    }
+                    Text("Profilini doldurunca (Mac'tan ya da Profil sekmesinden) günlük kalori/makro hedefi ve halka burada görünür.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack(spacing: 10) {
-                    metric("Kalori", value: Fmt.int(todayCalories), unit: "kcal")
-                    metric("Protein", value: Fmt.int(todayProtein), unit: "g")
-                    metric("Adım", value: Fmt.int(Double(todaySteps)), unit: "")
+                    heroStat("Adım", value: Fmt.int(Double(todaySteps)), systemImage: "figure.walk")
+                    heroStat("Kilo", value: measurements.first?.weight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "—", systemImage: "scalemass")
+                    heroStat("Su", value: calorieResult.map { "\(Fmt.num($0.water, digits: 1)) L" } ?? "—", systemImage: "drop.fill")
                 }
             }
         }
+    }
+
+    private func heroMacroBar(_ label: String, _ value: Double, _ target: Double, _ color: Color) -> some View {
+        let pct = target > 0 ? min(value / target, 1) : 0
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.textTertiary)
+                    .textCase(.uppercase)
+                Spacer()
+                Text("\(Fmt.int(value))/\(Fmt.int(target))g")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.surfaceElevated).frame(height: 6)
+                    Capsule().fill(color).frame(width: max(0, geo.size.width * pct), height: 6)
+                }
+            }
+            .frame(height: 6)
+        }
+    }
+
+    private func heroStat(_ label: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.textSecondary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.textQuaternary)
+                    .textCase(.uppercase)
+                Text(value)
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
     }
 
     private var todayFoodCard: some View {
@@ -1191,6 +1271,34 @@ struct MobileRootView: View {
 
     private var todayProtein: Double {
         todayFoods.reduce(0) { $0 + ($1.protein ?? 0) }
+    }
+
+    private var todayCarbs: Double {
+        todayFoods.reduce(0) { $0 + ($1.carbs ?? 0) }
+    }
+
+    private var todayFat: Double {
+        todayFoods.reduce(0) { $0 + ($1.fat ?? 0) }
+    }
+
+    private var calorieResult: CalorieResult? {
+        guard let profile = profiles.first,
+              let latest = measurements.first,
+              let weight = latest.weight else { return nil }
+        return CalorieCalculator.compute(
+            weight: weight,
+            height: profile.height,
+            age: profile.age,
+            sex: profile.sex,
+            bodyFat: latest.bodyFat ?? profile.manualBodyFat,
+            activity: profile.activity,
+            goal: profile.goal,
+            manualOffset: profile.manualCalorieOffset,
+            manualOffsetMacro: profile.manualCalorieOffsetMacro,
+            manualProteinGrams: profile.manualProteinGrams,
+            manualCarbsGrams: profile.manualCarbsGrams,
+            manualFatGrams: profile.manualFatGrams
+        )
     }
 
     private var todaySteps: Int {

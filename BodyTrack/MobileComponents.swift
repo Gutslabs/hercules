@@ -79,3 +79,31 @@ extension String {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+
+/// Mac kalitesinde dairesel ilerleme halkası (kalori/makro hedefleri için).
+/// progress > 1 olunca (hedefi aştın) renk uyarıya döner.
+struct MobileProgressRing<Center: View>: View {
+    let progress: Double
+    var lineWidth: CGFloat = 11
+    var size: CGFloat = 132
+    var tint: Color = Palette.accent
+    @ViewBuilder var center: () -> Center
+
+    var body: some View {
+        let clamped = max(0, min(progress, 1))
+        ZStack {
+            Circle()
+                .stroke(Palette.surfaceElevated, lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: clamped)
+                .stroke(
+                    progress > 1.001 ? Palette.warning : tint,
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(.spring(response: 0.55, dampingFraction: 0.85), value: clamped)
+            center()
+        }
+        .frame(width: size, height: size)
+    }
+}
