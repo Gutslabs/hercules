@@ -7,8 +7,9 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
-    /// UI'da seçilebilir sağlayıcılar (OpenRouter şu an gizli).
-    static var selectable: [AIProvider] { [.codex] }
+    /// UI'da seçilebilir sağlayıcılar. Codex (ChatGPT hesabı) varsayılan; OpenRouter
+    /// API-key ile alternatif (Terminal/Codex kuramayan ve iOS kullanıcıları için).
+    static var selectable: [AIProvider] { [.codex, .openRouter] }
 
     var label: String {
         switch self {

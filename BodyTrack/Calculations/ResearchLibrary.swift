@@ -94,6 +94,7 @@ enum ResearchWindow: Int, CaseIterable, Identifiable {
     }
 }
 
+@MainActor
 final class ResearchLibrary {
     static let shared = ResearchLibrary()
 
@@ -499,19 +500,23 @@ struct ResearchLibrarySkill: AgentSkill {
     }
 
     func run(query: String, context: AgentContext) async throws -> SkillResult? {
-        let papers = ResearchLibrary.shared.search(query: query, topK: 6)
-        guard !papers.isEmpty else { return nil }
-
-        let lines = papers.map { paper in
-            let topics = paper.topicLabels.isEmpty ? "" : " · \(paper.topicLabels.joined(separator: ", "))"
-            return "- \(paper.title) (\(paper.journal), \(paper.pubDate); PMID \(paper.pmid)\(topics))"
+        // ResearchLibrary artık @MainActor — erişimi main'e taşı (papers yarışını önler).
+        let result: (lines: [String], sources: [String])? = await MainActor.run {
+            let papers = ResearchLibrary.shared.search(query: query, topK: 6)
+            guard !papers.isEmpty else { return nil }
+            let lines = papers.map { paper -> String in
+                let topics = paper.topicLabels.isEmpty ? "" : " · \(paper.topicLabels.joined(separator: ", "))"
+                return "- \(paper.title) (\(paper.journal), \(paper.pubDate); PMID \(paper.pmid)\(topics))"
+            }
+            return (lines, papers.map(\.sourceURL))
         }
+        guard let result else { return nil }
 
         return SkillResult(
             skillID: id,
             title: "Bodybuilding Research Cache",
-            content: lines.joined(separator: "\n"),
-            sources: papers.map(\.sourceURL)
+            content: result.lines.joined(separator: "\n"),
+            sources: result.sources
         )
     }
 }

@@ -87,12 +87,12 @@ struct WorkoutRow: View {
                         .strokeBorder(Palette.borderStrong, lineWidth: 1)
                         .frame(width: 28, height: 28)
                 }
-                Text(WorkoutSession.weekdayShort[weekday])
+                Text(WorkoutSession.weekdayShortName(weekday))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(workout != nil || isToday ? Palette.textPrimary : Palette.textTertiary)
             }
 
-            Text(WorkoutSession.weekdayNames[weekday])
+            Text(WorkoutSession.weekdayName(weekday))
                 .font(Typography.body)
                 .foregroundStyle(workout != nil ? Palette.textPrimary : Palette.textTertiary)
                 .frame(width: 90, alignment: .leading)
@@ -146,7 +146,7 @@ struct WorkoutEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(WorkoutSession.weekdayNames[workout.weekday]) {
+                Section(WorkoutSession.weekdayName(workout.weekday)) {
                     TextField("Antrenman", text: $nameEdit, prompt: Text("ör: Sırt + Göğüs"))
                     LabeledContent("Tahmini kcal") {
                         TextField("", value: $caloriesEdit, format: .number)

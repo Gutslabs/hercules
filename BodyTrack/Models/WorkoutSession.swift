@@ -237,6 +237,16 @@ final class WorkoutSession {
         return Self.weekdayNames[weekday]
     }
 
+    /// Sınır-güvenli statik gün adı (geçersiz/decoded index → "?"). Çökmeyi önler.
+    static func weekdayName(_ index: Int) -> String {
+        weekdayNames.indices.contains(index) ? weekdayNames[index] : "?"
+    }
+
+    /// Sınır-güvenli statik kısa gün adı.
+    static func weekdayShortName(_ index: Int) -> String {
+        weekdayShort.indices.contains(index) ? weekdayShort[index] : "?"
+    }
+
     var sortedTemplateExercises: [WorkoutTemplateExercise] {
         templateExercises.sorted { $0.order < $1.order }
     }

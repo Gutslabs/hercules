@@ -486,19 +486,19 @@ struct BottomCenterChatDock: View {
 
     private var sendButton: some View {
         Button {
-            sendWithContext()
+            if store.isSending { store.stop() } else { sendWithContext() }
         } label: {
             Image(systemName: store.isSending ? "stop.fill" : "arrow.up")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(canSendInput ? ChatChrome.ink : ChatChrome.quaternary)
+                .foregroundStyle((canSendInput || store.isSending) ? ChatChrome.ink : ChatChrome.quaternary)
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(canSendInput ? ChatChrome.white : ChatChrome.panelPressed))
+                .background(Circle().fill((canSendInput || store.isSending) ? ChatChrome.white : ChatChrome.panelPressed))
                 .overlay(Circle().strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .disabled(!canSendInput || store.isSending)
-        .scaleEffect(canSendInput ? 1 : 0.98)
-        .help("Gönder")
+        .disabled(!store.isSending && !canSendInput)
+        .scaleEffect((canSendInput || store.isSending) ? 1 : 0.98)
+        .help(store.isSending ? "Durdur" : "Gönder")
     }
 
     private var dockInputEditor: some View {
@@ -645,7 +645,7 @@ struct BottomCenterChatDock: View {
         let skillScope = AgentDataScope.infer(query: store.input, explicitTags: allMentions)
         let skillData = AgentDataSnapshot.make(ctx: ctx, scope: skillScope)
         inputFocused = false
-        Task { await store.send(userContext: snapshot, skillData: skillData, ctx: ctx) }
+        store.startSend(userContext: snapshot, skillData: skillData, ctx: ctx)
     }
 
     private func addPresetToToday(_ preset: FoodPreset, servings: Double) {

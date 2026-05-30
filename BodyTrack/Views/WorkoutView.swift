@@ -455,7 +455,7 @@ struct WorkoutView: View {
         }
         let created = WorkoutSession(
             weekday: weekday,
-            name: WorkoutSession.weekdayNames[weekday],
+            name: WorkoutSession.weekdayName(weekday),
             estimatedCalories: 0,
             durationMinutes: 60
         )

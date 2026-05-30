@@ -99,7 +99,12 @@ final class CodexAuth {
     private let oauthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     private let oauthTokenURL = URL(string: "https://auth.openai.com/oauth/token")!
 
-    /// Hercules'in kendi Codex token kopyası — Codex CLI ile refresh çakışması olmasın diye.
+    /// Token'lar Keychain'de tutulur (düz-metin dosya + yedeklere sızma riski yok).
+    private static let keychainService = "hercules.codex"
+    private static let keychainAccount = "tokens"
+
+    /// Eski düz-metin token dosyası konumu. Token'lar artık Keychain'de tutulur;
+    /// bu yol yalnızca eski kurulumlardan Keychain'e taşıma (migration) için kullanılır.
     private var herculesStoreURL: URL {
         let fm = FileManager.default
         #if os(macOS)
@@ -128,9 +133,12 @@ final class CodexAuth {
         FileManager.default.fileExists(atPath: codexCLIAuthURL.path)
     }
 
-    /// Hercules'in kendi store'unda token var mı?
+    /// Hercules'in kendi store'unda (Keychain veya eski dosya) token var mı?
     var hasHerculesTokens: Bool {
-        FileManager.default.fileExists(atPath: herculesStoreURL.path)
+        if AIKeyStore.readKeychainPassword(service: Self.keychainService, account: Self.keychainAccount) != nil {
+            return true
+        }
+        return FileManager.default.fileExists(atPath: herculesStoreURL.path)
     }
 
     /// Geçerli erişim token'ı al — gerektiğinde otomatik yenile.
@@ -158,19 +166,37 @@ final class CodexAuth {
         return t
     }
 
-    /// Hercules store'undan token oku, yoksa Codex CLI'dan import et.
+    /// Token oku: önce Keychain, sonra eski düz-metin dosya (taşı + sil), sonra Codex CLI import.
     func loadTokens() throws -> CodexTokens {
+        // 1) Keychain — yeni, güvenli konum
+        if let json = AIKeyStore.readKeychainPassword(service: Self.keychainService, account: Self.keychainAccount),
+           let data = json.data(using: .utf8),
+           let tokens = try? JSONDecoder().decode(CodexTokens.self, from: data) {
+            return tokens
+        }
+        // 2) Eski düz-metin dosyası → Keychain'e taşı, dosyayı sil
         if FileManager.default.fileExists(atPath: herculesStoreURL.path) {
             let data = try Data(contentsOf: herculesStoreURL)
-            return try JSONDecoder().decode(CodexTokens.self, from: data)
+            let tokens = try JSONDecoder().decode(CodexTokens.self, from: data)
+            try? saveTokens(tokens)   // Keychain'e yazar + eski dosyayı temizler
+            return tokens
         }
-        // İlk kullanım — Codex CLI'dan import dene
+        // 3) İlk kullanım — Codex CLI'dan import dene
         return try importFromCodexCLI()
     }
 
     func saveTokens(_ tokens: CodexTokens) throws {
         let data = try JSONEncoder().encode(tokens)
-        try data.write(to: herculesStoreURL, options: [.atomic])
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw CodexAuthError.invalidAuthFile("token encode edilemedi")
+        }
+        guard AIKeyStore.writeKeychainPassword(json, service: Self.keychainService, account: Self.keychainAccount) else {
+            throw CodexAuthError.invalidAuthFile("token Keychain'e yazılamadı")
+        }
+        // Eski düz-metin dosyası varsa temizle (yedeklere/iCloud'a sızmasın).
+        if FileManager.default.fileExists(atPath: herculesStoreURL.path) {
+            try? FileManager.default.removeItem(at: herculesStoreURL)
+        }
     }
 
     /// Token'ı refresh endpoint'ine post ederek yenile.

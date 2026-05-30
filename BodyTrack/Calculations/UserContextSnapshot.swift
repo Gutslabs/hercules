@@ -870,16 +870,17 @@ enum UserContextSnapshot {
         // Tüm hafta — Pzt'den başla (Calendar weekday 2)
         let orderedWeekdays = [2, 3, 4, 5, 6, 7, 1] // Pzt..Paz
         let weekdayShort = ["", "Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"]
+        func short(_ i: Int) -> String { weekdayShort.indices.contains(i) ? weekdayShort[i] : "?" }
         var weekParts: [String] = []
         var totalKcal: Double = 0
         for wd in orderedWeekdays {
             if let w = workouts.first(where: { $0.weekday == wd }) {
                 let exCount = w.templateExercises.count
                 let detail = exCount > 0 ? " · \(exCount) hareket" : ""
-                weekParts.append("\(weekdayShort[wd])=\(w.name)\(detail)")
+                weekParts.append("\(short(wd))=\(w.name)\(detail)")
                 totalKcal += w.estimatedCalories
             } else {
-                weekParts.append("\(weekdayShort[wd])=—")
+                weekParts.append("\(short(wd))=—")
             }
         }
         lines.append("- Tüm hafta: " + weekParts.joined(separator: " · "))
@@ -887,7 +888,7 @@ enum UserContextSnapshot {
         lines.append("- \(trainingDays) gün/hafta · toplam ~\(Fmt.int(totalKcal)) kcal/hafta")
         if !overrides.isEmpty {
             let overrideParts = overrides.map { item in
-                "\(weekdayShort[item.weekday]) + \(item.exerciseName) (\(item.prescriptionText))"
+                "\(short(item.weekday)) + \(item.exerciseName) (\(item.prescriptionText))"
             }
             lines.append("- AI/user plan eklemeleri: " + overrideParts.joined(separator: " · "))
         }
@@ -904,7 +905,7 @@ enum UserContextSnapshot {
                     }
                     return item
                 }.joined(separator: "; ")
-                var dayLine = "  - \(weekdayShort[day.weekday]) \(day.name)"
+                var dayLine = "  - \(short(day.weekday)) \(day.name)"
                 if let focus = day.focus, !focus.isEmpty { dayLine += " — amaç: \(focus)" }
                 if !exercises.isEmpty { dayLine += " — hareketler: \(exercises)" }
                 if let progression = day.progression, !progression.isEmpty { dayLine += " — progression: \(progression)" }

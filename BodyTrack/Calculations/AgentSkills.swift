@@ -12,29 +12,34 @@ struct MemoryRecallSkill: AgentSkill {
     func run(query: String, context: AgentContext) async throws -> SkillResult? {
         // Model yüklüyse semantic (cosine) skoru da harmanlanır; değilse saf lexical (graceful).
         let queryEmbedding = await EmbeddingService.shared.embedQueryIfAvailable(query)
-        let memories = LocalMemoryProvider.shared.contextMemories(query: query, queryEmbedding: queryEmbedding, limit: 24)
-        guard !memories.isEmpty else { return nil }
+        // LocalMemoryProvider artık @MainActor — erişimi main'e taşı (veri yarışını önler).
+        let content = await MainActor.run { () -> String? in
+            let memories = LocalMemoryProvider.shared.contextMemories(query: query, queryEmbedding: queryEmbedding, limit: 24)
+            guard !memories.isEmpty else { return nil }
 
-        // Tipe göre grupla — koç yapılandırılmış, tiplenmiş bir hafıza bloğu görsün.
-        let grouped = Dictionary(grouping: memories, by: { $0.type })
-        let order: [MemoryType] = [
-            .profile, .goal, .constraint, .preference,
-            .training, .nutrition, .supplement, .app, .episodic, .other
-        ]
-        var lines: [String] = []
-        for type in order {
-            guard let items = grouped[type], !items.isEmpty else { continue }
-            lines.append("[\(type.label.uppercased())]")
-            for memory in items {
-                let pin = memory.pinned ? "📌 " : ""
-                lines.append("- \(pin)\(memory.content)")
+            // Tipe göre grupla — koç yapılandırılmış, tiplenmiş bir hafıza bloğu görsün.
+            let grouped = Dictionary(grouping: memories, by: { $0.type })
+            let order: [MemoryType] = [
+                .profile, .goal, .constraint, .preference,
+                .training, .nutrition, .supplement, .app, .episodic, .other
+            ]
+            var lines: [String] = []
+            for type in order {
+                guard let items = grouped[type], !items.isEmpty else { continue }
+                lines.append("[\(type.label.uppercased())]")
+                for memory in items {
+                    let pin = memory.pinned ? "📌 " : ""
+                    lines.append("- \(pin)\(memory.content)")
+                }
             }
+            return lines.joined(separator: "\n")
         }
+        guard let content, !content.isEmpty else { return nil }
 
         return SkillResult(
             skillID: id,
             title: "Kişisel Hafıza",
-            content: lines.joined(separator: "\n"),
+            content: content,
             sources: []
         )
     }

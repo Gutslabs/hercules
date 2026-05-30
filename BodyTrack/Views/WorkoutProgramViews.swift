@@ -163,7 +163,7 @@ struct WorkoutProgramDayCard: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(alignment: .top, spacing: Spacing.md) {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(WorkoutSession.weekdayNames[weekday])
+                    Text(WorkoutSession.weekdayName(weekday))
                         .font(Typography.captionBold)
                         .foregroundStyle(session == nil ? Palette.textTertiary : Palette.accent)
                         .padding(.horizontal, 9)
@@ -360,7 +360,7 @@ struct WorkoutProgramSessionEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(WorkoutSession.weekdayNames[session.weekday]) {
+                Section(WorkoutSession.weekdayName(session.weekday)) {
                     TextField("Gün adı", text: $name, prompt: Text("Upper A / Lower / Full Body"))
                     LabeledContent("Süre") {
                         TextField("", value: $duration, format: .number)
@@ -478,7 +478,7 @@ struct WorkoutProgramSessionEditor: View {
     }
 
     private func save() {
-        session.name = clean(name) ?? WorkoutSession.weekdayNames[session.weekday]
+        session.name = clean(name) ?? WorkoutSession.weekdayName(session.weekday)
         session.durationMinutes = duration
         session.estimatedCalories = calories
         session.focus = clean(focus)
@@ -556,7 +556,7 @@ struct WorkoutProgramArchiveSheet: View {
                                 .font(Typography.caption)
                                 .foregroundStyle(Palette.textSecondary)
                         }
-                        Text(archive.sessions.map { "\(WorkoutSession.weekdayShort[$0.weekday]) \($0.name)" }.joined(separator: " · "))
+                        Text(archive.sessions.map { "\(WorkoutSession.weekdayShortName($0.weekday)) \($0.name)" }.joined(separator: " · "))
                             .font(Typography.caption)
                             .foregroundStyle(Palette.textQuaternary)
                             .lineLimit(2)

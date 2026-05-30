@@ -19,6 +19,7 @@ final class ChatStore {
     @ObservationIgnored private var notificationToken: NSObjectProtocol?
     @ObservationIgnored private var supportRestoreToken: NSObjectProtocol?
     @ObservationIgnored private var historyWriteTask: Task<Void, Never>?
+    @ObservationIgnored private var sendTask: Task<Void, Never>?
     @ObservationIgnored private let historyWriter = HistoryWriter()
     @ObservationIgnored private var historyWriteSequence = 0
     @ObservationIgnored private let historyURL: URL = ChatStore.makeHistoryURL()
@@ -165,6 +166,24 @@ final class ChatStore {
         persistHistory()
     }
 
+    /// Gönderimi kendi Task'ında başlatır; handle'ı saklar ki "Dur" butonu iptal edebilsin.
+    func startSend(userContext: String? = nil, skillData: AgentDataSnapshot? = nil, ctx: ModelContext? = nil) {
+        guard !isSending else { return }
+        sendTask = Task { [weak self] in
+            await self?.send(userContext: userContext, skillData: skillData, ctx: ctx)
+            self?.sendTask = nil
+        }
+    }
+
+    /// Devam eden AI gönderimini durdurur (network + sonuç uygulaması iptal edilir).
+    func stop() {
+        sendTask?.cancel()
+        sendTask = nil
+        isSending = false
+        searchingFor = nil
+        persistHistory()
+    }
+
     func send(userContext: String? = nil, skillData: AgentDataSnapshot? = nil, ctx: ModelContext? = nil) async {
         if pruneExpiredConversations() {
             persistHistory()
@@ -267,6 +286,7 @@ final class ChatStore {
                     flushStreamText()
                 }
             )
+            try Task.checkCancellation()   // "Dur"a basıldıysa sonucu uygulama
             flushStreamText(force: true)
             let rawAssistantText = result.message.isEmpty
                 ? (result.name ?? "—")
@@ -287,9 +307,18 @@ final class ChatStore {
             syncCurrentConversation(titleSeed: text)
             agentRouter.absorbConversation(userText: text, assistantText: assistantText)
         } catch {
-            lastError = error.localizedDescription
-            setAssistantTextWithoutAnimation("❌ Hata: \(error.localizedDescription)")
-            syncCurrentConversation(titleSeed: text)
+            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+                // Kullanıcı "Dur"a bastı — kısmi metni koru, hata gösterme
+                flushStreamText(force: true)
+                if let idx = assistantIdx(), messages[idx].text.isEmpty {
+                    setAssistantTextWithoutAnimation("⏹︎ Durduruldu")
+                }
+                syncCurrentConversation(titleSeed: text)
+            } else {
+                lastError = error.localizedDescription
+                setAssistantTextWithoutAnimation("❌ Hata: \(error.localizedDescription)")
+                syncCurrentConversation(titleSeed: text)
+            }
         }
 
         isSending = false
@@ -586,7 +615,7 @@ final class ChatStore {
                     ctx: ctx
                 )
                 try ctx.save()
-                return "\(WorkoutSession.weekdayNames[weekday]) planına \(exerciseName) eklendi"
+                return "\(WorkoutSession.weekdayName(weekday)) planına \(exerciseName) eklendi"
 
             default:
                 let weekday = try validWeekday(action.weekday)
@@ -609,7 +638,7 @@ final class ChatStore {
                     try applyWorkoutDayPlan(day, to: session, ctx: ctx, replaceExercises: true)
                 }
                 try ctx.save()
-                return "\(WorkoutSession.weekdayNames[weekday]) antrenmanı güncellendi"
+                return "\(WorkoutSession.weekdayName(weekday)) antrenmanı güncellendi"
             }
 
         }
@@ -729,7 +758,7 @@ final class ChatStore {
                 weekday: weekday,
                 name: name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                     ? name!.trimmingCharacters(in: .whitespacesAndNewlines)
-                    : WorkoutSession.weekdayNames[weekday],
+                    : WorkoutSession.weekdayName(weekday),
                 estimatedCalories: estimatedCalories ?? 0,
                 durationMinutes: durationMinutes ?? 60
             )

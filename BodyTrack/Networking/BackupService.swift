@@ -51,11 +51,12 @@ enum BackupServiceError: LocalizedError {
 final class BackupService {
     static let shared = BackupService()
 
+    // NOT: codex_auth.json bilinçli olarak yok — OAuth token'ları artık Keychain'de
+    // tutuluyor ve taşınabilir yedeklere/iCloud'a asla yazılmıyor (güvenlik).
     private static let supportFileNames = [
         "chat-history.json",
         "agent-memory.json",
-        "research-library.json",
-        "codex_auth.json"
+        "research-library.json"
     ]
 
     private static let preferenceKeys = [

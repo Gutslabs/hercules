@@ -61,6 +61,7 @@ final class NutritionDataProvider {
 
     private let cacheURL: URL
     private var cache: [String: NutritionCacheEntry] = [:]
+    private let cacheLock = NSLock()   // eşzamanlı skill erişimlerinde cache yarışmasın
     private let session: URLSession
     private let usdaAPIKey: String
     private let cacheMaxAge: TimeInterval = 45 * 24 * 60 * 60
@@ -268,11 +269,11 @@ final class NutritionDataProvider {
         allowNetwork: Bool
     ) async -> (profile: NutritionLookupProfile?, usedNetwork: Bool) {
         let now = Date()
-        if let cached = cache[key],
+        if let cached = cacheLock.withLock({ cache[key] }),
            now.timeIntervalSince(cached.updatedAt) < cacheMaxAge {
             return (cached.profile, false)
         }
-        guard allowNetwork else { return (cache[key]?.profile, false) }
+        guard allowNetwork else { return (cacheLock.withLock { cache[key] }?.profile, false) }
 
         let query = Self.searchQuery(for: foodName)
         let productFirst = Self.looksLikePackagedProduct(foodName)
@@ -292,7 +293,7 @@ final class NutritionDataProvider {
         }
 
         if let profile {
-            cache[key] = NutritionCacheEntry(profile: profile, updatedAt: now)
+            cacheLock.withLock { cache[key] = NutritionCacheEntry(profile: profile, updatedAt: now) }
             persist()
         }
         return (profile, true)
@@ -624,14 +625,15 @@ final class NutritionDataProvider {
         guard let data = try? Data(contentsOf: cacheURL),
               let payload = try? Self.decoder.decode(CachePayload.self, from: data)
         else {
-            cache = [:]
+            cacheLock.withLock { cache = [:] }
             return
         }
-        cache = payload.entries
+        cacheLock.withLock { cache = payload.entries }
     }
 
     private func persist() {
-        let payload = CachePayload(version: 1, savedAt: .now, entries: cache)
+        let snapshot = cacheLock.withLock { cache }
+        let payload = CachePayload(version: 1, savedAt: .now, entries: snapshot)
         guard let data = try? Self.encoder.encode(payload) else { return }
         try? data.write(to: cacheURL, options: [.atomic])
     }

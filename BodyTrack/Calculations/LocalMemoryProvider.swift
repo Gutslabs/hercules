@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 final class LocalMemoryProvider {
     static let shared = LocalMemoryProvider()
 
@@ -20,21 +21,39 @@ final class LocalMemoryProvider {
         case deferredTouch
     }
 
+    /// Disk yazımlarını serialize eder ve encode'u main thread'den çıkarır.
+    /// sequence sırasına göre yazar; eski (stale) yazımları atlar.
+    private actor MemoryFileWriter {
+        private var latest = 0
+        private let encoder: JSONEncoder = {
+            let e = JSONEncoder()
+            e.dateEncodingStrategy = .iso8601
+            e.outputFormatting = [.prettyPrinted, .sortedKeys]
+            return e
+        }()
+
+        @discardableResult
+        func write(payload: MemoryPayload?, to url: URL, sequence: Int) -> Bool {
+            guard sequence >= latest else { return false }
+            latest = sequence
+            guard let payload else {
+                try? FileManager.default.removeItem(at: url)
+                return true
+            }
+            guard let data = try? encoder.encode(payload) else { return false }
+            try? data.write(to: url, options: [.atomic])
+            return true
+        }
+    }
+
     private let memoryURL: URL
     private var memories: [AgentMemory] = []
     private var memoryTermsByID: [UUID: Set<String>] = [:]
     private var memoryTagTermsByID: [UUID: Set<String>] = [:]
     private var loadedFingerprint: DiskFingerprint?
-    private let writeQueue = DispatchQueue(label: "com.hercules.local-memory.write", qos: .utility)
-    private var pendingWriteWorkItem: DispatchWorkItem?
     private var writeSequence = 0
-
-    private static let encoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
-    }()
+    private var deferredWriteInFlight = false
+    private let fileWriter = MemoryFileWriter()
 
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -489,7 +508,7 @@ final class LocalMemoryProvider {
     }
 
     private func refreshFromDiskIfChanged() {
-        guard pendingWriteWorkItem == nil else { return }
+        guard !deferredWriteInFlight else { return }
         let fingerprint = Self.diskFingerprint(for: memoryURL)
         guard fingerprint != loadedFingerprint else { return }
         load()
@@ -531,50 +550,32 @@ final class LocalMemoryProvider {
         return changed
     }
 
+    /// Diske yazımı arka plana (writer actor) devreder — encode + I/O main thread'i bloklamaz.
+    /// `mode` artık ayrım yaratmıyor; her iki durumda da debounced async yazım yapılır.
     private func persist(_ mode: PersistMode = .immediate) {
         let payload = memories.isEmpty ? nil : MemoryPayload(version: 1, savedAt: .now, memories: memories)
         writeSequence += 1
         let sequence = writeSequence
-        pendingWriteWorkItem?.cancel()
-        pendingWriteWorkItem = nil
-
-        switch mode {
-        case .immediate:
-            writeQueue.sync {
-                Self.write(payload: payload, to: memoryURL)
-            }
-            loadedFingerprint = Self.diskFingerprint(for: memoryURL)
-        case .deferredTouch:
-            let url = memoryURL
-            let workItem = DispatchWorkItem { [weak self] in
-                guard let self, self.writeSequence == sequence else { return }
-                Self.write(payload: payload, to: url)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.writeSequence == sequence else { return }
-                    self.pendingWriteWorkItem = nil
-                    self.loadedFingerprint = Self.diskFingerprint(for: self.memoryURL)
-                }
-            }
-            pendingWriteWorkItem = workItem
-            writeQueue.async(execute: workItem)
+        let url = memoryURL
+        let writer = fileWriter
+        deferredWriteInFlight = true
+        // Task @MainActor context'ini miras alır: actor write off-main, devamı tekrar main'de.
+        Task { [weak self] in
+            let wrote = await writer.write(payload: payload, to: url, sequence: sequence)
+            guard let self, self.writeSequence == sequence else { return }
+            if wrote { self.loadedFingerprint = Self.diskFingerprint(for: self.memoryURL) }
+            self.deferredWriteInFlight = false
         }
         postLocalMemoryChanged()
     }
 
     private func postLocalMemoryChanged() {
-        if Thread.isMainThread {
-            NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
-        } else {
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
-            }
-        }
+        NotificationCenter.default.post(name: .localMemoryChanged, object: nil)
     }
 
     private func cancelDeferredWrite() {
-        pendingWriteWorkItem?.cancel()
-        pendingWriteWorkItem = nil
-        writeSequence += 1
+        writeSequence += 1          // uçuştaki yazımların fingerprint güncellemesini geçersiz kıl
+        deferredWriteInFlight = false
     }
 
     private func rebuildSearchIndex() {
@@ -584,15 +585,6 @@ final class LocalMemoryProvider {
         memoryTagTermsByID = Dictionary(uniqueKeysWithValues: memories.map { memory in
             (memory.id, Set(memory.tags.flatMap(Self.tokens)))
         })
-    }
-
-    private static func write(payload: MemoryPayload?, to url: URL) {
-        guard let payload else {
-            try? FileManager.default.removeItem(at: url)
-            return
-        }
-        guard let data = try? encoder.encode(payload) else { return }
-        try? data.write(to: url, options: [.atomic])
     }
 
     private static func diskFingerprint(for url: URL) -> DiskFingerprint {

@@ -74,27 +74,45 @@ struct AIProviderCard: View {
             RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
-        .onAppear { refreshCodexStatus() }
+        .onAppear {
+            refreshCodexStatus()
+            apiKey = AIKeyStore.shared.apiKey   // kayıtlı anahtarı alana yansıt
+        }
     }
 
     private var openRouterSection: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "key")
-                .font(.system(size: 10))
-                .foregroundStyle(Palette.textTertiary)
-            SecureField("sk-or-...", text: $apiKey)
-                .textFieldStyle(.plain)
-                .font(Typography.mono)
-                .foregroundStyle(Palette.textPrimary)
-                .onSubmit {
-                    AIKeyStore.shared.apiKey = apiKey
-                    NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "key")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.textTertiary)
+                SecureField("sk-or-...", text: $apiKey)
+                    .textFieldStyle(.plain)
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textPrimary)
+                    .onChange(of: apiKey) { _, newValue in
+                        AIKeyStore.shared.apiKey = newValue   // her değişiklikte sessizce kaydet (kayıp olmasın)
+                    }
+                    .onSubmit {
+                        AIKeyStore.shared.apiKey = apiKey
+                        NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+                    }
+                if !apiKey.isEmpty {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.positive)
                 }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
+
+            Text("openrouter.ai/keys adresinden API key al, buraya yapıştır. Terminal gerekmez.")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-        .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
     }
 
     @ViewBuilder

@@ -191,11 +191,9 @@ final class AgentRouter {
     )
 
     private let skills: [AgentSkill]
-    private let memoryProvider: LocalMemoryProvider
 
-    init(skills: [AgentSkill], memoryProvider: LocalMemoryProvider = .shared) {
+    init(skills: [AgentSkill]) {
         self.skills = skills
-        self.memoryProvider = memoryProvider
     }
 
     func buildSkillContext(
