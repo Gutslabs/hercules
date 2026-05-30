@@ -346,7 +346,7 @@ final class ChatStore {
             fat: food.fat_g
         )
         ctx.insert(entry)
-        try? ctx.save()
+        ctx.saveOrReport()
         if let idx = messages.firstIndex(where: { $0.id == turn.id }) {
             messages[idx].saved = true
             syncCurrentConversation()

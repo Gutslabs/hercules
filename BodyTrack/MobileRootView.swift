@@ -21,6 +21,7 @@ struct MobileRootView: View {
     @State private var showAddFood = false
     @State private var showAddMeasurement = false
     @State private var statusMessage: String? = nil
+    @State private var saveErrors = SaveErrorReporter.shared
     @State private var isWorking = false
     @State private var refreshTick = UUID()
 
@@ -70,6 +71,14 @@ struct MobileRootView: View {
         } message: {
             Text("Bu cihazdaki local veri değişmeden önce safety backup alınır. Sonra seçili klasördeki Hercules snapshot içeri aktarılır.")
         }
+        .alert("Kaydedilemedi", isPresented: Binding(
+            get: { saveErrors.message != nil },
+            set: { if !$0 { saveErrors.message = nil } }
+        )) {
+            Button("Tamam", role: .cancel) { saveErrors.message = nil }
+        } message: {
+            Text(saveErrors.message ?? "")
+        }
         .sheet(isPresented: $showAddFood) {
             foodForm
                 .presentationDetents([.medium])
@@ -82,9 +91,9 @@ struct MobileRootView: View {
             restoreIfNewer()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                restoreIfNewer()
-            } else if newPhase == .background {
+            // Aktive olunca OTOMATİK restore YOK — bellekteki düzenlemeleri ezebilir.
+            // İlk açılışta onAppear restore eder; sonradan içeri alma kullanıcı onaylı.
+            if newPhase == .background {
                 BackupService.shared.exportAsync(from: ctx)
             }
         }
@@ -1165,7 +1174,7 @@ struct MobileRootView: View {
 
     private func addPreset(_ preset: FoodPreset, servings: Double) {
         ctx.insert(preset.makeFoodEntry(servings: servings))
-        try? ctx.save()
+        ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
     }
 
@@ -1180,7 +1189,7 @@ struct MobileRootView: View {
             fat: number(foodFat)
         )
         ctx.insert(entry)
-        try? ctx.save()
+        ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
         foodName = ""
         foodGrams = ""
@@ -1289,7 +1298,7 @@ struct MobileRootView: View {
             fat: result.fat_g
         )
         ctx.insert(entry)
-        try? ctx.save()
+        ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
         aiFoodInput = ""
         aiFoodResult = nil
@@ -1329,7 +1338,7 @@ struct MobileRootView: View {
             neck: measurementFullCheckIn ? number(measurementNeck) : nil,
             note: measurementFullCheckIn ? "Haftalık tam ölçüm" : nil
         ))
-        try? ctx.save()
+        ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
         showAddMeasurement = false
     }

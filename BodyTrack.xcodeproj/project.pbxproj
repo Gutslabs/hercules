@@ -45,6 +45,8 @@
 		A24E00000000000000000057 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000039 /* OpenRouterClient.swift */; };
 		A24E0000000000000000EE54 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE56 /* AIModels.swift */; };
 		A24E0000000000000000EE55 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE56 /* AIModels.swift */; };
+		A24E0000000000000000EE60 /* PersistenceSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE62 /* PersistenceSupport.swift */; };
+		A24E0000000000000000EE61 /* PersistenceSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE62 /* PersistenceSupport.swift */; };
 		A24E00000000000000000058 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003A /* ChatStore.swift */; };
 		A24E0000000000000000EE5A /* ChatStoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5B /* ChatStoreModels.swift */; };
 		A24E0000000000000000EE5C /* UserContextMention.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5D /* UserContextMention.swift */; };
@@ -155,6 +157,7 @@
 		A24E00000000000000000038 /* FoodEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodEntry.swift; sourceTree = "<group>"; };
 		A24E00000000000000000039 /* OpenRouterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterClient.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE56 /* AIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModels.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE62 /* PersistenceSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceSupport.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003A /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE5B /* ChatStoreModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStoreModels.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE5D /* UserContextMention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextMention.swift; sourceTree = "<group>"; };
@@ -297,6 +300,7 @@
 				A24E00000000000000000081 /* LocalMemoryProvider.swift */,
 				A24E0000000000000000EE11 /* AgentMemory.swift */,
 				A24E0000000000000000EE13 /* MemoryManager.swift */,
+				A24E0000000000000000EE62 /* PersistenceSupport.swift */,
 				A24E0000000000000000EE15 /* EmbeddingService.swift */,
 				A24E00000000000000000082 /* PubMedResearchSkill.swift */,
 				A24E00000000000000000083 /* FoodLookupSkill.swift */,
@@ -571,6 +575,7 @@
 				A24E0000000000000000006B /* LocalMemoryProvider.swift in Sources */,
 				A24E0000000000000000EE10 /* AgentMemory.swift in Sources */,
 				A24E0000000000000000EE12 /* MemoryManager.swift in Sources */,
+				A24E0000000000000000EE60 /* PersistenceSupport.swift in Sources */,
 				A24E0000000000000000EE14 /* EmbeddingService.swift in Sources */,
 				A24E0000000000000000006C /* PubMedResearchSkill.swift in Sources */,
 				A24E0000000000000000006D /* FoodLookupSkill.swift in Sources */,
@@ -608,6 +613,7 @@
 				A24E000000000000000000D0 /* AIProvider.swift in Sources */,
 				A24E000000000000000000D1 /* OpenRouterClient.swift in Sources */,
 				A24E0000000000000000EE55 /* AIModels.swift in Sources */,
+				A24E0000000000000000EE61 /* PersistenceSupport.swift in Sources */,
 				A24E000000000000000000D2 /* CodexAuth.swift in Sources */,
 				A24E000000000000000000D3 /* CodexClient.swift in Sources */,
 			);

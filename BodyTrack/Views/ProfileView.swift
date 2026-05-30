@@ -1165,7 +1165,7 @@ struct ProfileView: View {
         profile.manualProteinGrams = manualProteinGrams
         profile.manualCarbsGrams = manualCarbsGrams
         profile.manualFatGrams = manualFatGrams
-        try? ctx.save()
+        ctx.saveOrReport()
         saved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             saved = false

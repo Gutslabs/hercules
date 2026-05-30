@@ -223,10 +223,12 @@ struct AgentDataSnapshot: Sendable {
                 sortBy: [SortDescriptor(\.sortOrder)]
             ))) ?? []).map(AgentFoodPresetSnapshot.init)
             : []
-        let recipes = scope.includeRecipes
-            ? ((try? ctx.fetch(FetchDescriptor<Recipe>(
-                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
-            ))) ?? []).map(AgentRecipeSnapshot.init)
+        let recipes: [AgentRecipeSnapshot] = scope.includeRecipes
+            ? {
+                var d = FetchDescriptor<Recipe>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
+                d.fetchLimit = 80   // bağlam için son 80 tarif yeterli
+                return ((try? ctx.fetch(d)) ?? []).map(AgentRecipeSnapshot.init)
+            }()
             : []
 
         return AgentDataSnapshot(

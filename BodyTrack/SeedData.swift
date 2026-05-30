@@ -29,6 +29,6 @@ enum DemoSeed {
             }
         }
 
-        try? ctx.save()
+        ctx.saveOrReport()
     }
 }

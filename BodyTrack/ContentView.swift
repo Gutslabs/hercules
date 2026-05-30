@@ -80,6 +80,7 @@ struct ContentView: View {
     @AppStorage("hercules.chat.presentationMode") private var chatPresentationMode: ChatPresentationMode = .sidebar
     @State private var chatWidth: CGFloat = 380
     @State private var showingPromptTips: Bool = false
+    @State private var saveErrors = SaveErrorReporter.shared
     private let chatMinWidth: CGFloat = 320
     private let chatMaxWidth: CGFloat = 560
     private let detailReserveWidth: CGFloat = 760
@@ -106,6 +107,14 @@ struct ContentView: View {
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
             }
+        }
+        .alert("Kaydedilemedi", isPresented: Binding(
+            get: { saveErrors.message != nil },
+            set: { if !$0 { saveErrors.message = nil } }
+        )) {
+            Button("Tamam", role: .cancel) { saveErrors.message = nil }
+        } message: {
+            Text(saveErrors.message ?? "")
         }
     }
 

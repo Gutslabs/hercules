@@ -111,10 +111,10 @@ struct WorkoutView: View {
         .background(Palette.background.ignoresSafeArea())
         .sheet(item: $editing) { log in
             WorkoutLogEditor(mode: .edit(log)) { _ in
-                try? ctx.save()
+                ctx.saveOrReport()
             } onDelete: {
                 ctx.delete(log)
-                try? ctx.save()
+                ctx.saveOrReport()
             }
         }
         .sheet(item: Binding(
@@ -133,12 +133,12 @@ struct WorkoutView: View {
                 )
             ) { log in
                 ctx.insert(log)
-                try? ctx.save()
+                ctx.saveOrReport()
             }
         }
         .sheet(item: $editingProgramSession) { session in
             WorkoutProgramSessionEditor(session: session) {
-                try? ctx.save()
+                ctx.saveOrReport()
                 editingProgramSession = nil
             }
         }
@@ -148,7 +148,7 @@ struct WorkoutView: View {
                 onRestore: restoreArchivedProgram,
                 onDelete: { archive in
                     ctx.delete(archive)
-                    try? ctx.save()
+                    ctx.saveOrReport()
                 }
             )
         }
@@ -306,7 +306,7 @@ struct WorkoutView: View {
                             editProgramSession(weekday)
                         } onDelete: { session in
                             ctx.delete(session)
-                            try? ctx.save()
+                            ctx.saveOrReport()
                         }
                         .id("program-day-\(weekday)")
                     }
@@ -460,7 +460,7 @@ struct WorkoutView: View {
             durationMinutes: 60
         )
         ctx.insert(created)
-        try? ctx.save()
+        ctx.saveOrReport()
         editingProgramSession = created
     }
 
@@ -480,7 +480,7 @@ struct WorkoutView: View {
             source: "manual",
             sessionsJSON: json
         ))
-        try? ctx.save()
+        ctx.saveOrReport()
     }
 
     private func activeProgramSnapshots() -> [WorkoutProgramSessionSnapshot] {
@@ -551,7 +551,7 @@ struct WorkoutView: View {
                 session.templateExercises.append(exercise)
             }
         }
-        try? ctx.save()
+        ctx.saveOrReport()
         showingArchives = false
     }
 
@@ -1032,7 +1032,7 @@ struct WorkoutView: View {
                         .foregroundStyle(Palette.textSecondary)
                     Button {
                         ctx.delete(item)
-                        try? ctx.save()
+                        ctx.saveOrReport()
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 10, weight: .semibold))

@@ -797,7 +797,7 @@ struct DashboardView: View {
                 ForEach(todaysFoods) { food in
                     FoodRow(food: food) {
                         ctx.delete(food)
-                        try? ctx.save()
+                        ctx.saveOrReport()
                     }
                 }
             }

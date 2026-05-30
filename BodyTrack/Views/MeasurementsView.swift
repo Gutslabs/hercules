@@ -28,15 +28,15 @@ struct MeasurementsView: View {
         .sheet(isPresented: $showingNew) {
             MeasurementEditor(mode: .create, createKind: newMeasurementKind) { m in
                 ctx.insert(m)
-                try? ctx.save()
+                ctx.saveOrReport()
             }
         }
         .sheet(item: $editingMeasurement) { m in
             MeasurementEditor(mode: .edit(m)) { _ in
-                try? ctx.save()
+                ctx.saveOrReport()
             } onDelete: {
                 ctx.delete(m)
-                try? ctx.save()
+                ctx.saveOrReport()
             }
         }
     }

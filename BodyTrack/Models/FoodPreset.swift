@@ -208,6 +208,6 @@ struct FoodPresetSeed {
             }
         }
 
-        try? ctx.save()
+        ctx.saveOrReport()
     }
 }

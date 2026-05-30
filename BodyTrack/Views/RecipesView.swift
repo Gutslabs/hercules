@@ -98,15 +98,15 @@ struct RecipesView: View {
         .sheet(isPresented: $showingNew) {
             RecipeEditor(mode: .create) { r in
                 ctx.insert(r)
-                try? ctx.save()
+                ctx.saveOrReport()
             }
         }
         .sheet(item: $editing) { r in
             RecipeEditor(mode: .edit(r)) { _ in
-                try? ctx.save()
+                ctx.saveOrReport()
             } onDelete: {
                 ctx.delete(r)
-                try? ctx.save()
+                ctx.saveOrReport()
             }
         }
         .sheet(item: $viewing) { r in
@@ -523,7 +523,7 @@ struct RecipesView: View {
         }
 
         if didChange {
-            try? ctx.save()
+            ctx.saveOrReport()
         }
     }
 

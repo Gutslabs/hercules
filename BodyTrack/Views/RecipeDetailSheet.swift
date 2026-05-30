@@ -68,7 +68,7 @@ struct RecipeDetailSheet: View {
                 HStack(spacing: Spacing.sm) {
                     Button {
                         recipe.isFavorite.toggle()
-                        try? ctx.save()
+                        ctx.saveOrReport()
                     } label: {
                         Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
                             .font(.system(size: 12, weight: .semibold))
@@ -416,7 +416,7 @@ struct RecipeFavoriteButton: View {
     var body: some View {
         Button {
             recipe.isFavorite.toggle()
-            try? ctx.save()
+            ctx.saveOrReport()
         } label: {
             Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
                 .font(.system(size: iconSize, weight: .semibold))

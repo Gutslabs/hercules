@@ -828,7 +828,9 @@ enum UserContextSnapshot {
     }
 
     private static func goalsSection(ctx: ModelContext, latestWeight: Double?) -> String? {
-        let goals = (try? ctx.fetch(FetchDescriptor<MonthlyGoal>(sortBy: [SortDescriptor(\.anchorDate)]))) ?? []
+        var goalsDescriptor = FetchDescriptor<MonthlyGoal>(sortBy: [SortDescriptor(\.anchorDate, order: .reverse)])
+        goalsDescriptor.fetchLimit = 36   // son ~3 yıl; bağlam için fazlası gereksiz
+        let goals = ((try? ctx.fetch(goalsDescriptor)) ?? []).sorted { $0.anchorDate < $1.anchorDate }
         guard !goals.isEmpty else { return nil }
         let now = Date()
         let past = goals.filter { $0.anchorDate <= now }
@@ -858,7 +860,9 @@ enum UserContextSnapshot {
     private static func todaysWorkoutSection(ctx: ModelContext) -> String? {
         let weekday = Calendar.current.component(.weekday, from: .now)
         let workouts = (try? ctx.fetch(FetchDescriptor<WorkoutSession>())) ?? []
-        let overrides = (try? ctx.fetch(FetchDescriptor<WorkoutPlanOverride>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
+        var overridesDescriptor = FetchDescriptor<WorkoutPlanOverride>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
+        overridesDescriptor.fetchLimit = 50
+        let overrides = ((try? ctx.fetch(overridesDescriptor)) ?? []).sorted { $0.createdAt < $1.createdAt }
         guard !workouts.isEmpty || !overrides.isEmpty else { return nil }
 
         var lines: [String] = ["[HAFTALIK ANTRENMAN PROGRAMI]"]
@@ -985,9 +989,13 @@ enum UserContextSnapshot {
     /// Kayıtlı tarifler — başlık + kısa içerik + kategori. Çok uzarsa kategori
     /// bazlı sayım ve son 10 başlık.
     private static func recipesSection(ctx: ModelContext) -> String? {
-        let recipes = (try? ctx.fetch(FetchDescriptor<Recipe>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)]))) ?? []
+        let totalCount = (try? ctx.fetchCount(FetchDescriptor<Recipe>())) ?? 0
+        guard totalCount > 0 else { return nil }
+        var descriptor = FetchDescriptor<Recipe>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
+        descriptor.fetchLimit = 120   // bağlam için son 120 yeterli; send tap'inde tümünü çekme
+        let recipes = (try? ctx.fetch(descriptor)) ?? []
         guard !recipes.isEmpty else { return nil }
-        var lines: [String] = ["[KAYITLI TARİFLER (\(recipes.count))]"]
+        var lines: [String] = ["[KAYITLI TARİFLER (\(totalCount))]"]
         // Kategori sayımı
         let counts = Dictionary(grouping: recipes, by: { $0.category }).mapValues { $0.count }
         let countLine = RecipeCategory.allCases.compactMap { cat -> String? in
@@ -1005,8 +1013,8 @@ enum UserContextSnapshot {
             return "  · [\(recipe.category.label)] \(recipe.title)\(detail)"
         }
         lines.append(contentsOf: titles)
-        if recipes.count > 12 {
-            lines.append("  · (... ve \(recipes.count - 12) tarif daha)")
+        if totalCount > 12 {
+            lines.append("  · (... ve \(totalCount - 12) tarif daha)")
         }
         return lines.joined(separator: "\n")
     }

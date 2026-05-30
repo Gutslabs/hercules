@@ -121,9 +121,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        // Aktive olunca OTOMATİK vault restore YOK — bellekteki/diskteki güncel veriyi
+        // ezebilir (sessiz veri kaybı). İlk açılışta init'te restore edilir; sonradan
+        // içeri alma kullanıcı tetiklemeli. Health import additive olduğu için kalır.
         Task { @MainActor in
             if let ctx = Self.sharedContainer?.mainContext {
-                BackupService.shared.restoreFromVaultIfNewer(into: ctx)
                 ShortcutHealthSyncService.shared.importIfAvailable(into: ctx)
             }
         }

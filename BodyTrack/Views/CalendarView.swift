@@ -107,12 +107,12 @@ struct CalendarView: View {
             GoalEditorSheet(
                 goal: goal,
                 onSave: {
-                    try? ctx.save()
+                    ctx.saveOrReport()
                     editing = nil
                 },
                 onDelete: {
                     ctx.delete(goal)
-                    try? ctx.save()
+                    ctx.saveOrReport()
                     editing = nil
                 },
                 onCancel: { editing = nil }
@@ -124,7 +124,7 @@ struct CalendarView: View {
                 selectedDay: selectedDay,
                 onSave: { newDate in
                     food.date = newDate
-                    try? ctx.save()
+                    ctx.saveOrReport()
                     selectedDay = Calendar.current.startOfDay(for: newDate)
                     currentMonth = Self.startOfMonth(newDate)
                     editingFoodDate = nil
@@ -799,7 +799,7 @@ struct CalendarView: View {
     private func moveFood(_ entry: FoodEntry, byDays days: Int) {
         guard let newDate = Calendar.current.date(byAdding: .day, value: days, to: entry.date) else { return }
         entry.date = newDate
-        try? ctx.save()
+        ctx.saveOrReport()
         selectedDay = Calendar.current.startOfDay(for: newDate)
         currentMonth = Self.startOfMonth(newDate)
     }
@@ -881,13 +881,13 @@ struct CalendarView: View {
             let goal = MonthlyGoal(anchorDate: anchor, targetWeight: roundToHalf(target))
             ctx.insert(goal)
         }
-        try? ctx.save()
+        ctx.saveOrReport()
     }
 
     private func clearAll() {
         let toDelete = Array(goals)
         for g in toDelete { ctx.delete(g) }
-        try? ctx.save()
+        ctx.saveOrReport()
     }
 
     private func roundToHalf(_ v: Double) -> Double {

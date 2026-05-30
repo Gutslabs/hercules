@@ -37,12 +37,12 @@ struct WorkoutScheduleCard: View {
                         else {
                             let new = WorkoutSession(weekday: weekday, name: "Antrenman", estimatedCalories: 300)
                             ctx.insert(new)
-                            try? ctx.save()
+                            ctx.saveOrReport()
                             editing = new
                         }
                     } onDelete: { w in
                         ctx.delete(w)
-                        try? ctx.save()
+                        ctx.saveOrReport()
                     }
                 }
             }
@@ -58,7 +58,7 @@ struct WorkoutScheduleCard: View {
         )
         .sheet(item: $editing) { w in
             WorkoutEditor(workout: w) {
-                try? ctx.save()
+                ctx.saveOrReport()
                 editing = nil
             }
         }

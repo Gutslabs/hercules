@@ -219,7 +219,7 @@ struct HealthKitCard: View {
             let new = StepEntry(date: .now, steps: stepInput, source: "manual")
             ctx.insert(new)
         }
-        try? ctx.save()
+        ctx.saveOrReport()
     }
 
     private func activityMetric(label: String, value: String, unit: String, detail: String) -> some View {
