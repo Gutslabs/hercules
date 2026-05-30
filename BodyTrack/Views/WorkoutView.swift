@@ -16,6 +16,7 @@ struct WorkoutView: View {
     @State private var editingProgramSession: WorkoutSession? = nil
     @State private var showingArchives = false
     @State private var highlightedProgramWeekday: Int? = nil
+    @State private var sessionPendingDelete: WorkoutSession?
 
     /// Exact log dict: startOfDay → log (her gün için doğrudan kayıt).
     private var exactLogByDay: [Date: WorkoutLog] {
@@ -151,6 +152,21 @@ struct WorkoutView: View {
                     ctx.saveOrReport()
                 }
             )
+        }
+        .confirmationDialog(
+            "Bu antrenman günü silinsin mi?",
+            isPresented: Binding(get: { sessionPendingDelete != nil }, set: { if !$0 { sessionPendingDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: sessionPendingDelete
+        ) { session in
+            Button("Sil", role: .destructive) {
+                ctx.delete(session)
+                ctx.saveOrReport()
+                sessionPendingDelete = nil
+            }
+            Button("İptal", role: .cancel) { sessionPendingDelete = nil }
+        } message: { session in
+            Text("\(session.name) ve içindeki tüm hareketler silinir.")
         }
     }
 
@@ -305,8 +321,7 @@ struct WorkoutView: View {
                         ) {
                             editProgramSession(weekday)
                         } onDelete: { session in
-                            ctx.delete(session)
-                            ctx.saveOrReport()
+                            sessionPendingDelete = session
                         }
                         .id("program-day-\(weekday)")
                     }

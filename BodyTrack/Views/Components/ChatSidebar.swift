@@ -55,6 +55,7 @@ struct ChatSidebar: View {
     @State private var showingPresetWidget = false
     @State private var presetQuery = ""
     @State private var presetFeedback: String? = nil
+    @State private var confirmingClear = false
     @State private var collapseHandleHovering = false
     @State private var resizeCursorActive = false
     @State private var resizeStartWidth: CGFloat? = nil
@@ -333,8 +334,8 @@ struct ChatSidebar: View {
             }
 
             Section("Panel") {
-                Button {
-                    store.clear()
+                Button(role: .destructive) {
+                    confirmingClear = true
                 } label: {
                     Label("Bu sohbeti sil", systemImage: "trash")
                 }
@@ -347,6 +348,12 @@ struct ChatSidebar: View {
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .help("Chat ayarları")
+        .confirmationDialog("Bu sohbet silinsin mi?", isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("Sohbeti sil", role: .destructive) { store.clear() }
+            Button("İptal", role: .cancel) {}
+        } message: {
+            Text("Bu sohbetteki tüm mesajlar kalıcı olarak silinir.")
+        }
     }
 
     private var historyMenu: some View {
@@ -962,6 +969,7 @@ struct ChatSidebar: View {
                     .disabled(!store.isSending && !canSendInput)
                     .scaleEffect((canSendInput || store.isSending) ? 1 : 0.98)
                     .help(store.isSending ? "Durdur" : "Gönder")
+                    .accessibilityLabel(store.isSending ? "Yanıtı durdur" : "Mesajı gönder")
                 }
             }
             .padding(Spacing.md)

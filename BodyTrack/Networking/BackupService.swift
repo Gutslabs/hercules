@@ -239,13 +239,13 @@ final class BackupService {
     @discardableResult
     func export(from ctx: ModelContext) -> Bool {
         guard storeHasMeaningfulData(ctx) else {
-            print("[Backup] store boş, mevcut yedek korunuyor.")
+            AppLog.backup.notice("[Backup] store boş, mevcut yedek korunuyor.")
             return false
         }
         do {
             let backup = try buildBackup(ctx: ctx)
             guard richerVaultCandidate(than: backup) == nil else {
-                print("[Backup] vault daha dolu, export atlandı.")
+                AppLog.backup.notice("[Backup] vault daha dolu, export atlandı.")
                 return false
             }
             let data = try encoder.encode(backup)
@@ -254,7 +254,7 @@ final class BackupService {
             _ = try? writeVaultSnapshot(backup, data: data)
             return true
         } catch {
-            print("[Backup] export failed: \(error)")
+            AppLog.backup.error("[Backup] export failed: \(String(describing: error))")
             return false
         }
     }
@@ -265,18 +265,18 @@ final class BackupService {
     /// Store boşsa NO-OP — kullanıcının backup'ını korur.
     func exportAsync(from ctx: ModelContext) {
         guard storeHasMeaningfulData(ctx) else {
-            print("[Backup] store boş, async export atlandı.")
+            AppLog.backup.notice("[Backup] store boş, async export atlandı.")
             return
         }
         let snapshot: HerculesBackup
         do {
             snapshot = try buildBackup(ctx: ctx)
         } catch {
-            print("[Backup] async build failed: \(error)")
+            AppLog.backup.error("[Backup] async build failed: \(String(describing: error))")
             return
         }
         guard richerVaultCandidate(than: snapshot) == nil else {
-            print("[Backup] vault daha dolu, async export atlandı.")
+            AppLog.backup.notice("[Backup] vault daha dolu, async export atlandı.")
             return
         }
         let url = backupURL
@@ -314,7 +314,7 @@ final class BackupService {
                     }
                 }
             } catch {
-                print("[Backup] async write failed: \(error)")
+                AppLog.backup.error("[Backup] async write failed: \(String(describing: error))")
             }
         }
     }
@@ -567,9 +567,9 @@ final class BackupService {
             }
             guard shouldRestore else { return }
             try restoreFromVault(into: ctx)
-            print("[Vault] restored newer vault snapshot")
+            AppLog.backup.notice("[Vault] restored newer vault snapshot")
         } catch {
-            print("[Vault] auto-restore failed: \(error)")
+            AppLog.backup.error("[Vault] auto-restore failed: \(String(describing: error))")
         }
     }
 
@@ -984,9 +984,9 @@ final class BackupService {
         do {
             try restore(from: restoreURL, into: ctx, mode: .replaceAll)
             UserDefaults.standard.set(true, forKey: importedFlagKey)
-            print("[Backup] auto-restored from \(restoreURL.path)")
+            AppLog.backup.notice("[Backup] auto-restored from \(restoreURL.path)")
         } catch {
-            print("[Backup] auto-restore failed: \(error)")
+            AppLog.backup.error("[Backup] auto-restore failed: \(String(describing: error))")
         }
     }
 
@@ -1007,9 +1007,9 @@ final class BackupService {
             if let data = try? Data(contentsOf: cloudURL) {
                 try? data.write(to: backupURL, options: [.atomic])
             }
-            print("[Backup] restored newer iCloud backup from \(cloudURL.path)")
+            AppLog.backup.notice("[Backup] restored newer iCloud backup from \(cloudURL.path)")
         } catch {
-            print("[Backup] iCloud auto-restore failed: \(error)")
+            AppLog.backup.error("[Backup] iCloud auto-restore failed: \(String(describing: error))")
         }
     }
 

@@ -19,6 +19,7 @@ struct BottomCenterChatDock: View {
     @State private var autoFollowMessages = true
     @State private var suppressAutoFollowUntil = Date.distantPast
     @State private var showingPresetWidget = false
+    @State private var confirmingClear = false
     @State private var messagesCollapsed = false
     @State private var messagePanelHeight: CGFloat = 300
     @State private var messageResizeStartHeight: CGFloat? = nil
@@ -454,9 +455,8 @@ struct BottomCenterChatDock: View {
             }
 
             Section("Panel") {
-                Button {
-                    store.clear()
-                    inputFocused = false
+                Button(role: .destructive) {
+                    confirmingClear = true
                 } label: {
                     Label("Bu sohbeti sil", systemImage: "trash")
                 }
@@ -468,6 +468,12 @@ struct BottomCenterChatDock: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
+        .confirmationDialog("Bu sohbet silinsin mi?", isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("Sohbeti sil", role: .destructive) { store.clear(); inputFocused = false }
+            Button("İptal", role: .cancel) {}
+        } message: {
+            Text("Bu sohbetteki tüm mesajlar kalıcı olarak silinir.")
+        }
         .simultaneousGesture(TapGesture().onEnded {
             inputFocused = false
         })
@@ -499,6 +505,7 @@ struct BottomCenterChatDock: View {
         .disabled(!store.isSending && !canSendInput)
         .scaleEffect((canSendInput || store.isSending) ? 1 : 0.98)
         .help(store.isSending ? "Durdur" : "Gönder")
+        .accessibilityLabel(store.isSending ? "Yanıtı durdur" : "Mesajı gönder")
     }
 
     private var dockInputEditor: some View {
