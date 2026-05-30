@@ -35,7 +35,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
     /// Bu sağlayıcı için varsayılan model.
     var defaultModel: String {
         switch self {
-        case .openRouter: return "x-ai/grok-4.1-fast"
+        case .openRouter: return "openai/gpt-5.4-mini"
         case .codex: return "gpt-5.4"
         }
     }
@@ -44,7 +44,8 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
     var availableModels: [String] {
         switch self {
         case .openRouter:
-            return ["x-ai/grok-4.1-fast"]
+            // Hepsi tool/function-calling destekli (web arama akışı için şart).
+            return ["openai/gpt-5.4-mini", "openai/gpt-5.4", "openai/gpt-5.4-nano"]
         case .codex:
             return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"]
         }

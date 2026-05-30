@@ -3,8 +3,9 @@ import Security
 
 enum AIConfig {
     static let defaultAPIKey = ""
-    static let defaultModel = "x-ai/grok-4.1-fast"
-    static let searchModel = "x-ai/grok-4.1-fast:online"
+    static let defaultModel = "openai/gpt-5.4-mini"
+    // :online suffix = OpenRouter'ın web arama eklentisi (her modelde çalışır).
+    static let searchModel = "openai/gpt-5.4-mini:online"
     static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     static let appReferer = "https://hercules.local"
     static let appTitle = "Hercules"
