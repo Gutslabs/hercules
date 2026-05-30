@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import Charts
 
 struct MobileRootView: View {
     @Environment(\.modelContext) private var ctx
@@ -26,6 +27,8 @@ struct MobileRootView: View {
     @State private var showProfileEditor = false
     @State private var showRecipeEditor = false
     @State private var recipeToEdit: Recipe?
+    @State private var calendarMonth: Date = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
+    @State private var calendarSelectedDay: Date = Calendar.current.startOfDay(for: Date())
     @State private var isWorking = false
     @State private var refreshTick = UUID()
 
@@ -130,6 +133,8 @@ struct MobileRootView: View {
             mobilePage { workoutPage }
         case .measurements:
             mobilePage { measurementsPage }
+        case .calendar:
+            mobilePage { calendarPage }
         case .profile:
             mobilePage { profilePage }
         }
@@ -249,6 +254,7 @@ struct MobileRootView: View {
                 showAddFood = true
             }
             nutritionSummaryCard
+            calorieTrendCard
             foodAIEstimatorCard
             foodQuickAddCard
             todayFoodCard
@@ -320,6 +326,7 @@ struct MobileRootView: View {
             }
             measurementCadenceCard
             measurementHeroCard
+            weightTrendCard
             MobileCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Son kayıtlar")
@@ -373,6 +380,162 @@ struct MobileRootView: View {
                 : "Kilo dışında yağ %, bel, göğüs ve boyun da gir."
         }
         return "Bugün hızlı tartı yeterli. Sıradaki tam ölçüm: \(Fmt.dateLong.string(from: nextFull))."
+    }
+
+    private var calendarPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            calendarGridCard
+            calendarDaySummaryCard
+        }
+    }
+
+    private var calendarGridCard: some View {
+        let days = calendarDays(for: calendarMonth)
+        return MobileCard {
+            VStack(spacing: 12) {
+                HStack {
+                    Button { shiftMonth(-1) } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(Palette.surfaceElevated))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.textPrimary)
+                    Spacer()
+                    Text(monthTitle(calendarMonth))
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                    Spacer()
+                    Button { shiftMonth(1) } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(Palette.surfaceElevated))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.textPrimary)
+                }
+                HStack(spacing: 4) {
+                    ForEach(["Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pz"], id: \.self) { d in
+                        Text(d)
+                            .font(Typography.label)
+                            .foregroundStyle(Palette.textQuaternary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
+                    ForEach(Array(days.enumerated()), id: \.offset) { _, day in
+                        calendarDayCell(day)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func calendarDayCell(_ date: Date?) -> some View {
+        if let date {
+            let cal = Calendar.current
+            let isSelected = cal.isDate(date, inSameDayAs: calendarSelectedDay)
+            let isToday = cal.isDateInToday(date)
+            let kcal = dayCalories(date)
+            let hasWorkout = activeWorkouts.contains { $0.weekday == cal.component(.weekday, from: date) }
+            let hasMeasure = measurements.contains { cal.isDate($0.date, inSameDayAs: date) }
+            Button {
+                calendarSelectedDay = date
+            } label: {
+                VStack(spacing: 3) {
+                    Text("\(cal.component(.day, from: date))")
+                        .font(.system(size: 13, weight: isToday ? .bold : .regular))
+                        .foregroundStyle(isSelected ? Palette.background : (isToday ? Palette.accent : Palette.textPrimary))
+                    HStack(spacing: 2) {
+                        if kcal > 0 { Circle().fill(isSelected ? Palette.background : Palette.warning).frame(width: 4, height: 4) }
+                        if hasWorkout { Circle().fill(isSelected ? Palette.background : Palette.accent).frame(width: 4, height: 4) }
+                        if hasMeasure { Circle().fill(isSelected ? Palette.background : Palette.positive).frame(width: 4, height: 4) }
+                    }
+                    .frame(height: 5)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .background(
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(isSelected ? Palette.accent : (isToday ? Palette.surfaceElevated : Color.clear))
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            Color.clear.frame(height: 42)
+        }
+    }
+
+    private var calendarDaySummaryCard: some View {
+        let cal = Calendar.current
+        let day = calendarSelectedDay
+        let dayFoods = foods.filter { cal.isDate($0.date, inSameDayAs: day) }
+        let kcal = dayFoods.reduce(0) { $0 + $1.calories }
+        let protein = dayFoods.reduce(0) { $0 + ($1.protein ?? 0) }
+        let workout = activeWorkouts.first { $0.weekday == cal.component(.weekday, from: day) }
+        let measure = measurements.first { cal.isDate($0.date, inSameDayAs: day) }
+        return MobileCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(daySummaryTitle(day))
+                    .font(Typography.titleSmall)
+                    .foregroundStyle(Palette.textPrimary)
+                HStack(spacing: 10) {
+                    metric("Kalori", value: Fmt.int(kcal), unit: "kcal")
+                    metric("Protein", value: Fmt.int(protein), unit: "g")
+                    metric("Öğün", value: "\(dayFoods.count)", unit: "")
+                }
+                if let workout {
+                    heroStat("Antrenman", value: workout.name, systemImage: "dumbbell.fill")
+                }
+                if let measure, let w = measure.weight {
+                    heroStat("Kilo", value: "\(Fmt.num(w, digits: 1)) kg", systemImage: "scalemass")
+                }
+                if dayFoods.isEmpty && workout == nil && measure == nil {
+                    emptyText("Bu gün için kayıt yok.")
+                }
+            }
+        }
+    }
+
+    private func calendarDays(for month: Date) -> [Date?] {
+        let cal = Calendar.current
+        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: month)),
+              let range = cal.range(of: .day, in: .month, for: monthStart) else { return [] }
+        let firstWeekday = cal.component(.weekday, from: monthStart)   // 1=Paz..7=Cmt
+        let leading = (firstWeekday + 5) % 7                            // Pazartesi bazlı boşluk sayısı
+        var cells: [Date?] = Array(repeating: nil, count: leading)
+        for day in range {
+            cells.append(cal.date(byAdding: .day, value: day - 1, to: monthStart))
+        }
+        return cells
+    }
+
+    private func shiftMonth(_ delta: Int) {
+        if let m = Calendar.current.date(byAdding: .month, value: delta, to: calendarMonth) {
+            calendarMonth = m
+        }
+    }
+
+    private func dayCalories(_ date: Date) -> Double {
+        let cal = Calendar.current
+        return foods.filter { cal.isDate($0.date, inSameDayAs: date) }.reduce(0) { $0 + $1.calories }
+    }
+
+    private func monthTitle(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "LLLL yyyy"
+        return f.string(from: date).capitalized
+    }
+
+    private func daySummaryTitle(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMMM EEEE"
+        return f.string(from: date)
     }
 
     private var profilePage: some View {
@@ -1014,6 +1177,40 @@ struct MobileRootView: View {
         .background(Capsule().fill(Palette.surfaceElevated))
     }
 
+    private var weightTrendCard: some View {
+        MobileCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Kilo Trendi")
+                    .font(Typography.titleSmall)
+                    .foregroundStyle(Palette.textPrimary)
+                if weightTrendPoints.count >= 2 {
+                    MobileTrendChart(points: weightTrendPoints, tint: Palette.accent, target: profiles.first?.targetWeight)
+                } else {
+                    emptyText("Trend için en az 2 kilo ölçümü gerekli.")
+                }
+            }
+        }
+    }
+
+    private var calorieTrendCard: some View {
+        MobileCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Kalori — Son 14 Gün")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                    Spacer()
+                    if let plan = calorieResult {
+                        Text("Hedef \(Fmt.int(plan.goalCalories))")
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+                MobileTrendChart(points: calorieTrendPoints, tint: Palette.warning, target: calorieResult?.goalCalories, bars: true)
+            }
+        }
+    }
+
     private var latestMeasurementCard: some View {
         MobileCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -1520,6 +1717,25 @@ struct MobileRootView: View {
 
     private var todayFat: Double {
         todayFoods.reduce(0) { $0 + ($1.fat ?? 0) }
+    }
+
+    private var weightTrendPoints: [MobileChartPoint] {
+        Array(measurements.prefix(30)).reversed().compactMap { m in
+            m.weight.map { MobileChartPoint(date: m.date, value: $0) }
+        }
+    }
+
+    private var calorieTrendPoints: [MobileChartPoint] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var byDay: [Date: Double] = [:]
+        for f in foods {
+            byDay[cal.startOfDay(for: f.date), default: 0] += f.calories
+        }
+        return (0..<14).reversed().compactMap { offset in
+            guard let d = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            return MobileChartPoint(date: d, value: byDay[d] ?? 0)
+        }
     }
 
     private var calorieResult: CalorieResult? {
@@ -2064,5 +2280,64 @@ struct MobileRecipeEditor: View {
             fat: parse(fat)
         ))
         dismiss()
+    }
+}
+
+struct MobileChartPoint: Identifiable {
+    let date: Date
+    let value: Double
+    var id: Date { date }
+}
+
+/// Swift Charts tabanlı trend grafiği (çizgi+alan ya da bar) + opsiyonel hedef çizgisi.
+struct MobileTrendChart: View {
+    let points: [MobileChartPoint]
+    var tint: Color = Palette.accent
+    var target: Double? = nil
+    var bars: Bool = false
+
+    var body: some View {
+        Chart {
+            ForEach(points) { p in
+                if bars {
+                    BarMark(
+                        x: .value("Gün", p.date, unit: .day),
+                        y: .value("Değer", p.value)
+                    )
+                    .foregroundStyle(tint.gradient)
+                    .cornerRadius(3)
+                } else {
+                    AreaMark(
+                        x: .value("Tarih", p.date),
+                        y: .value("Değer", p.value)
+                    )
+                    .foregroundStyle(LinearGradient(colors: [tint.opacity(0.22), .clear], startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.catmullRom)
+                    LineMark(
+                        x: .value("Tarih", p.date),
+                        y: .value("Değer", p.value)
+                    )
+                    .foregroundStyle(tint)
+                    .interpolationMethod(.catmullRom)
+                }
+            }
+            if let target {
+                RuleMark(y: .value("Hedef", target))
+                    .foregroundStyle(Palette.warning.opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            }
+        }
+        .chartYAxis {
+            AxisMarks { _ in
+                AxisGridLine().foregroundStyle(Palette.border)
+                AxisValueLabel()
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+            }
+        }
+        .frame(height: 150)
     }
 }
