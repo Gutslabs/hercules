@@ -5,15 +5,17 @@ final class CodexClient: AIClient {
     private let endpoint = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
     private let session: URLSession
 
-    /// Dedicated session — default URLSession sonsuz timeout'a yakın değerlerle
-    /// gelir; biz açık 60s request / 600s resource (streaming uzun cevaplar) belirliyoruz.
+    /// Dedicated session — Codex streaming bazen ilk token'a kadar uzun düşünebiliyor;
+    /// bu yüzden request timeout'u kısa tutmuyoruz, resource timeout'u da stream'e alan açıyor.
     private static let defaultSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 600
+        config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 900
         config.waitsForConnectivity = true
         return URLSession(configuration: config)
     }()
+
+    private static let maxStreamAttempts = 3
 
     init(session: URLSession? = nil) {
         self.session = session ?? Self.defaultSession
@@ -75,7 +77,7 @@ final class CodexClient: AIClient {
         body["reasoning"] = ["effort": effort, "summary": "auto"]
         body["include"] = ["reasoning.encrypted_content"]
 
-        let stream = try await streamResponse(
+        let stream = try await streamResponseWithRetry(
             body: body,
             token: tokens.access_token,
             accountId: accountId,
@@ -117,10 +119,168 @@ final class CodexClient: AIClient {
         return (parseFood(finalText), searchQuery ?? stream.searchQuery)
     }
 
+    /// Lean completion — araç/yemek-parse yok, minimal reasoning. Streaming yolunu
+    /// no-op callback'lerle yeniden kullanır (test edilmiş kod), final metni döner.
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+        let tokens = try await CodexAuth.shared.ensureFreshToken()
+        guard let accountId = tokens.chatGPTAccountId else {
+            throw CodexAuthError.noAccountId
+        }
+
+        var body: [String: Any] = [
+            "model": AIKeyStore.shared.model,
+            "instructions": systemPrompt,
+            "input": [["role": "user", "content": userPrompt]],
+            "store": false,
+            "stream": true
+        ]
+        // send() ile birebir aynı reasoning kurulumu (bu kombinasyon Codex'te çalışıyor); araç yok.
+        body["reasoning"] = ["effort": "minimal", "summary": "auto"]
+        body["include"] = ["reasoning.encrypted_content"]
+
+        let stream = try await streamResponseWithRetry(
+            body: body,
+            token: tokens.access_token,
+            accountId: accountId,
+            onSearchStart: { _ in },
+            onMessageUpdate: { _ in }
+        )
+
+        var assistantText = ""
+        for item in stream.output where (item["type"] as? String) == "message" {
+            if let content = item["content"] as? [[String: Any]] {
+                for part in content {
+                    if let text = part["text"] as? String {
+                        assistantText += text
+                    } else if let text = part["output_text"] as? String {
+                        assistantText += text
+                    }
+                }
+            } else if let directText = item["text"] as? String {
+                assistantText += directText
+            }
+        }
+
+        let finalText = assistantText.isEmpty ? stream.accumulatedText : assistantText
+        guard !finalText.isEmpty else {
+            throw OpenRouterError.decoding("Boş yanıt")
+        }
+        return finalText
+    }
+
     struct StreamResult {
         var output: [[String: Any]]
         var accumulatedText: String  // text delta'larından toplanmış
         var searchQuery: String?     // web_search çağrıldıysa query
+    }
+
+    private func streamResponseWithRetry(
+        body: [String: Any],
+        token: String,
+        accountId: String,
+        onSearchStart: @MainActor @escaping (String) -> Void,
+        onMessageUpdate: @MainActor @escaping (String) -> Void
+    ) async throws -> StreamResult {
+        var lastError: Error?
+
+        for attempt in 1...Self.maxStreamAttempts {
+            do {
+                return try await streamResponse(
+                    body: body,
+                    token: token,
+                    accountId: accountId,
+                    onSearchStart: onSearchStart,
+                    onMessageUpdate: onMessageUpdate
+                )
+            } catch {
+                lastError = error
+                guard Self.shouldRetryStream(after: error),
+                      attempt < Self.maxStreamAttempts
+                else {
+                    throw Self.userFacingNetworkError(for: error)
+                }
+
+                await onMessageUpdate(Self.retryNotice(for: error, attempt: attempt))
+                try await Task.sleep(nanoseconds: Self.retryDelay(for: attempt))
+            }
+        }
+
+        throw Self.userFacingNetworkError(for: lastError ?? URLError(.timedOut))
+    }
+
+    private static func shouldRetryStream(after error: Error) -> Bool {
+        guard let code = urlErrorCode(from: error) else { return false }
+        switch code {
+        case .timedOut,
+             .networkConnectionLost,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .notConnectedToInternet,
+             .secureConnectionFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func retryDelay(for attempt: Int) -> UInt64 {
+        UInt64(attempt) * 900_000_000
+    }
+
+    private static func retryNotice(for error: Error, attempt: Int) -> String {
+        let remaining = maxStreamAttempts - attempt
+        let suffix = remaining > 0 ? " (\(attempt)/\(maxStreamAttempts - 1))" : ""
+        switch urlErrorCode(from: error) {
+        case .timedOut:
+            return "Codex bağlantısı zaman aşımına uğradı; tekrar deniyorum\(suffix)..."
+        case .networkConnectionLost:
+            return "Codex bağlantısı koptu; tekrar deniyorum\(suffix)..."
+        case .notConnectedToInternet:
+            return "İnternet bağlantısı yok gibi görünüyor; tekrar deniyorum\(suffix)..."
+        default:
+            return "Codex bağlantısında geçici sorun oldu; tekrar deniyorum\(suffix)..."
+        }
+    }
+
+    private static func userFacingNetworkError(for error: Error) -> Error {
+        guard let code = urlErrorCode(from: error) else { return error }
+
+        let message: String
+        switch code {
+        case .timedOut:
+            message = "Codex bağlantısı zaman aşımına uğradı. İnternet/VPN bağlantını kontrol edip tekrar dene."
+        case .networkConnectionLost:
+            message = "Codex bağlantısı yarıda koptu. Bağlantı toparlanınca tekrar dene."
+        case .notConnectedToInternet:
+            message = "İnternet bağlantısı yok gibi görünüyor."
+        default:
+            message = "Codex bağlantısı başarısız oldu (\(code.rawValue)). Biraz sonra tekrar dene."
+        }
+        return NetworkFailure(message: message)
+    }
+
+    private static func urlErrorCode(from error: Error) -> URLError.Code? {
+        if let urlError = error as? URLError {
+            return urlError.code
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return URLError.Code(rawValue: nsError.code)
+        }
+
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            return urlErrorCode(from: underlying)
+        }
+
+        return nil
+    }
+
+    private struct NetworkFailure: LocalizedError {
+        let message: String
+
+        var errorDescription: String? { message }
     }
 
     /// Codex'ten gelen SSE stream'ini parse et. Hem text delta'ları biriktir hem de

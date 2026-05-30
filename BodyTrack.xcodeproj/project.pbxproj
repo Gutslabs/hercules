@@ -20,6 +20,19 @@
 		A24E0000000000000000004A /* MeasurementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002B /* MeasurementsView.swift */; };
 		A24E0000000000000000004B /* ChartsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002C /* ChartsView.swift */; };
 		A24E0000000000000000004D /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002E /* ProfileView.swift */; };
+		A24E0000000000000000EE40 /* MeasurementsSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE41 /* MeasurementsSupport.swift */; };
+		A24E0000000000000000EE42 /* MeasurementEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE43 /* MeasurementEditor.swift */; };
+		A24E0000000000000000EE44 /* CalendarDayViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE45 /* CalendarDayViews.swift */; };
+		A24E0000000000000000EE46 /* CalendarSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE47 /* CalendarSheets.swift */; };
+		A24E0000000000000000EE48 /* DashboardComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE49 /* DashboardComponents.swift */; };
+		A24E0000000000000000EE4A /* ChartsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE4B /* ChartsComponents.swift */; };
+		A24E0000000000000000EE4C /* ContentSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE4D /* ContentSidebar.swift */; };
+		A24E0000000000000000EE4E /* ContentPromptTips.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE4F /* ContentPromptTips.swift */; };
+		A24E0000000000000000EE20 /* ProfileSupportingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE21 /* ProfileSupportingViews.swift */; };
+		A24E0000000000000000EE22 /* ProfileWorkoutCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE23 /* ProfileWorkoutCard.swift */; };
+		A24E0000000000000000EE24 /* HealthKitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE25 /* HealthKitCard.swift */; };
+		A24E0000000000000000EE26 /* AIProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE27 /* AIProviderCard.swift */; };
+		A24E0000000000000000EE28 /* BackupCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE29 /* BackupCard.swift */; };
 		A24E0000000000000000004E /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002F /* Card.swift */; };
 		A24E0000000000000000004F /* MetricChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000030 /* MetricChart.swift */; };
 		A24E00000000000000000050 /* MetricTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000031 /* MetricTile.swift */; };
@@ -29,10 +42,20 @@
 		A24E00000000000000000054 /* Recipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000036 /* Recipe.swift */; };
 		A24E00000000000000000055 /* RecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000037 /* RecipesView.swift */; };
 		A24E00000000000000000056 /* FoodEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000038 /* FoodEntry.swift */; };
-		A24E00000000000000000086 /* FoodPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000087 /* FoodPreset.swift */; };
 		A24E00000000000000000057 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000039 /* OpenRouterClient.swift */; };
+		A24E0000000000000000EE54 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE56 /* AIModels.swift */; };
+		A24E0000000000000000EE55 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE56 /* AIModels.swift */; };
 		A24E00000000000000000058 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003A /* ChatStore.swift */; };
+		A24E0000000000000000EE5A /* ChatStoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5B /* ChatStoreModels.swift */; };
+		A24E0000000000000000EE5C /* UserContextMention.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5D /* UserContextMention.swift */; };
 		A24E00000000000000000059 /* ChatSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003B /* ChatSidebar.swift */; };
+		A24E0000000000000000EE30 /* BottomCenterChatDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE31 /* BottomCenterChatDock.swift */; };
+		A24E0000000000000000EE32 /* ChatComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE33 /* ChatComponents.swift */; };
+		A24E0000000000000000EE34 /* WorkoutProgramViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE35 /* WorkoutProgramViews.swift */; };
+		A24E0000000000000000EE36 /* WorkoutLogEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE37 /* WorkoutLogEditor.swift */; };
+		A24E0000000000000000EE38 /* RecipeCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE39 /* RecipeCards.swift */; };
+		A24E0000000000000000EE3A /* RecipeDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE3B /* RecipeDetailSheet.swift */; };
+		A24E0000000000000000EE3C /* RecipeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE3D /* RecipeEditor.swift */; };
 		A24E0000000000000000005A /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003C /* AIProvider.swift */; };
 		A24E0000000000000000005B /* CodexAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003D /* CodexAuth.swift */; };
 		A24E0000000000000000005C /* CodexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003E /* CodexClient.swift */; };
@@ -41,6 +64,8 @@
 		A24E0000000000000000005F /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000071 /* HealthKit.framework */; };
 		A24E00000000000000000060 /* StepEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000072 /* StepEntry.swift */; };
 		A24E00000000000000000061 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000073 /* BackupService.swift */; };
+		A24E0000000000000000EE57 /* BackupModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE59 /* BackupModels.swift */; };
+		A24E0000000000000000EE58 /* BackupModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE59 /* BackupModels.swift */; };
 		A24E00000000000000000062 /* MonthlyGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000074 /* MonthlyGoal.swift */; };
 		A24E00000000000000000063 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000075 /* CalendarView.swift */; };
 		A24E00000000000000000066 /* UserContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000078 /* UserContextSnapshot.swift */; };
@@ -48,16 +73,23 @@
 		A24E00000000000000000068 /* WorkoutLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000007A /* WorkoutLog.swift */; };
 		A24E00000000000000000069 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000007B /* WorkoutView.swift */; };
 		A24E0000000000000000006A /* AgentSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000080 /* AgentSkill.swift */; };
+		A24E0000000000000000EE50 /* AgentSkills.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE51 /* AgentSkills.swift */; };
+		A24E0000000000000000EE52 /* NutritionDataProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE53 /* NutritionDataProvider.swift */; };
 		A24E0000000000000000006B /* LocalMemoryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000081 /* LocalMemoryProvider.swift */; };
+		A24E0000000000000000EE10 /* AgentMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE11 /* AgentMemory.swift */; };
+		A24E0000000000000000EE12 /* MemoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE13 /* MemoryManager.swift */; };
+		A24E0000000000000000EE14 /* EmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE15 /* EmbeddingService.swift */; };
 		A24E0000000000000000006C /* PubMedResearchSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000082 /* PubMedResearchSkill.swift */; };
 		A24E0000000000000000006D /* FoodLookupSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000083 /* FoodLookupSkill.swift */; };
 		A24E0000000000000000006E /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000084 /* MemoryView.swift */; };
 		A24E0000000000000000006F /* ResearchLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000085 /* ResearchLibrary.swift */; };
+		A24E00000000000000000086 /* FoodPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000087 /* FoodPreset.swift */; };
 		A24E00000000000000000088 /* CoachIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000089 /* CoachIntelligence.swift */; };
 		A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000008B /* AgentDataSnapshot.swift */; };
 		A24E00000000000000000094 /* SeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000093 /* SeedData.swift */; };
 		A24E000000000000000000A0 /* HerculesMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000091 /* HerculesMobileApp.swift */; };
 		A24E000000000000000000A1 /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000092 /* MobileRootView.swift */; };
+		A24E0000000000000000EE5E /* MobileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5F /* MobileComponents.swift */; };
 		A24E000000000000000000A2 /* SeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000093 /* SeedData.swift */; };
 		A24E000000000000000000A3 /* Measurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000023 /* Measurement.swift */; };
 		A24E000000000000000000A4 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000024 /* UserProfile.swift */; };
@@ -79,16 +111,13 @@
 		A24E000000000000000000D1 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000039 /* OpenRouterClient.swift */; };
 		A24E000000000000000000D2 /* CodexAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003D /* CodexAuth.swift */; };
 		A24E000000000000000000D3 /* CodexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003E /* CodexClient.swift */; };
+		A24E0000000000000000EE03 /* Embeddings in Frameworks */ = {isa = PBXBuildFile; productRef = A24E0000000000000000EE02 /* Embeddings */; };
+		A24E0000000000000000EE06 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = A24E0000000000000000EE05 /* Hub */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A24E00000000000000000020 /* Hercules.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hercules.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A24E00000000000000000090 /* HerculesMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HerculesMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A24E00000000000000000021 /* BodyTrackApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyTrackApp.swift; sourceTree = "<group>"; };
-		A24E00000000000000000091 /* HerculesMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesMobileApp.swift; sourceTree = "<group>"; };
-		A24E00000000000000000092 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
-		A24E00000000000000000093 /* SeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedData.swift; sourceTree = "<group>"; };
-		A24E000000000000000000B4 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A24E00000000000000000022 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000023 /* Measurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Measurement.swift; sourceTree = "<group>"; };
 		A24E00000000000000000024 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
@@ -101,6 +130,19 @@
 		A24E0000000000000000002B /* MeasurementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementsView.swift; sourceTree = "<group>"; };
 		A24E0000000000000000002C /* ChartsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartsView.swift; sourceTree = "<group>"; };
 		A24E0000000000000000002E /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE41 /* MeasurementsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementsSupport.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE43 /* MeasurementEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementEditor.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE45 /* CalendarDayViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarDayViews.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE47 /* CalendarSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSheets.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE49 /* DashboardComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardComponents.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE4B /* ChartsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartsComponents.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE4D /* ContentSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentSidebar.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE4F /* ContentPromptTips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPromptTips.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE21 /* ProfileSupportingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSupportingViews.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE23 /* ProfileWorkoutCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileWorkoutCard.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE25 /* HealthKitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitCard.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE27 /* AIProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderCard.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE29 /* BackupCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupCard.swift; sourceTree = "<group>"; };
 		A24E0000000000000000002F /* Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Card.swift; sourceTree = "<group>"; };
 		A24E00000000000000000030 /* MetricChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricChart.swift; sourceTree = "<group>"; };
 		A24E00000000000000000031 /* MetricTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricTile.swift; sourceTree = "<group>"; };
@@ -111,10 +153,19 @@
 		A24E00000000000000000036 /* Recipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recipe.swift; sourceTree = "<group>"; };
 		A24E00000000000000000037 /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000038 /* FoodEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodEntry.swift; sourceTree = "<group>"; };
-		A24E00000000000000000087 /* FoodPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodPreset.swift; sourceTree = "<group>"; };
 		A24E00000000000000000039 /* OpenRouterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterClient.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE56 /* AIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModels.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003A /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE5B /* ChatStoreModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStoreModels.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE5D /* UserContextMention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextMention.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003B /* ChatSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSidebar.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE31 /* BottomCenterChatDock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomCenterChatDock.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE33 /* ChatComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatComponents.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE35 /* WorkoutProgramViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgramViews.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE37 /* WorkoutLogEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLogEditor.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE39 /* RecipeCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeCards.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE3B /* RecipeDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailSheet.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE3D /* RecipeEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeEditor.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003C /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003D /* CodexAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAuth.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003E /* CodexClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexClient.swift; sourceTree = "<group>"; };
@@ -123,6 +174,7 @@
 		A24E00000000000000000071 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		A24E00000000000000000072 /* StepEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepEntry.swift; sourceTree = "<group>"; };
 		A24E00000000000000000073 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE59 /* BackupModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupModels.swift; sourceTree = "<group>"; };
 		A24E00000000000000000074 /* MonthlyGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthlyGoal.swift; sourceTree = "<group>"; };
 		A24E00000000000000000075 /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000078 /* UserContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextSnapshot.swift; sourceTree = "<group>"; };
@@ -130,13 +182,25 @@
 		A24E0000000000000000007A /* WorkoutLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLog.swift; sourceTree = "<group>"; };
 		A24E0000000000000000007B /* WorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000080 /* AgentSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSkill.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE51 /* AgentSkills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSkills.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE53 /* NutritionDataProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionDataProvider.swift; sourceTree = "<group>"; };
 		A24E00000000000000000081 /* LocalMemoryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMemoryProvider.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE11 /* AgentMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMemory.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE13 /* MemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryManager.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE15 /* EmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingService.swift; sourceTree = "<group>"; };
 		A24E00000000000000000082 /* PubMedResearchSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubMedResearchSkill.swift; sourceTree = "<group>"; };
 		A24E00000000000000000083 /* FoodLookupSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLookupSkill.swift; sourceTree = "<group>"; };
 		A24E00000000000000000084 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000085 /* ResearchLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchLibrary.swift; sourceTree = "<group>"; };
+		A24E00000000000000000087 /* FoodPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodPreset.swift; sourceTree = "<group>"; };
 		A24E00000000000000000089 /* CoachIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachIntelligence.swift; sourceTree = "<group>"; };
 		A24E0000000000000000008B /* AgentDataSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDataSnapshot.swift; sourceTree = "<group>"; };
+		A24E00000000000000000090 /* HerculesMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HerculesMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A24E00000000000000000091 /* HerculesMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesMobileApp.swift; sourceTree = "<group>"; };
+		A24E00000000000000000092 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE5F /* MobileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileComponents.swift; sourceTree = "<group>"; };
+		A24E00000000000000000093 /* SeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedData.swift; sourceTree = "<group>"; };
+		A24E000000000000000000B4 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -145,6 +209,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A24E0000000000000000005F /* HealthKit.framework in Frameworks */,
+				A24E0000000000000000EE03 /* Embeddings in Frameworks */,
+				A24E0000000000000000EE06 /* Hub in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -183,6 +249,7 @@
 				A24E00000000000000000091 /* HerculesMobileApp.swift */,
 				A24E00000000000000000022 /* ContentView.swift */,
 				A24E00000000000000000092 /* MobileRootView.swift */,
+				A24E0000000000000000EE5F /* MobileComponents.swift */,
 				A24E00000000000000000093 /* SeedData.swift */,
 				A24E000000000000000000B4 /* LaunchScreen.storyboard */,
 				A24E00000000000000000005 /* Models */,
@@ -219,11 +286,18 @@
 				A24E00000000000000000025 /* CalorieCalculator.swift */,
 				A24E00000000000000000026 /* TrendAnalysis.swift */,
 				A24E0000000000000000003A /* ChatStore.swift */,
+				A24E0000000000000000EE5B /* ChatStoreModels.swift */,
 				A24E00000000000000000078 /* UserContextSnapshot.swift */,
+				A24E0000000000000000EE5D /* UserContextMention.swift */,
 				A24E00000000000000000079 /* CalorieStats.swift */,
 				A24E0000000000000000008B /* AgentDataSnapshot.swift */,
 				A24E00000000000000000080 /* AgentSkill.swift */,
+				A24E0000000000000000EE51 /* AgentSkills.swift */,
+				A24E0000000000000000EE53 /* NutritionDataProvider.swift */,
 				A24E00000000000000000081 /* LocalMemoryProvider.swift */,
+				A24E0000000000000000EE11 /* AgentMemory.swift */,
+				A24E0000000000000000EE13 /* MemoryManager.swift */,
+				A24E0000000000000000EE15 /* EmbeddingService.swift */,
 				A24E00000000000000000082 /* PubMedResearchSkill.swift */,
 				A24E00000000000000000083 /* FoodLookupSkill.swift */,
 				A24E00000000000000000085 /* ResearchLibrary.swift */,
@@ -251,8 +325,26 @@
 				A24E00000000000000000075 /* CalendarView.swift */,
 				A24E0000000000000000007B /* WorkoutView.swift */,
 				A24E00000000000000000037 /* RecipesView.swift */,
+				A24E0000000000000000EE35 /* WorkoutProgramViews.swift */,
+				A24E0000000000000000EE37 /* WorkoutLogEditor.swift */,
+				A24E0000000000000000EE39 /* RecipeCards.swift */,
+				A24E0000000000000000EE3B /* RecipeDetailSheet.swift */,
+				A24E0000000000000000EE3D /* RecipeEditor.swift */,
 				A24E00000000000000000084 /* MemoryView.swift */,
 				A24E0000000000000000002E /* ProfileView.swift */,
+				A24E0000000000000000EE41 /* MeasurementsSupport.swift */,
+				A24E0000000000000000EE43 /* MeasurementEditor.swift */,
+				A24E0000000000000000EE45 /* CalendarDayViews.swift */,
+				A24E0000000000000000EE47 /* CalendarSheets.swift */,
+				A24E0000000000000000EE49 /* DashboardComponents.swift */,
+				A24E0000000000000000EE4B /* ChartsComponents.swift */,
+				A24E0000000000000000EE4D /* ContentSidebar.swift */,
+				A24E0000000000000000EE4F /* ContentPromptTips.swift */,
+				A24E0000000000000000EE21 /* ProfileSupportingViews.swift */,
+				A24E0000000000000000EE23 /* ProfileWorkoutCard.swift */,
+				A24E0000000000000000EE25 /* HealthKitCard.swift */,
+				A24E0000000000000000EE27 /* AIProviderCard.swift */,
+				A24E0000000000000000EE29 /* BackupCard.swift */,
 				A24E00000000000000000009 /* Components */,
 			);
 			path = Views;
@@ -266,6 +358,8 @@
 				A24E00000000000000000031 /* MetricTile.swift */,
 				A24E00000000000000000032 /* InputField.swift */,
 				A24E0000000000000000003B /* ChatSidebar.swift */,
+				A24E0000000000000000EE31 /* BottomCenterChatDock.swift */,
+				A24E0000000000000000EE33 /* ChatComponents.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -282,11 +376,13 @@
 			isa = PBXGroup;
 			children = (
 				A24E00000000000000000039 /* OpenRouterClient.swift */,
+				A24E0000000000000000EE56 /* AIModels.swift */,
 				A24E0000000000000000003C /* AIProvider.swift */,
 				A24E0000000000000000003D /* CodexAuth.swift */,
 				A24E0000000000000000003E /* CodexClient.swift */,
 				A24E00000000000000000070 /* HealthService.swift */,
 				A24E00000000000000000073 /* BackupService.swift */,
+				A24E0000000000000000EE59 /* BackupModels.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -313,6 +409,10 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			packageProductDependencies = (
+				A24E0000000000000000EE02 /* Embeddings */,
+				A24E0000000000000000EE05 /* Hub */,
 			);
 			name = BodyTrack;
 			productName = BodyTrack;
@@ -364,6 +464,10 @@
 				tr,
 			);
 			mainGroup = A24E00000000000000000002;
+			packageReferences = (
+				A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */,
+				A24E0000000000000000EE04 /* XCRemoteSwiftPackageReference "swift-transformers" */,
+			);
 			productRefGroup = A24E00000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -413,6 +517,19 @@
 				A24E0000000000000000004A /* MeasurementsView.swift in Sources */,
 				A24E0000000000000000004B /* ChartsView.swift in Sources */,
 				A24E0000000000000000004D /* ProfileView.swift in Sources */,
+				A24E0000000000000000EE40 /* MeasurementsSupport.swift in Sources */,
+				A24E0000000000000000EE42 /* MeasurementEditor.swift in Sources */,
+				A24E0000000000000000EE44 /* CalendarDayViews.swift in Sources */,
+				A24E0000000000000000EE46 /* CalendarSheets.swift in Sources */,
+				A24E0000000000000000EE48 /* DashboardComponents.swift in Sources */,
+				A24E0000000000000000EE4A /* ChartsComponents.swift in Sources */,
+				A24E0000000000000000EE4C /* ContentSidebar.swift in Sources */,
+				A24E0000000000000000EE4E /* ContentPromptTips.swift in Sources */,
+				A24E0000000000000000EE20 /* ProfileSupportingViews.swift in Sources */,
+				A24E0000000000000000EE22 /* ProfileWorkoutCard.swift in Sources */,
+				A24E0000000000000000EE24 /* HealthKitCard.swift in Sources */,
+				A24E0000000000000000EE26 /* AIProviderCard.swift in Sources */,
+				A24E0000000000000000EE28 /* BackupCard.swift in Sources */,
 				A24E0000000000000000004E /* Card.swift in Sources */,
 				A24E0000000000000000004F /* MetricChart.swift in Sources */,
 				A24E00000000000000000050 /* MetricTile.swift in Sources */,
@@ -422,8 +539,18 @@
 				A24E00000000000000000056 /* FoodEntry.swift in Sources */,
 				A24E00000000000000000086 /* FoodPreset.swift in Sources */,
 				A24E00000000000000000057 /* OpenRouterClient.swift in Sources */,
+				A24E0000000000000000EE54 /* AIModels.swift in Sources */,
 				A24E00000000000000000058 /* ChatStore.swift in Sources */,
+				A24E0000000000000000EE5A /* ChatStoreModels.swift in Sources */,
+				A24E0000000000000000EE5C /* UserContextMention.swift in Sources */,
 				A24E00000000000000000059 /* ChatSidebar.swift in Sources */,
+				A24E0000000000000000EE30 /* BottomCenterChatDock.swift in Sources */,
+				A24E0000000000000000EE32 /* ChatComponents.swift in Sources */,
+				A24E0000000000000000EE34 /* WorkoutProgramViews.swift in Sources */,
+				A24E0000000000000000EE36 /* WorkoutLogEditor.swift in Sources */,
+				A24E0000000000000000EE38 /* RecipeCards.swift in Sources */,
+				A24E0000000000000000EE3A /* RecipeDetailSheet.swift in Sources */,
+				A24E0000000000000000EE3C /* RecipeEditor.swift in Sources */,
 				A24E0000000000000000005A /* AIProvider.swift in Sources */,
 				A24E0000000000000000005B /* CodexAuth.swift in Sources */,
 				A24E0000000000000000005C /* CodexClient.swift in Sources */,
@@ -431,6 +558,7 @@
 				A24E0000000000000000005E /* HealthService.swift in Sources */,
 				A24E00000000000000000060 /* StepEntry.swift in Sources */,
 				A24E00000000000000000061 /* BackupService.swift in Sources */,
+				A24E0000000000000000EE57 /* BackupModels.swift in Sources */,
 				A24E00000000000000000062 /* MonthlyGoal.swift in Sources */,
 				A24E00000000000000000063 /* CalendarView.swift in Sources */,
 				A24E00000000000000000066 /* UserContextSnapshot.swift in Sources */,
@@ -438,7 +566,12 @@
 				A24E00000000000000000068 /* WorkoutLog.swift in Sources */,
 				A24E00000000000000000069 /* WorkoutView.swift in Sources */,
 				A24E0000000000000000006A /* AgentSkill.swift in Sources */,
+				A24E0000000000000000EE50 /* AgentSkills.swift in Sources */,
+				A24E0000000000000000EE52 /* NutritionDataProvider.swift in Sources */,
 				A24E0000000000000000006B /* LocalMemoryProvider.swift in Sources */,
+				A24E0000000000000000EE10 /* AgentMemory.swift in Sources */,
+				A24E0000000000000000EE12 /* MemoryManager.swift in Sources */,
+				A24E0000000000000000EE14 /* EmbeddingService.swift in Sources */,
 				A24E0000000000000000006C /* PubMedResearchSkill.swift in Sources */,
 				A24E0000000000000000006D /* FoodLookupSkill.swift in Sources */,
 				A24E0000000000000000006E /* MemoryView.swift in Sources */,
@@ -455,6 +588,7 @@
 			files = (
 				A24E000000000000000000A0 /* HerculesMobileApp.swift in Sources */,
 				A24E000000000000000000A1 /* MobileRootView.swift in Sources */,
+				A24E0000000000000000EE5E /* MobileComponents.swift in Sources */,
 				A24E000000000000000000A2 /* SeedData.swift in Sources */,
 				A24E000000000000000000A3 /* Measurement.swift in Sources */,
 				A24E000000000000000000A4 /* UserProfile.swift in Sources */,
@@ -470,8 +604,10 @@
 				A24E000000000000000000AF /* Typography.swift in Sources */,
 				A24E000000000000000000B0 /* Formatters.swift in Sources */,
 				A24E000000000000000000B1 /* BackupService.swift in Sources */,
+				A24E0000000000000000EE58 /* BackupModels.swift in Sources */,
 				A24E000000000000000000D0 /* AIProvider.swift in Sources */,
 				A24E000000000000000000D1 /* OpenRouterClient.swift in Sources */,
+				A24E0000000000000000EE55 /* AIModels.swift in Sources */,
 				A24E000000000000000000D2 /* CodexAuth.swift in Sources */,
 				A24E000000000000000000D3 /* CodexClient.swift in Sources */,
 			);
@@ -609,7 +745,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"BodyTrack/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = ACY2F2P77T;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -641,7 +777,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"BodyTrack/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = ACY2F2P77T;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -761,6 +897,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jkrukowski/swift-embeddings.git";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.0.28;
+			};
+		};
+		A24E0000000000000000EE04 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.3.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A24E0000000000000000EE02 /* Embeddings */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */;
+			productName = Embeddings;
+		};
+		A24E0000000000000000EE05 /* Hub */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A24E0000000000000000EE04 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Hub;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A24E00000000000000000001 /* Project object */;
 }

@@ -1,42 +1,5 @@
 import Foundation
 
-struct AgentMemory: Codable, Identifiable, Equatable, Sendable {
-    let id: UUID
-    var content: String
-    var tags: [String]
-    var source: String
-    var confidence: Double
-    var createdAt: Date
-    var updatedAt: Date
-    var lastSeenAt: Date
-    var expiresAt: Date?
-    var pinned: Bool
-
-    init(
-        id: UUID = UUID(),
-        content: String,
-        tags: [String],
-        source: String,
-        confidence: Double,
-        createdAt: Date = .now,
-        updatedAt: Date = .now,
-        lastSeenAt: Date = .now,
-        expiresAt: Date? = nil,
-        pinned: Bool = false
-    ) {
-        self.id = id
-        self.content = content
-        self.tags = tags
-        self.source = source
-        self.confidence = confidence
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.lastSeenAt = lastSeenAt
-        self.expiresAt = expiresAt
-        self.pinned = pinned
-    }
-}
-
 final class LocalMemoryProvider {
     static let shared = LocalMemoryProvider()
 
@@ -55,14 +18,6 @@ final class LocalMemoryProvider {
     private enum PersistMode {
         case immediate
         case deferredTouch
-    }
-
-    private struct MemoryCandidate {
-        var content: String
-        var tags: [String]
-        var source: String
-        var confidence: Double
-        var pinned: Bool = false
     }
 
     private let memoryURL: URL
@@ -110,7 +65,7 @@ final class LocalMemoryProvider {
 
         let now = Date()
         let scored = memories
-            .filter { !Self.isExpired($0, now: now) }
+            .filter { $0.isActive && !Self.isExpired($0, now: now) }
             .map { memory -> (memory: AgentMemory, score: Double) in
                 let memoryTerms = memoryTermsByID[memory.id] ?? Set(Self.tokens(memory.content + " " + memory.tags.joined(separator: " ")))
                 let tagTerms = memoryTagTermsByID[memory.id] ?? Set(memory.tags.flatMap(Self.tokens))
@@ -138,17 +93,213 @@ final class LocalMemoryProvider {
         return selected
     }
 
-    func allMemories() -> [AgentMemory] {
+    func allMemories(includeInvalidated: Bool = false) -> [AgentMemory] {
         refreshFromDiskIfChanged()
         if pruneExpiredMemories() {
             persist()
         }
-        return memories.sorted { lhs, rhs in
-            if lhs.pinned != rhs.pinned {
-                return lhs.pinned && !rhs.pinned
+        return memories
+            .filter { includeInvalidated || $0.isActive }
+            .sorted { lhs, rhs in
+                if lhs.pinned != rhs.pinned {
+                    return lhs.pinned && !rhs.pinned
+                }
+                return lhs.updatedAt > rhs.updatedAt
             }
+    }
+
+    /// Coach context'ine enjekte edilecek memory seti. Çekirdek (profil/hedef/kısıt)
+    /// + pinli kayıtlar HER ZAMAN dahil; gerisi blended skorla (lexical + importance +
+    /// recency) seçilir ve limit'e göre kırpılır — çekirdek/pinli asla düşmez. Asıl
+    /// "semantic" seçimi güçlü ana model yapar; biz ona temiz, tiplenmiş, sınırlı set veririz.
+    func contextMemories(query: String, queryEmbedding: [Float]? = nil, limit: Int = 24) -> [AgentMemory] {
+        refreshFromDiskIfChanged()
+        if pruneExpiredMemories() { persist() }
+        let now = Date()
+        let active = memories.filter { $0.isActive && !Self.isExpired($0, now: now) }
+        guard !active.isEmpty else { return [] }
+
+        let queryTerms = Set(Self.tokens(query))
+        func relevance(_ memory: AgentMemory) -> Double {
+            let terms = memoryTermsByID[memory.id] ?? Set(Self.tokens(memory.content + " " + memory.tags.joined(separator: " ")))
+            let overlap = Double(queryTerms.intersection(terms).count)
+            let recencyDays = max(0, now.timeIntervalSince(memory.lastSeenAt) / 86_400)
+            let recency = 1.0 / (1.0 + min(recencyDays, 90))
+            // Semantic (cosine) varsa baskın sinyal; yoksa saf lexical davranışı korunur.
+            var semantic = 0.0
+            if let queryEmbedding, let emb = memory.embedding, !emb.isEmpty {
+                semantic = Double(max(0, EmbeddingMath.cosine(queryEmbedding, emb)))
+            }
+            return semantic * 6.0 + overlap * 2.0 + memory.confidence + recency
+        }
+
+        let alwaysIn = active.filter { $0.type.isCore || $0.pinned }
+        let rest = active.filter { !($0.type.isCore || $0.pinned) }
+            .sorted { relevance($0) > relevance($1) }
+        let remaining = max(0, limit - alwaysIn.count)
+        let selected = alwaysIn + Array(rest.prefix(remaining))
+
+        touch(selected)
+
+        return selected.sorted { lhs, rhs in
+            if lhs.type.isCore != rhs.type.isCore { return lhs.type.isCore && !rhs.type.isCore }
+            if lhs.pinned != rhs.pinned { return lhs.pinned && !rhs.pinned }
             return lhs.updatedAt > rhs.updatedAt
         }
+    }
+
+    /// LLM memory-manager'a verilecek "ilgili mevcut kayıtlar" kümesi. Çekirdek
+    /// (profil/hedef/kısıt) + pinli kayıtlar her zaman dahil; gerisi konuşmaya
+    /// lexical alaka skoruyla seçilir. Yan etkisiz — lastSeenAt'e dokunmaz, persist etmez.
+    func candidatesForUpdate(userText: String, assistantText: String, limit: Int = 12) -> [AgentMemory] {
+        refreshFromDiskIfChanged()
+        let now = Date()
+        let active = memories.filter { $0.isActive && !Self.isExpired($0, now: now) }
+        guard !active.isEmpty else { return [] }
+
+        let queryTerms = Set(Self.tokens(userText + " " + assistantText))
+        let scored = active.map { memory -> (memory: AgentMemory, score: Double) in
+            let memoryTerms = memoryTermsByID[memory.id] ?? Set(Self.tokens(memory.content + " " + memory.tags.joined(separator: " ")))
+            var score = Double(queryTerms.intersection(memoryTerms).count)
+            if memory.type.isCore { score += 1.5 }
+            if memory.pinned { score += 1.0 }
+            return (memory, score)
+        }
+
+        return scored
+            .filter { $0.score > 0 || $0.memory.type.isCore || $0.memory.pinned }
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score { return lhs.memory.updatedAt > rhs.memory.updatedAt }
+                return lhs.score > rhs.score
+            }
+            .prefix(limit)
+            .map(\.memory)
+    }
+
+    /// Lokal decay (ağ yok): uzun süre görülmemiş, pinli/çekirdek olmayan otomatik
+    /// kayıtların confidence'ını kademeli düşürür; çok düşük + çok eski olanları
+    /// soft-invalidate eder. Manuel/explicit/pinli ve profil/hedef/kısıt kayıtlarına dokunmaz.
+    @discardableResult
+    func applyDecay(now: Date = Date()) -> Bool {
+        var changed = false
+        for idx in memories.indices {
+            let memory = memories[idx]
+            guard memory.isActive, !memory.pinned, !memory.type.isCore,
+                  Self.isAutoSource(memory.source)
+            else { continue }
+            let unseenDays = now.timeIntervalSince(memory.lastSeenAt) / 86_400
+            guard unseenDays > 30 else { continue }
+            let decayed = max(0.3, memory.confidence - 0.1)
+            if decayed != memory.confidence {
+                memories[idx].confidence = decayed
+                changed = true
+            }
+            if memories[idx].confidence <= 0.35, unseenDays > 90 {
+                memories[idx].invalidatedAt = now
+                changed = true
+            }
+        }
+        if changed {
+            rebuildSearchIndex()
+            persist()
+        }
+        return changed
+    }
+
+    /// Mem0 tarzı operasyon listesini uygula. UPDATE içerikte yerinde düzeltme;
+    /// DELETE soft-invalidate (Zep tarzı, diskte kalır); ADD yeni kayıt (gerekirse
+    /// eski kaydı supersede eder). Pinli/manuel kayıtlar LLM tarafından değiştirilemez/silinemez.
+    @discardableResult
+    func applyLLMOperations(_ ops: [LLMMemoryOperation]) -> Int {
+        guard !ops.isEmpty else { return 0 }
+        refreshFromDiskIfChanged()
+        var changed = 0
+        for op in ops {
+            switch op.kind {
+            case .add:
+                guard let content = Self.cleanedContent(op.content) else { continue }
+                let memory = upsertMemory(
+                    content: content,
+                    tags: op.tags,
+                    source: "llm-add",
+                    confidence: Self.confidence(from: op.importance, default: 0.8),
+                    type: op.type ?? .other
+                )
+                if let supersedes = op.supersedes,
+                   let oldIdx = memories.firstIndex(where: { $0.id == supersedes }),
+                   memories[oldIdx].id != memory.id,
+                   !memories[oldIdx].pinned {
+                    memories[oldIdx].invalidatedAt = .now
+                    memories[oldIdx].supersededBy = memory.id
+                }
+                changed += 1
+            case .update:
+                guard let id = op.targetID,
+                      let idx = memories.firstIndex(where: { $0.id == id }),
+                      !memories[idx].pinned,                 // pinli/manuel kaydı koru
+                      let content = Self.cleanedContent(op.content)
+                else { continue }
+                memories[idx].content = content
+                if !op.tags.isEmpty {
+                    memories[idx].tags = Array(Set(memories[idx].tags + Self.normalizedTags(op.tags))).sorted()
+                }
+                if let type = op.type, type != .other { memories[idx].type = type }
+                if let importance = op.importance {
+                    memories[idx].confidence = max(memories[idx].confidence, Self.confidence(from: importance, default: memories[idx].confidence))
+                }
+                memories[idx].source = "llm-update"
+                memories[idx].updatedAt = .now
+                memories[idx].lastSeenAt = .now
+                memories[idx].invalidatedAt = nil
+                memories[idx].supersededBy = nil
+                memories[idx].embedding = nil          // içerik değişti → embedding bayat, yeniden hesaplanacak
+                memories[idx].embeddingModel = nil
+                changed += 1
+            case .delete:
+                guard let id = op.targetID,
+                      let idx = memories.firstIndex(where: { $0.id == id }),
+                      !memories[idx].pinned,                 // pinli/manuel kaydı LLM silemez
+                      memories[idx].isActive
+                else { continue }
+                memories[idx].invalidatedAt = .now
+                memories[idx].updatedAt = .now
+                changed += 1
+            }
+        }
+        if changed > 0 {
+            rebuildSearchIndex()
+            persist()
+        }
+        return changed
+    }
+
+    /// Embedding'i eksik veya güncel-model ile üretilmemiş aktif kayıtlar (backfill kaynağı).
+    func memoriesNeedingEmbedding(model: String, limit: Int = 64) -> [(id: UUID, content: String)] {
+        refreshFromDiskIfChanged()
+        return memories
+            .filter { $0.isActive && ($0.embedding == nil || $0.embeddingModel != model) }
+            .prefix(limit)
+            .map { ($0.id, $0.content) }
+    }
+
+    /// Embedding'i eksik/bayat aktif kayıt sayısı (backfill ilerlemesi için).
+    func pendingEmbeddingCount(model: String) -> Int {
+        refreshFromDiskIfChanged()
+        return memories.filter { $0.isActive && ($0.embedding == nil || $0.embeddingModel != model) }.count
+    }
+
+    /// Hesaplanmış embedding'leri uygula (tek persist; arama indeksini etkilemez).
+    func applyEmbeddings(_ embeddings: [UUID: [Float]], model: String) {
+        guard !embeddings.isEmpty else { return }
+        var changed = false
+        for idx in memories.indices {
+            if let vector = embeddings[memories[idx].id] {
+                memories[idx].embedding = vector
+                memories[idx].embeddingModel = model
+                changed = true
+            }
+        }
+        if changed { persist() }
     }
 
     func deleteMemory(id: UUID) {
@@ -196,60 +347,25 @@ final class LocalMemoryProvider {
         )
     }
 
+    /// Heuristik fallback — yalnızca LLM memory-manager (MemoryManager) ulaşılamazsa
+    /// devreye girer ve SADECE kullanıcının açıkça "bunu hatırla / unutma" dediği bilgiyi
+    /// yakalar. Eski templated çıkarım (kalitesiz raw-text dökümü) kaldırıldı: LLM yoksa
+    /// gürültü yazmaktansa hiç yazmamayı tercih eder.
     @discardableResult
     func absorbConversation(userText: String, assistantText: String) -> Int {
         refreshFromDiskIfChanged()
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return 0 }
-
-        var candidates: [MemoryCandidate] = []
-        if let explicit = explicitMemoryCandidate(from: trimmed) {
-            candidates.append(MemoryCandidate(
-                content: explicit.content,
-                tags: explicit.tags,
-                source: "explicit",
-                confidence: 0.96,
-                pinned: true
-            ))
-        } else {
-            candidates.append(contentsOf: inferredMemoryCandidates(fromUserText: trimmed))
-        }
-
-        if let style = styleMemoryCandidate(from: trimmed) {
-            candidates.append(style)
-        }
-
-        candidates.append(contentsOf: inferredMemoryCandidates(fromAssistantText: assistantText, userText: trimmed))
-
-        var stored = 0
-        for candidate in Self.deduplicated(candidates) {
-            _ = upsertMemory(
-                content: candidate.content,
-                tags: candidate.tags,
-                source: candidate.source,
-                confidence: candidate.confidence,
-                pinned: candidate.pinned
-            )
-            stored += 1
-        }
-        if stored > 0 {
-            rebuildSearchIndex()
-            persist()
-        }
-
-        return stored
-    }
-
-    private func styleMemoryCandidate(from text: String) -> MemoryCandidate? {
-        guard Self.containsAny(text, needles: ["kanka", "knk", "aq", "amk", "samimi", "casual"]) else {
-            return nil
-        }
-        return MemoryCandidate(
-            content: "Kullanıcı samimi Türkçe tonda, kısa ve direkt konuşmayı seviyor.",
-            tags: ["communication", "tone"],
-            source: "chat-style",
-            confidence: 0.72
+        guard !trimmed.isEmpty, let explicit = explicitMemoryCandidate(from: trimmed) else { return 0 }
+        _ = upsertMemory(
+            content: explicit.content,
+            tags: explicit.tags,
+            source: "explicit",
+            confidence: 0.96,
+            pinned: true
         )
+        rebuildSearchIndex()
+        persist()
+        return 1
     }
 
     @discardableResult
@@ -258,6 +374,7 @@ final class LocalMemoryProvider {
         tags: [String],
         source: String,
         confidence: Double,
+        type: MemoryType = .other,
         expiresAt: Date? = nil,
         pinned: Bool = false
     ) -> AgentMemory {
@@ -267,6 +384,7 @@ final class LocalMemoryProvider {
             tags: tags,
             source: source,
             confidence: confidence,
+            type: type,
             expiresAt: expiresAt,
             pinned: pinned
         )
@@ -280,6 +398,7 @@ final class LocalMemoryProvider {
         tags: [String],
         source: String,
         confidence: Double,
+        type: MemoryType = .other,
         expiresAt: Date? = nil,
         pinned: Bool = false
     ) -> AgentMemory {
@@ -290,9 +409,15 @@ final class LocalMemoryProvider {
             memories[idx].tags = Array(Set(memories[idx].tags + normalizedTags)).sorted()
             memories[idx].source = source
             memories[idx].confidence = max(memories[idx].confidence, confidence)
+            if memories[idx].type == .other, type != .other {
+                memories[idx].type = type
+            }
             memories[idx].updatedAt = .now
             memories[idx].lastSeenAt = .now
             memories[idx].pinned = memories[idx].pinned || pinned
+            // Aynı içerik tekrar doğrulandı — daha önce invalidate edildiyse geri getir.
+            memories[idx].invalidatedAt = nil
+            memories[idx].supersededBy = nil
             if pinned || expiresAt == nil {
                 memories[idx].expiresAt = nil
             } else if memories[idx].expiresAt == nil {
@@ -306,6 +431,7 @@ final class LocalMemoryProvider {
             tags: normalizedTags,
             source: source,
             confidence: confidence,
+            type: type,
             expiresAt: expiresAt,
             pinned: pinned
         )
@@ -335,230 +461,6 @@ final class LocalMemoryProvider {
 
         let content = cleaned.isEmpty ? text : cleaned
         return ("Kullanıcı açıkça şunu hatırlatmak istedi: \(content)", Self.tags(for: content))
-    }
-
-    private func inferredMemoryCandidates(fromUserText text: String) -> [MemoryCandidate] {
-        let lower = Self.fold(text)
-        guard !Self.isProbablyNoise(lower),
-              text.count <= 1_200
-        else { return [] }
-
-        let captured = Self.captureText(text)
-        guard !captured.isEmpty else { return [] }
-
-        let personalSignals = [
-            "ben ", "bende ", "benim ", "bana ", "bende", "kendim", "hakkimda", "hakkımda",
-            "yasim", "yaşim", "yaşım", "boyum", "kilom", "hedefim", "amacim", "amacım",
-            "istiyorum", "istemiyorum", "istemiyoruz", "tercih", "severim", "seviyorum",
-            "sevmiyorum", "zor geliyor", "kolay geliyor", "yapiyorum", "yapıyorum",
-            "gidiyorum", "yiyorum", "kullaniyorum", "kullanıyorum", "alicam", "alacağım",
-            "baslicam", "başlıcam", "baslayacagim", "başlayacağım"
-        ]
-        let preferenceSignals = [
-            "istiyorum", "istemiyorum", "istemiyoruz", "olmasin", "olmasın", "olsun",
-            "tercih", "daha iyi", "gerek yok", "lazim", "lazım", "bence", "severim",
-            "seviyorum", "sevmiyorum", "mantikli", "mantıklı"
-        ]
-        let appSignals = [
-            "chat", "memory", "hafiza", "hafıza", "sidebar", "layout", "responsive",
-            "tasarim", "tasarım", "renk", "preset", "popup", "pop-up", "takvim",
-            "tarif", "tarifler", "antrenman sayfasi", "antrenman sayfası", "icloud",
-            "shortcut", "shortcuts", "kaydet", "onay", "buton", "arrow", "resize",
-            "scroll", "typewriter", "profil", "uygulama", "app"
-        ]
-        let nutritionSignals = [
-            "protein", "kalori", "makro", "yemek", "ogun", "öğün", "tarif", "whey",
-            "protein tozu", "pirinc", "pirinç", "tavuk", "yumurta", "yag", "yağ",
-            "karbonhidrat", "carb", "bulk", "cut", "definasyon", "olcek", "ölçek"
-        ]
-        let trainingSignals = [
-            "antrenman", "idman", "workout", "gym", "program", "hareket", "set", "rir",
-            "bench", "squat", "deadlift", "hipertrofi", "hypertrophy", "upper", "lower",
-            "calf", "hamstring", "quad", "gogus", "göğüs", "sirt", "sırt", "bacak"
-        ]
-        let profileSignals = [
-            "hedef", "kilo", "yag orani", "yağ oranı", "boy", "yas", "yaş", "adim",
-            "adım", "ölçüm", "olcum", "vucut", "vücut", "kg", "cm"
-        ]
-        let supplementSignals = [
-            "whey", "protein tozu", "command quadro", "gentopure", "protein ocean",
-            "kreatin", "creatine", "bcaa", "ssn", "olcek", "ölçek", "servis"
-        ]
-
-        let hasPersonal = Self.containsAny(lower, needles: personalSignals)
-        let hasPreference = Self.containsAny(lower, needles: preferenceSignals)
-        let hasApp = Self.containsAny(lower, needles: appSignals)
-        let hasNutrition = Self.containsAny(lower, needles: nutritionSignals)
-        let hasTraining = Self.containsAny(lower, needles: trainingSignals)
-        let hasProfile = Self.containsAny(lower, needles: profileSignals)
-        let hasSupplement = Self.containsAny(lower, needles: supplementSignals)
-        let hasDurableDomain = hasApp || hasNutrition || hasTraining || hasProfile || hasSupplement
-
-        guard hasDurableDomain && (hasPersonal || hasPreference || Self.looksLikeDurableInstruction(lower)) else {
-            return []
-        }
-
-        var candidates: [MemoryCandidate] = []
-
-        if hasSupplement {
-            candidates.append(MemoryCandidate(
-                content: "Takviye bilgisi: \(captured)",
-                tags: Self.tags(for: text) + ["supplement"],
-                source: "chat-inferred",
-                confidence: 0.78
-            ))
-        }
-
-        if hasApp {
-            candidates.append(MemoryCandidate(
-                content: "Uygulama tercihi: \(captured)",
-                tags: Self.tags(for: text) + ["app-preference"],
-                source: "chat-inferred",
-                confidence: hasPreference ? 0.78 : 0.7
-            ))
-        }
-
-        if hasTraining && (hasPersonal || hasPreference || Self.containsAny(lower, needles: ["program", "hareket", "set", "rir", "arşiv", "arsiv"])) {
-            candidates.append(MemoryCandidate(
-                content: "Antrenman tercihi/verisi: \(captured)",
-                tags: Self.tags(for: text) + ["training"],
-                source: "chat-inferred",
-                confidence: hasPreference ? 0.78 : 0.7
-            ))
-        }
-
-        if hasNutrition && (hasPersonal || hasPreference || hasSupplement || Self.containsAny(lower, needles: ["gunde", "günde", "her gun", "her gün", "olcek", "ölçek"])) {
-            candidates.append(MemoryCandidate(
-                content: "Beslenme tercihi/verisi: \(captured)",
-                tags: Self.tags(for: text) + ["nutrition"],
-                source: "chat-inferred",
-                confidence: hasPreference ? 0.78 : 0.7
-            ))
-        }
-
-        if hasProfile && hasPersonal {
-            candidates.append(MemoryCandidate(
-                content: "Profil/hedef bilgisi: \(captured)",
-                tags: Self.tags(for: text) + ["profile"],
-                source: "chat-inferred",
-                confidence: 0.72
-            ))
-        }
-
-        if candidates.isEmpty, hasDurableDomain {
-            candidates.append(MemoryCandidate(
-                content: "Kullanıcı bilgisi: \(captured)",
-                tags: Self.tags(for: text),
-                source: "chat-inferred",
-                confidence: 0.66
-            ))
-        }
-
-        return Array(Self.deduplicated(candidates).prefix(3))
-    }
-
-    private func inferredMemoryCandidates(fromAssistantText assistantText: String, userText: String) -> [MemoryCandidate] {
-        let userLower = Self.fold(userText)
-        guard Self.containsAny(userLower, needles: [
-            "onayliyorum", "onaylıyorum", "onay", "kabul", "tamam", "olur", "bundan sonra",
-            "ayarla", "ekle", "kaydet", "yap"
-        ]) else { return [] }
-
-        let compact = Self.captureAssistantDecision(assistantText)
-        guard !compact.isEmpty else { return [] }
-        return [MemoryCandidate(
-            content: "Koç/app kararı: \(compact)",
-            tags: Self.tags(for: compact) + ["coach-note"],
-            source: "assistant-inferred",
-            confidence: 0.62
-        )]
-    }
-
-    private static func isProbablyNoise(_ lower: String) -> Bool {
-        let compact = lower
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let exactNoise: Set<String> = [
-            "", "ok", "okay", "tamam", "tmm", "devam", "hadi", "evet", "hayir",
-            "hayır", "olur", "ail", "v2", "v3", "kanka", "knk", "onayliyorum", "onaylıyorum"
-        ]
-        if exactNoise.contains(compact) { return true }
-        return compact.count < 8
-    }
-
-    private static func looksLikeDurableInstruction(_ lower: String) -> Bool {
-        containsAny(lower, needles: [
-            "bundan sonra", "hep", "her zaman", "surekli", "sürekli", "artik", "artık",
-            "duzenli", "düzenli", "gunde", "günde", "her gun", "her gün", "istemiyorum",
-            "istemiyoruz", "olmasin", "olmasın", "olsun", "kaldir", "kaldır", "ekle",
-            "ayarla", "tasarl", "gelistir", "geliştir"
-        ])
-    }
-
-    private static func captureText(_ text: String) -> String {
-        var compact = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let fillerPatterns = [
-            #"(?i)\b(kanka|knk|aq|amk|olm)\b"#,
-            #"(?i)\byarram\b"#,
-            #"(?i)\bsikicem\b"#,
-            #"(?i)\bsikice[mn]?\b"#
-        ]
-        for pattern in fillerPatterns {
-            compact = compact.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
-        }
-        compact = compact
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: " ,.;:-\n\t"))
-
-        let limit = 360
-        guard compact.count > limit else { return compact }
-        let end = compact.index(compact.startIndex, offsetBy: limit)
-        return String(compact[..<end]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
-    }
-
-    private static func captureAssistantDecision(_ text: String) -> String {
-        let lower = fold(text)
-        guard containsAny(lower, needles: [
-            "bundan sonra", "kabul", "hedef", "program", "ekledim", "eklendi",
-            "guncellendi", "güncellendi", "aktif", "arşiv", "arsiv", "arşivlendi",
-            "arsivlendi", "uygulandi", "uygulandı"
-        ]) else {
-            return ""
-        }
-        let lines = text
-            .split(separator: "\n")
-            .map { captureText(String($0)) }
-            .filter { !$0.isEmpty }
-        guard let selected = lines.first(where: {
-            let folded = fold($0)
-            return containsAny(folded, needles: [
-                "bundan sonra", "kabul", "program", "hedef", "aktif", "arşiv",
-                "arsiv", "eklendi", "guncellendi", "güncellendi", "uygulandi", "uygulandı"
-            ])
-        }) ?? lines.first else {
-            return ""
-        }
-        return selected
-    }
-
-    private static func deduplicated(_ candidates: [MemoryCandidate]) -> [MemoryCandidate] {
-        var output: [MemoryCandidate] = []
-        for candidate in candidates {
-            let key = normalizeMemory(candidate.content)
-            guard !key.isEmpty else { continue }
-            if let idx = output.firstIndex(where: { normalizeMemory($0.content) == key }) {
-                output[idx].tags = Array(Set(output[idx].tags + candidate.tags)).sorted()
-                output[idx].confidence = max(output[idx].confidence, candidate.confidence)
-                output[idx].pinned = output[idx].pinned || candidate.pinned
-            } else {
-                output.append(candidate)
-            }
-        }
-        return output
     }
 
     private func touch(_ selected: [AgentMemory]) {
@@ -763,6 +665,22 @@ final class LocalMemoryProvider {
         tokens(text).joined(separator: " ")
     }
 
+    private static func cleanedContent(_ value: String?) -> String? {
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count >= 3 ? trimmed : nil
+    }
+
+    /// Otomatik (LLM/chat/assistant) kaynaklı — decay'e tabi olanlar. Manuel/explicit hariç.
+    private static func isAutoSource(_ source: String) -> Bool {
+        source.hasPrefix("llm") || source.hasPrefix("chat") || source.hasPrefix("assistant")
+    }
+
+    /// LLM "importance" (0...1) → confidence. Aralığı makul tut: ne 0'a düşsün ne 1'i geçsin.
+    private static func confidence(from importance: Double?, default fallback: Double) -> Double {
+        guard let importance else { return fallback }
+        return min(1.0, max(0.4, importance))
+    }
+
     private static func normalizedTags(_ tags: [String]) -> [String] {
         Array(Set(tags.flatMap { tag in
             tag
@@ -789,9 +707,19 @@ final class LocalMemoryProvider {
                 output[idx].tags = Array(Set(output[idx].tags + memory.tags)).sorted()
                 output[idx].confidence = max(output[idx].confidence, memory.confidence)
                 output[idx].pinned = output[idx].pinned || memory.pinned
+                if output[idx].type == .other, memory.type != .other {
+                    output[idx].type = memory.type
+                }
                 output[idx].createdAt = min(output[idx].createdAt, memory.createdAt)
                 output[idx].updatedAt = max(output[idx].updatedAt, memory.updatedAt)
                 output[idx].lastSeenAt = max(output[idx].lastSeenAt, memory.lastSeenAt)
+                // İkisinden biri aktifse aktif kabul et — aktif kayıt eskiyi supersede eder.
+                if output[idx].invalidatedAt == nil || memory.invalidatedAt == nil {
+                    output[idx].invalidatedAt = nil
+                    output[idx].supersededBy = nil
+                } else {
+                    output[idx].invalidatedAt = max(output[idx].invalidatedAt!, memory.invalidatedAt!)
+                }
                 if output[idx].expiresAt == nil || memory.expiresAt == nil {
                     output[idx].expiresAt = nil
                 } else {
@@ -816,4 +744,7 @@ final class LocalMemoryProvider {
 
 extension Notification.Name {
     static let localMemoryChanged = Notification.Name("hercules.local-memory.changed")
+    static let embeddingStatusChanged = Notification.Name("hercules.embedding-status.changed")
 }
+
+/// Embedding modelinin yükleme/backfill durumu — Memory ekranı bunu gösterir.

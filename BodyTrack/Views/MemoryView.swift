@@ -13,6 +13,7 @@ struct MemoryView: View {
     @State private var researchUpdating = false
     @State private var researchMessage: String?
     @State private var researchWindow: ResearchWindow = .current
+    @State private var embeddingPhase: EmbeddingStatus.Phase = .idle
 
     private var filteredMemories: [AgentMemory] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -56,6 +57,7 @@ struct MemoryView: View {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 header
                 controls
+                embeddingStatusBar
                 researchPanel
                 memoryGrid
             }
@@ -64,10 +66,16 @@ struct MemoryView: View {
         .background(Palette.background.ignoresSafeArea())
         .onAppear {
             reload()
+            embeddingPhase = EmbeddingStatus.shared.phase
             Task { await updateResearchIfNeeded() }
+            // Embedding modelini (gerekiyorsa) indir/yükle ve eksik kayıtları backfill et.
+            Task { await MemoryManager.shared.warmUpEmbeddingsAndBackfill() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .localMemoryChanged)) { _ in
             reload()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .embeddingStatusChanged)) { _ in
+            embeddingPhase = EmbeddingStatus.shared.phase
         }
         .sheet(isPresented: $showingEditor) {
             memoryEditor
@@ -138,6 +146,61 @@ struct MemoryView: View {
             .buttonStyle(.plain)
             .help("Yenile")
         }
+    }
+
+    @ViewBuilder
+    private var embeddingStatusBar: some View {
+        switch embeddingPhase {
+        case .idle:
+            EmptyView()
+        case .downloading(let fraction):
+            embeddingRow(
+                spinner: true, icon: nil,
+                text: "Embedding modeli indiriliyor… %\(Int((fraction * 100).rounded())) (Qwen3-Embedding-0.6B, ilk sefer ~2.4 GB). Bu sırada lexical arama kullanılıyor.",
+                tint: Palette.accent
+            )
+        case .backfilling(let done, let total):
+            embeddingRow(
+                spinner: true, icon: nil,
+                text: "Hafıza semantik olarak indeksleniyor… \(done)/\(total)",
+                tint: Palette.accent
+            )
+        case .ready:
+            embeddingRow(
+                spinner: false, icon: "sparkles",
+                text: "Semantic arama aktif · Qwen3-Embedding (on-device)",
+                tint: Palette.macroCarbs
+            )
+        case .unavailable:
+            embeddingRow(
+                spinner: false, icon: "exclamationmark.triangle",
+                text: "Embedding modeli yüklenemedi — lexical arama kullanılıyor.",
+                tint: Palette.negative
+            )
+        }
+    }
+
+    private func embeddingRow(spinner: Bool, icon: String?, text: String, tint: Color) -> some View {
+        HStack(spacing: 10) {
+            if spinner {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 14, height: 14)
+            } else if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            Text(text)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(tint.opacity(0.3), lineWidth: 0.5))
     }
 
     @ViewBuilder
@@ -318,6 +381,7 @@ struct MemoryView: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(alignment: .top, spacing: 8) {
                 sourceBadge(memory)
+                typeBadge(memory)
                 Spacer()
                 Button {
                     LocalMemoryProvider.shared.setPinned(id: memory.id, pinned: !memory.pinned)
@@ -387,6 +451,18 @@ struct MemoryView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Radius.md).fill(Palette.surface))
         .overlay(RoundedRectangle(cornerRadius: Radius.md).strokeBorder(Palette.border, lineWidth: 0.5))
+    }
+
+    @ViewBuilder
+    private func typeBadge(_ memory: AgentMemory) -> some View {
+        if memory.type != .other {
+            Text(memory.type.label)
+                .font(Typography.captionBold)
+                .foregroundStyle(Palette.macroCarbs)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Palette.macroCarbs.opacity(0.12)))
+        }
     }
 
     private func sourceBadge(_ memory: AgentMemory) -> some View {

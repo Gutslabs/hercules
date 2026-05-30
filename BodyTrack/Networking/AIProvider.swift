@@ -90,6 +90,11 @@ protocol AIClient {
         onSearchStart: @MainActor @escaping (String) -> Void,
         onMessageUpdate: @MainActor @escaping (String) -> Void
     ) async throws -> (AIFoodResult, String?)
+
+    /// Lean, tek-atışlık completion: streaming/araç/yemek-parse yok. Memory
+    /// extraction gibi arka plan işleri için kullanılır. Modelin ham metin
+    /// çıktısını (genellikle JSON) döner.
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String
 }
 
 final class CodexFirstFallbackClient: AIClient {
@@ -117,6 +122,11 @@ final class CodexFirstFallbackClient: AIClient {
                 onMessageUpdate: onMessageUpdate
             )
         } catch {
+            let openRouterKey = AIKeyStore.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !openRouterKey.isEmpty else {
+                throw error
+            }
+
             let notice = Self.routingNotice(for: error)
             await onMessageUpdate(notice)
 
@@ -142,6 +152,16 @@ final class CodexFirstFallbackClient: AIClient {
             } catch {
                 throw AIFallbackError(codexError: notice, openRouterError: error.localizedDescription)
             }
+        }
+    }
+
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+        do {
+            return try await codex.complete(systemPrompt: systemPrompt, userPrompt: userPrompt)
+        } catch {
+            let openRouterKey = AIKeyStore.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !openRouterKey.isEmpty else { throw error }
+            return try await openRouter.complete(systemPrompt: systemPrompt, userPrompt: userPrompt)
         }
     }
 
