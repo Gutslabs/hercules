@@ -706,19 +706,23 @@ struct MobileRootView: View {
             showVaultImporter = true
             return
         }
-        isWorking = true
-        statusMessage = "Senkronize ediliyor..."
-        BackupService.shared.restoreFromVaultIfNewer(into: ctx)
-        FoodPresetSeed.upsertDefaults(ctx)
-        do {
-            _ = try BackupService.shared.exportToVault(from: ctx)
-            statusMessage = "Senkronize edildi ✓"
-        } catch {
-            // emptyStore / richerVault → zaten güncel demektir
-            statusMessage = "Güncel ✓"
+        // Bloklamayan: önce iCloud okumaları arka planda ısıtılır (restore),
+        // sonra export (okumalar artık yerelden, yazma zaten yerel + arka plan upload).
+        Task { @MainActor in
+            isWorking = true
+            statusMessage = "Senkronize ediliyor..."
+            await BackupService.shared.restoreFromVaultIfNewerNonBlocking(into: ctx)
+            FoodPresetSeed.upsertDefaults(ctx)
+            do {
+                _ = try BackupService.shared.exportToVault(from: ctx)
+                statusMessage = "Senkronize edildi ✓"
+            } catch {
+                // emptyStore / richerVault → zaten güncel demektir
+                statusMessage = "Güncel ✓"
+            }
+            isWorking = false
+            refreshTick = UUID()
         }
-        isWorking = false
-        refreshTick = UUID()
     }
 
     private var heroCard: some View {
@@ -1860,11 +1864,15 @@ struct MobileRootView: View {
 
     private func restoreIfNewer() {
         guard vaultConfigured else { return }
-        isWorking = true
-        BackupService.shared.restoreFromVaultIfNewer(into: ctx)
-        FoodPresetSeed.upsertDefaults(ctx)
-        isWorking = false
-        refreshTick = UUID()
+        // Bloklamayan: ağır iCloud okuması arka planda yapılır, UI ilk kareyi anında
+        // çizer. Eskiden bu .onAppear'da senkron çalışıp açılışı dakikalarca dondururdu.
+        Task { @MainActor in
+            isWorking = true
+            await BackupService.shared.restoreFromVaultIfNewerNonBlocking(into: ctx)
+            FoodPresetSeed.upsertDefaults(ctx)
+            isWorking = false
+            refreshTick = UUID()
+        }
     }
 
     private func addPreset(_ preset: FoodPreset, servings: Double) {

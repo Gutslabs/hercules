@@ -573,6 +573,46 @@ final class BackupService {
         }
     }
 
+    /// iCloud vault dosyalarını ana thread DIŞINDA indirip önbelleğe ısıtır.
+    /// Decode yok, ctx yok — sadece indirmeyi tetikleyip byte'ları okur. Dataless bir
+    /// iCloud dosyasında `Data(contentsOf:)` indirme bitene kadar BEKLER; bunu burada
+    /// (arka thread'de) yapınca o bekleme ana thread'i dondurmaz.
+    nonisolated private static func warmVaultFilesDetached(bookmarkData: Data, relativePaths: [String]) {
+        #if os(macOS)
+        let options: URL.BookmarkResolutionOptions = [.withSecurityScope]
+        #else
+        let options: URL.BookmarkResolutionOptions = []
+        #endif
+        var isStale = false
+        guard let root = try? URL(
+            resolvingBookmarkData: bookmarkData,
+            options: options,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return }
+        let didStart = root.startAccessingSecurityScopedResource()
+        defer { if didStart { root.stopAccessingSecurityScopedResource() } }
+
+        let fm = FileManager.default
+        for rel in relativePaths {
+            let url = root.appendingPathComponent(rel)
+            try? fm.startDownloadingUbiquitousItem(at: url) // dataless ise indirmeyi başlat (iCloud değilse no-op)
+            _ = try? Data(contentsOf: url)                  // indirme bitene kadar BURADA bekler (arka thread)
+        }
+    }
+
+    /// `restoreFromVaultIfNewer`'in BLOKLAMAYAN sürümü: önce iCloud dosyalarını arka
+    /// planda ısıtır, sonra mevcut (kanıtlanmış) senkron mantığı main'de çalıştırır —
+    /// ağır iCloud indirmesi artık ana thread'i (ve uygulama açılışını) dondurmaz.
+    func restoreFromVaultIfNewerNonBlocking(into ctx: ModelContext) async {
+        guard let bookmarkData = UserDefaults.standard.data(forKey: vaultBookmarkKey) else { return }
+        let relativePaths = [vaultSnapshotRelativePath, vaultLegacySnapshotName, vaultManifestName]
+        await Task.detached(priority: .utility) {
+            BackupService.warmVaultFilesDetached(bookmarkData: bookmarkData, relativePaths: relativePaths)
+        }.value
+        restoreFromVaultIfNewer(into: ctx) // okumalar artık yerel önbellekten → hızlı
+    }
+
     private func writeVaultSnapshot(_ backup: HerculesBackup, data: Data) throws -> VaultOperationSummary {
         try withVaultRoot { root in
             let summary = try Self.writeVaultSnapshotDetached(
