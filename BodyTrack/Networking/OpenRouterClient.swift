@@ -441,10 +441,16 @@ final class AIKeyStore {
 
     /// Yeni sağlayıcı seçilince doğru istemciyi kur.
     func makeClient() -> AIClient {
+        #if os(macOS)
         switch provider {
         case .openRouter: return OpenRouterClient()
         case .codex: return CodexFirstFallbackClient()
         }
+        #else
+        // iOS'ta Codex/Terminal yok — provider ne olursa olsun DOĞRUDAN OpenRouter.
+        // Böylece telefonda "Codex hata verdi… OpenRouter'a yönlendirdim" bildirimi hiç çıkmaz.
+        return OpenRouterClient()
+        #endif
     }
 
     @discardableResult
