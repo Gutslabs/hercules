@@ -118,10 +118,16 @@ struct MobileRootView: View {
             keyPersisted = !openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         .onChange(of: scenePhase) { _, newPhase in
-            // Aktive olunca OTOMATİK restore YOK — bellekteki düzenlemeleri ezebilir.
-            // İlk açılışta onAppear restore eder; sonradan içeri alma kullanıcı onaylı.
-            if newPhase == .background {
+            // Merge sync güvenli (union) → foreground'da oto pull-merge + push,
+            // background'da local yedek + vault push (best-effort). Throttle'lı.
+            switch newPhase {
+            case .active:
+                Task { @MainActor in await BackupService.shared.autoSyncWithVault(into: ctx) }
+            case .background:
                 BackupService.shared.exportAsync(from: ctx)
+                Task { @MainActor in await BackupService.shared.autoSyncWithVault(into: ctx) }
+            default:
+                break
             }
         }
     }
@@ -706,20 +712,14 @@ struct MobileRootView: View {
             showVaultImporter = true
             return
         }
-        // Bloklamayan: önce iCloud okumaları arka planda ısıtılır (restore),
-        // sonra export (okumalar artık yerelden, yazma zaten yerel + arka plan upload).
+        // Bloklamayan tam senkron: pull-merge (vault'tan kat) + push (birleşmişi yaz).
+        // Ağır iCloud okuması arka planda ısıtılır; merge ezmez, katar.
         Task { @MainActor in
             isWorking = true
             statusMessage = "Senkronize ediliyor..."
-            await BackupService.shared.restoreFromVaultIfNewerNonBlocking(into: ctx)
+            await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
             FoodPresetSeed.upsertDefaults(ctx)
-            do {
-                _ = try BackupService.shared.exportToVault(from: ctx)
-                statusMessage = "Senkronize edildi ✓"
-            } catch {
-                // emptyStore / richerVault → zaten güncel demektir
-                statusMessage = "Güncel ✓"
-            }
+            statusMessage = "Senkronize edildi ✓"
             isWorking = false
             refreshTick = UUID()
         }
@@ -1864,11 +1864,11 @@ struct MobileRootView: View {
 
     private func restoreIfNewer() {
         guard vaultConfigured else { return }
-        // Bloklamayan: ağır iCloud okuması arka planda yapılır, UI ilk kareyi anında
-        // çizer. Eskiden bu .onAppear'da senkron çalışıp açılışı dakikalarca dondururdu.
+        // Bloklamayan + throttle'lı oto-senkron (pull-merge + push). Ağır iCloud okuması
+        // arka planda; UI ilk kareyi anında çizer. Merge ezmez, katar.
         Task { @MainActor in
             isWorking = true
-            await BackupService.shared.restoreFromVaultIfNewerNonBlocking(into: ctx)
+            await BackupService.shared.autoSyncWithVault(into: ctx)
             FoodPresetSeed.upsertDefaults(ctx)
             isWorking = false
             refreshTick = UUID()

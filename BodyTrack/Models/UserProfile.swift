@@ -139,6 +139,8 @@ final class UserProfile {
     /// Kullanıcının düzenli kullandığı supplementler — AI context'e kalıcı
     /// profil bilgisi olarak enjekte edilir.
     var supplements: String = UserProfile.defaultSupplements
+    /// Sync merge: son değişiklik zamanı (çakışmada yenisi kazanır).
+    var updatedAt: Date = Date.now
 
     init(
         name: String = "",

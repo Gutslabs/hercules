@@ -33,7 +33,7 @@ struct BodyTrackApp: App {
             Task { @MainActor in
                 BackupService.shared.importIfStoreEmpty(into: ctx)
                 BackupService.shared.restoreFromICloudIfNewer(into: ctx)
-                BackupService.shared.restoreFromVaultIfNewer(into: ctx)
+                await BackupService.shared.autoSyncWithVault(into: ctx) // vault: pull-merge + push
                 FoodPresetSeed.upsertDefaults(ctx)
                 ShortcutHealthSyncService.shared.startAutoImport(into: ctx)
             }
@@ -123,17 +123,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             if let ctx = Self.sharedContainer?.mainContext {
                 BackupService.shared.exportAsync(from: ctx)
+                await BackupService.shared.autoSyncWithVault(into: ctx) // değişiklikleri vault'a it
             }
         }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        // Aktive olunca OTOMATİK vault restore YOK — bellekteki/diskteki güncel veriyi
-        // ezebilir (sessiz veri kaybı). İlk açılışta init'te restore edilir; sonradan
-        // içeri alma kullanıcı tetiklemeli. Health import additive olduğu için kalır.
+        // Artık güvenli: vault senkronu MERGE (union) — ezmez, katar. Foreground'da
+        // otomatik pull-merge + push (throttle'lı). Health import additive.
         Task { @MainActor in
             if let ctx = Self.sharedContainer?.mainContext {
                 ShortcutHealthSyncService.shared.importIfAvailable(into: ctx)
+                await BackupService.shared.autoSyncWithVault(into: ctx)
             }
         }
     }

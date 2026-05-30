@@ -202,6 +202,8 @@ final class WorkoutSession {
     var warmup: String?
     var progression: String?
     var notes: String?
+    /// Sync merge: son değişiklik zamanı (çakışmada yenisi kazanır).
+    var updatedAt: Date = Date.now
     @Relationship(deleteRule: .cascade) var templateExercises: [WorkoutTemplateExercise] = []
 
     init(

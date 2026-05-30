@@ -8,6 +8,8 @@ final class MonthlyGoal {
     /// O tarihte ulaşılmak istenen kilo (kg).
     var targetWeight: Double
     var note: String?
+    /// Sync merge: son değişiklik zamanı (çakışmada yenisi kazanır).
+    var updatedAt: Date = Date.now
 
     init(anchorDate: Date, targetWeight: Double, note: String? = nil) {
         self.anchorDate = anchorDate

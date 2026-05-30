@@ -10,6 +10,8 @@ final class FoodEntry {
     var protein: Double?
     var carbs: Double?
     var fat: Double?
+    /// Sync merge: son değişiklik zamanı (çakışmada yenisi kazanır).
+    var updatedAt: Date = Date.now
 
     init(
         date: Date = .now,

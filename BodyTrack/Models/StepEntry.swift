@@ -10,6 +10,8 @@ final class StepEntry {
     var distanceMeters: Double?
     var activeEnergyKcal: Double?
     var syncedAt: Date?
+    /// Sync merge: son değişiklik zamanı (çakışmada yenisi kazanır).
+    var updatedAt: Date = Date.now
 
     init(
         date: Date = .now,

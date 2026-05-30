@@ -11,6 +11,8 @@ final class WorkoutLog {
     var notes: String?
     /// Tahmini kalori — kullanıcı manuel girer ya da süre × yoğunluk hesaplaması.
     var estimatedCalories: Double
+    /// Sync merge: son değişiklik zamanı (çakışmada yenisi kazanır).
+    var updatedAt: Date = Date.now
     @Relationship(deleteRule: .cascade) var exercises: [WorkoutExerciseEntry] = []
 
     init(

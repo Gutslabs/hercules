@@ -67,6 +67,10 @@ final class BackupService {
     ]
 
     private let vaultBookmarkKey = "hercules.vault.bookmark_v1"
+    /// Merge öncesi güvenlik yedeği oturumda bir kez yazılsın (her foreground'da değil).
+    private var didWriteMergeSafety = false
+    /// Oto-senkron throttle'ı — sık foreground/background olaylarında vault'u dövmesin.
+    private var lastAutoSyncAt: Date?
     private let vaultLastSeenExportKey = "hercules.vault.last_seen_exported_at_v1"
     private let vaultDeviceIDKey = "hercules.vault.device_id_v1"
     private let vaultSnapshotRelativePath = "data/hercules-backup.json"
@@ -353,7 +357,7 @@ final class BackupService {
         let workoutLogs = (try? ctx.fetch(FetchDescriptor<WorkoutLog>(sortBy: [SortDescriptor(\.date)]))) ?? []
 
         return HerculesBackup(
-            version: 12,
+            version: 13,
             exportedAt: .now,
             profile: profileData,
             measurements: measurements.map {
@@ -476,7 +480,11 @@ final class BackupService {
                 )
             },
             supportFiles: buildSupportFileSnapshots(),
-            preferences: buildPreferenceSnapshots()
+            preferences: buildPreferenceSnapshots(),
+            // Sync v13: kayıt-başına updatedAt + mevcut tombstone seti (SAF — burada
+            // mutasyon yok; yeni silme tespiti push anında recordPushDeletionsAndTombstones'da).
+            recordTimestamps: currentKeysAndTimestamps(ctx: ctx).timestamps,
+            tombstones: Array(loadTombstones().values)
         )
     }
 
@@ -550,27 +558,11 @@ final class BackupService {
 
     /// App açıldığında/öne geldiğinde seçili vault daha yeniyse içeri alır.
     /// Local taraf anlamlı veri taşıyorsa restore öncesi local safety backup alınır.
+    /// Geri-uyumluluk girişi: artık "ifNewer" gating + replaceAll YOK. Union merge her
+    /// zaman güvenli olduğu için tam iki-yönlü senkronu (pull-merge + push) çalıştırır.
     func restoreFromVaultIfNewer(into ctx: ModelContext) {
-        do {
-            let shouldRestore = try withVaultRoot { root in
-                guard let candidate = bestVaultRestoreCandidate(root: root) else { return false }
-                let vaultDate = candidate.backup.exportedAt
-                let localDate = comparableBackupDate(for: backupURL) ?? .distantPast
-                let localIsEmpty = !storeHasMeaningfulData(ctx)
-                let candidateScore = Self.backupMeaningfulScore(candidate.backup)
-                let candidateIsMeaningful = candidateScore > 0
-                let localScore = (try? buildBackup(ctx: ctx)).map(Self.backupMeaningfulScore) ?? 0
-                let candidateIsMuchRicher = candidateScore >= localScore + 25
-                return (localIsEmpty && candidateIsMeaningful)
-                    || candidateIsMuchRicher
-                    || vaultDate.timeIntervalSince(localDate) > 2
-            }
-            guard shouldRestore else { return }
-            try restoreFromVault(into: ctx)
-            AppLog.backup.notice("[Vault] restored newer vault snapshot")
-        } catch {
-            AppLog.backup.error("[Vault] auto-restore failed: \(String(describing: error))")
-        }
+        do { try syncWithVault(into: ctx) }
+        catch { AppLog.backup.error("[Vault] sync failed: \(String(describing: error))") }
     }
 
     /// iCloud vault dosyalarını ana thread DIŞINDA indirip önbelleğe ısıtır.
@@ -605,12 +597,7 @@ final class BackupService {
     /// planda ısıtır, sonra mevcut (kanıtlanmış) senkron mantığı main'de çalıştırır —
     /// ağır iCloud indirmesi artık ana thread'i (ve uygulama açılışını) dondurmaz.
     func restoreFromVaultIfNewerNonBlocking(into ctx: ModelContext) async {
-        guard let bookmarkData = UserDefaults.standard.data(forKey: vaultBookmarkKey) else { return }
-        let relativePaths = [vaultSnapshotRelativePath, vaultLegacySnapshotName, vaultManifestName]
-        await Task.detached(priority: .utility) {
-            BackupService.warmVaultFilesDetached(bookmarkData: bookmarkData, relativePaths: relativePaths)
-        }.value
-        restoreFromVaultIfNewer(into: ctx) // okumalar artık yerel önbellekten → hızlı
+        await syncWithVaultNonBlocking(into: ctx)
     }
 
     private func writeVaultSnapshot(_ backup: HerculesBackup, data: Data) throws -> VaultOperationSummary {
@@ -1414,4 +1401,442 @@ final class BackupService {
 
 extension Notification.Name {
     static let herculesSupportFilesRestored = Notification.Name("hercules.support-files.restored")
+}
+
+// MARK: - Sync merge engine (union + çakışma + tombstone)
+//
+// İki cihazı KATARAK senkronlar (replaceAll gibi ezmez): bir cihazda olup
+// diğerinde olmayan kayıt eklenir; aynı kayıt iki yerde değiştiyse updatedAt
+// yenisi kazanır; silmeler tombstone ile propagate olur (geri dirilmez).
+//
+// Kimlik: uid YOK. Anahtarlar DEĞİŞMEZ alanlardan türetilir; böylece eski
+// replaceAll-sync ile zaten kopyalanmış kayıtlar iki cihazda aynı anahtarı
+// üretir ve ilk merge'de çiftlenmez.
+extension BackupService {
+
+    enum SyncKey {
+        static func ms(_ date: Date) -> Int { Int((date.timeIntervalSince1970 * 1000).rounded()) }
+        static func day(_ date: Date) -> String {
+            let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+            return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
+        }
+        static func month(_ date: Date) -> String {
+            let c = Calendar.current.dateComponents([.year, .month], from: date)
+            return "\(c.year ?? 0)-\(c.month ?? 0)"
+        }
+
+        static let profile = "profile"
+        static func measurement(_ d: Date) -> String { "m-\(ms(d))" }
+        static func food(_ d: Date, _ name: String) -> String { "f-\(ms(d))-\(name)" }
+        static func step(_ d: Date) -> String { "s-\(day(d))" }
+        static func goal(_ anchor: Date) -> String { "g-\(month(anchor))" }
+        static func recipe(_ createdAt: Date) -> String { "r-\(ms(createdAt))" }
+        static func workoutLog(_ d: Date, _ name: String) -> String { "wl-\(ms(d))-\(name)" }
+        static func workout(_ weekday: Int) -> String { "ws-\(weekday)" }
+        static func archive(_ archivedAt: Date, _ title: String) -> String { "wa-\(ms(archivedAt))-\(title)" }
+        static func planOverride(_ createdAt: Date, _ weekday: Int, _ name: String) -> String { "wo-\(ms(createdAt))-\(weekday)-\(name)" }
+        static func preset(_ id: String) -> String { "fp-\(id)" }
+    }
+
+    // MARK: Local sync state (tombstones + son sync anahtarları)
+
+    private var syncStateDir: URL { backupURL.deletingLastPathComponent() }
+    private var tombstonesFileURL: URL { syncStateDir.appendingPathComponent("sync-tombstones.json") }
+    private var lastKeysFileURL: URL { syncStateDir.appendingPathComponent("sync-lastkeys.json") }
+
+    /// key → en yeni tombstone.
+    func loadTombstones() -> [String: TombstoneSnapshot] {
+        guard let data = try? Data(contentsOf: tombstonesFileURL),
+              let arr = try? decoder.decode([TombstoneSnapshot].self, from: data) else { return [:] }
+        var map: [String: TombstoneSnapshot] = [:]
+        for t in arr {
+            if let e = map[t.key] { if t.deletedAt > e.deletedAt { map[t.key] = t } } else { map[t.key] = t }
+        }
+        return map
+    }
+
+    func saveTombstones(_ map: [String: TombstoneSnapshot]) {
+        // 180 günden eski tombstone'ları buda (sınırsız büyümesin).
+        let cutoff = Date().addingTimeInterval(-180 * 86_400)
+        let kept = map.values.filter { $0.deletedAt >= cutoff }
+        if let data = try? encoder.encode(Array(kept)) {
+            try? data.write(to: tombstonesFileURL, options: [.atomic])
+        }
+    }
+
+    private func loadLastSyncedKeys() -> Set<String> {
+        guard let data = try? Data(contentsOf: lastKeysFileURL),
+              let arr = try? decoder.decode([String].self, from: data) else { return [] }
+        return Set(arr)
+    }
+
+    private func saveLastSyncedKeys(_ keys: Set<String>) {
+        if let data = try? encoder.encode(Array(keys)) {
+            try? data.write(to: lastKeysFileURL, options: [.atomic])
+        }
+    }
+
+    /// Tüm canlı kayıtların merge anahtarları + updatedAt'leri.
+    func currentKeysAndTimestamps(ctx: ModelContext) -> (keys: Set<String>, timestamps: [String: Date]) {
+        var keys = Set<String>()
+        var ts: [String: Date] = [:]
+        func add(_ k: String, _ d: Date) { keys.insert(k); ts[k] = d }
+
+        if let p = (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first { add(SyncKey.profile, p.updatedAt) }
+        for m in (try? ctx.fetch(FetchDescriptor<Measurement>())) ?? [] { add(SyncKey.measurement(m.date), m.updatedAt) }
+        for f in (try? ctx.fetch(FetchDescriptor<FoodEntry>())) ?? [] { add(SyncKey.food(f.date, f.name), f.updatedAt) }
+        for s in (try? ctx.fetch(FetchDescriptor<StepEntry>())) ?? [] { add(SyncKey.step(s.date), s.updatedAt) }
+        for g in (try? ctx.fetch(FetchDescriptor<MonthlyGoal>())) ?? [] { add(SyncKey.goal(g.anchorDate), g.updatedAt) }
+        for r in (try? ctx.fetch(FetchDescriptor<Recipe>())) ?? [] { add(SyncKey.recipe(r.createdAt), r.updatedAt) }
+        for w in (try? ctx.fetch(FetchDescriptor<WorkoutSession>())) ?? [] { add(SyncKey.workout(w.weekday), w.updatedAt) }
+        for a in (try? ctx.fetch(FetchDescriptor<WorkoutProgramArchive>())) ?? [] { add(SyncKey.archive(a.archivedAt, a.title), a.archivedAt) }
+        for o in (try? ctx.fetch(FetchDescriptor<WorkoutPlanOverride>())) ?? [] { add(SyncKey.planOverride(o.createdAt, o.weekday, o.exerciseName), o.createdAt) }
+        for fp in (try? ctx.fetch(FetchDescriptor<FoodPreset>())) ?? [] { add(SyncKey.preset(fp.presetID), fp.updatedAt) }
+        for l in (try? ctx.fetch(FetchDescriptor<WorkoutLog>())) ?? [] { add(SyncKey.workoutLog(l.date, l.name), l.updatedAt) }
+        return (keys, ts)
+    }
+
+    /// Push öncesi: son sync'ten bu yana SİLİNEN anahtarlar için tombstone üretir,
+    /// lastSyncedKeys'i günceller. Dönen liste snapshot'a yazılır.
+    func recordPushDeletionsAndTombstones(ctx: ModelContext) -> [TombstoneSnapshot] {
+        let current = currentKeysAndTimestamps(ctx: ctx).keys
+        var tombs = loadTombstones()
+        let deleted = loadLastSyncedKeys().subtracting(current)
+        if !deleted.isEmpty {
+            let now = Date()
+            for key in deleted {
+                let entity = String(key.prefix(while: { $0 != "-" }))
+                if let existing = tombs[key], existing.deletedAt >= now { continue }
+                tombs[key] = TombstoneSnapshot(entity: entity, key: key, deletedAt: now)
+            }
+            saveTombstones(tombs)
+        }
+        // NOT: canlı anahtarlar için tombstone SİLİNMEZ — recreate senaryosunu applyMerge
+        // zaten (record.updatedAt > tombstone.deletedAt) ile çözer. Burada silmek, henüz
+        // merge etmemiş diğer cihaza giden silmeyi kaybettirirdi.
+        saveLastSyncedKeys(current)
+        return Array(tombs.values)
+    }
+
+    /// İki-yönlü union merge. Incoming snapshot'ı local'e KATAR. Çakışmada updatedAt
+    /// yenisi kazanır; tombstone'lar silmeleri uygular. Ham save() kullanır (updatedAt
+    /// snapshot'tan gelir, saveOrReport damgası onu ezmesin).
+    func applyMerge(_ backup: HerculesBackup, into ctx: ModelContext) {
+        let incomingTS = backup.recordTimestamps ?? [:]
+
+        // 1) tombstone'ları birleştir
+        var tombs = loadTombstones()
+        for t in (backup.tombstones ?? []) {
+            if let e = tombs[t.key] { if t.deletedAt > e.deletedAt { tombs[t.key] = t } } else { tombs[t.key] = t }
+        }
+        func resolvedTS(_ key: String, _ fallback: Date) -> Date { incomingTS[key] ?? fallback }
+        func tombstoned(_ key: String, _ recordDate: Date) -> Bool {
+            if let t = tombs[key], t.deletedAt >= recordDate { return true }
+            return false
+        }
+
+        // 2) PROFILE (singleton)
+        if let ps = backup.profile {
+            let key = SyncKey.profile
+            let u = resolvedTS(key, backup.exportedAt)
+            let existing = (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first
+            if !tombstoned(key, u) {
+                if let existing {
+                    if u > existing.updatedAt { applyProfileSnapshot(ps, to: existing); existing.updatedAt = u }
+                } else {
+                    let p = UserProfile(); ctx.insert(p); applyProfileSnapshot(ps, to: p); p.updatedAt = u
+                }
+            }
+        }
+
+        // 3) MEASUREMENTS
+        mergeUpsert(
+            Measurement.self,
+            ctx: ctx, incoming: backup.measurements,
+            key: { SyncKey.measurement($0.date) }, fallbackDate: { $0.date },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.measurement($0.date) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let m = Measurement(date: snap.date, weight: snap.weight, bodyFat: snap.bodyFat, waist: snap.waist, chest: snap.chest, neck: snap.neck, note: snap.note)
+                m.updatedAt = u; ctx.insert(m)
+            }
+        )
+
+        // 4) FOODS
+        mergeUpsert(
+            FoodEntry.self,
+            ctx: ctx, incoming: backup.foods,
+            key: { SyncKey.food($0.date, $0.name) }, fallbackDate: { $0.date },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.food($0.date, $0.name) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let f = FoodEntry(date: snap.date, name: snap.name, grams: snap.grams, calories: snap.calories, protein: snap.protein, carbs: snap.carbs, fat: snap.fat)
+                f.updatedAt = u; ctx.insert(f)
+            }
+        )
+
+        // 5) STEPS
+        mergeUpsert(
+            StepEntry.self,
+            ctx: ctx, incoming: backup.steps,
+            key: { SyncKey.step($0.date) }, fallbackDate: { $0.date },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.step($0.date) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let s = StepEntry(date: snap.date, steps: snap.steps, source: snap.source, distanceMeters: snap.distanceMeters, activeEnergyKcal: snap.activeEnergyKcal, syncedAt: snap.syncedAt)
+                s.updatedAt = u; ctx.insert(s)
+            }
+        )
+
+        // 6) MONTHLY GOALS
+        mergeUpsert(
+            MonthlyGoal.self,
+            ctx: ctx, incoming: backup.monthlyGoals ?? [],
+            key: { SyncKey.goal($0.anchorDate) }, fallbackDate: { $0.anchorDate },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.goal($0.anchorDate) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let g = MonthlyGoal(anchorDate: snap.anchorDate, targetWeight: snap.targetWeight, note: snap.note)
+                g.updatedAt = u; ctx.insert(g)
+            }
+        )
+
+        // 7) RECIPES
+        mergeUpsert(
+            Recipe.self,
+            ctx: ctx, incoming: backup.recipes,
+            key: { SyncKey.recipe($0.createdAt) }, fallbackDate: { $0.createdAt },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.recipe($0.createdAt) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let r = Recipe(title: snap.title, urlString: snap.urlString, category: RecipeCategory(rawValue: snap.category) ?? .dinner, isFavorite: snap.isFavorite ?? false, summary: snap.summary, ingredientsText: snap.ingredientsText, instructionsText: snap.instructionsText, servings: snap.servings, prepMinutes: snap.prepMinutes, calories: snap.calories, protein: snap.protein, carbs: snap.carbs, fat: snap.fat, createdAt: snap.createdAt)
+                r.updatedAt = u; ctx.insert(r)
+            }
+        )
+
+        // 8) WORKOUT SESSIONS (template + nested exercises)
+        mergeUpsert(
+            WorkoutSession.self,
+            ctx: ctx, incoming: backup.workouts,
+            key: { SyncKey.workout($0.weekday) }, fallbackDate: { _ in backup.exportedAt },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.workout($0.weekday) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let session = WorkoutSession(weekday: snap.weekday, name: snap.name, estimatedCalories: snap.estimatedCalories, durationMinutes: snap.durationMinutes ?? 60, focus: snap.focus, warmup: snap.warmup, progression: snap.progression, notes: snap.notes)
+                session.updatedAt = u
+                ctx.insert(session)
+                for ex in (snap.exercises ?? []).sorted(by: { $0.order < $1.order }) {
+                    let e = WorkoutTemplateExercise(name: ex.name, order: ex.order, sets: ex.sets, reps: ex.reps, load: ex.load, rir: ex.rir, rest: ex.rest, sourceURL: ex.sourceURL, notes: ex.notes)
+                    ctx.insert(e)
+                    session.templateExercises.append(e)
+                }
+            }
+        )
+
+        // 9) WORKOUT ARCHIVES (archivedAt = recency proxy)
+        mergeUpsert(
+            WorkoutProgramArchive.self,
+            ctx: ctx, incoming: backup.workoutArchives ?? [],
+            key: { SyncKey.archive($0.archivedAt, $0.title) }, fallbackDate: { $0.archivedAt },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.archive($0.archivedAt, $0.title) }, localUpdatedAt: { $0.archivedAt },
+            insert: { snap, _ in
+                ctx.insert(WorkoutProgramArchive(title: snap.title, summary: snap.summary, notes: snap.notes, source: snap.source, archivedAt: snap.archivedAt, sessionsJSON: snap.sessionsJSON))
+            }
+        )
+
+        // 10) WORKOUT PLAN OVERRIDES (createdAt = recency proxy)
+        mergeUpsert(
+            WorkoutPlanOverride.self,
+            ctx: ctx, incoming: backup.workoutPlanOverrides ?? [],
+            key: { SyncKey.planOverride($0.createdAt, $0.weekday, $0.exerciseName) }, fallbackDate: { $0.createdAt },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.planOverride($0.createdAt, $0.weekday, $0.exerciseName) }, localUpdatedAt: { $0.createdAt },
+            insert: { snap, _ in
+                ctx.insert(WorkoutPlanOverride(weekday: snap.weekday, operation: WorkoutPlanOverrideOperation(rawValue: snap.operationRaw) ?? .addExercise, exerciseName: snap.exerciseName, sets: snap.sets, reps: snap.reps, weight: snap.weight, note: snap.note, source: snap.source, createdAt: snap.createdAt))
+            }
+        )
+
+        // 11) FOOD PRESETS
+        mergeUpsert(
+            FoodPreset.self,
+            ctx: ctx, incoming: backup.foodPresets ?? [],
+            key: { SyncKey.preset($0.presetID) }, fallbackDate: { $0.updatedAt },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.preset($0.presetID) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let p = FoodPreset(presetID: snap.presetID, name: snap.name, brand: snap.brand, category: snap.category, servingLabel: snap.servingLabel, servingGrams: snap.servingGrams, defaultServings: snap.defaultServings, calories: snap.calories, protein: snap.protein, carbs: snap.carbs, fat: snap.fat, note: snap.note, searchText: snap.searchText, sortOrder: snap.sortOrder, createdAt: snap.createdAt, updatedAt: snap.updatedAt)
+                p.updatedAt = u; ctx.insert(p)
+            }
+        )
+
+        // 12) WORKOUT LOGS (nested exercises + sets)
+        mergeUpsert(
+            WorkoutLog.self,
+            ctx: ctx, incoming: backup.workoutLogs ?? [],
+            key: { SyncKey.workoutLog($0.date, $0.name) }, fallbackDate: { $0.date },
+            ts: incomingTS, tombs: tombs,
+            localKey: { SyncKey.workoutLog($0.date, $0.name) }, localUpdatedAt: { $0.updatedAt },
+            insert: { snap, u in
+                let log = WorkoutLog(date: snap.date, name: snap.name, durationMinutes: snap.durationMinutes, estimatedCalories: snap.estimatedCalories, notes: snap.notes)
+                log.updatedAt = u
+                ctx.insert(log)
+                for ex in snap.exercises.sorted(by: { $0.order < $1.order }) {
+                    let entry = WorkoutExerciseEntry(name: ex.name, order: ex.order)
+                    ctx.insert(entry)
+                    for st in ex.sets.sorted(by: { $0.order < $1.order }) {
+                        let set = ExerciseSet(order: st.order, reps: st.reps, weight: st.weight)
+                        ctx.insert(set)
+                        entry.setEntries.append(set)
+                    }
+                    log.exercises.append(entry)
+                }
+            }
+        )
+
+        // 13) tombstone'ları KALAN local kayıtlara uygula (incoming'de olmayanlar dahil)
+        applyTombstonesToLocalRecords(tombs, ctx: ctx)
+
+        // 14) ham save (saveOrReport DEĞİL — updatedAt ezilmesin)
+        do { try ctx.save() } catch {
+            AppLog.backup.error("[Merge] save failed: \(String(describing: error))")
+        }
+
+        // 15) durumu güncelle
+        saveTombstones(tombs)
+        saveLastSyncedKeys(currentKeysAndTimestamps(ctx: ctx).keys)
+        AppLog.backup.notice("[Merge] union merge applied")
+    }
+
+    /// Generic upsert: incoming kayıtları local'e katar; çakışmada updatedAt yenisi
+    /// kazanır (eski local'i silip yenisini ekler); tombstone'lanmışsa atlar/siler.
+    private func mergeUpsert<Snapshot, Model: PersistentModel>(
+        _ modelType: Model.Type,
+        ctx: ModelContext,
+        incoming: [Snapshot],
+        key: (Snapshot) -> String,
+        fallbackDate: (Snapshot) -> Date,
+        ts: [String: Date],
+        tombs: [String: TombstoneSnapshot],
+        localKey: (Model) -> String,
+        localUpdatedAt: (Model) -> Date,
+        insert: (Snapshot, Date) -> Void
+    ) {
+        var localByKey: [String: Model] = [:]
+        for m in (try? ctx.fetch(FetchDescriptor<Model>())) ?? [] {
+            let k = localKey(m)
+            if localByKey[k] == nil { localByKey[k] = m }
+        }
+        for snap in incoming {
+            let k = key(snap)
+            let u = ts[k] ?? fallbackDate(snap)
+            if let t = tombs[k], t.deletedAt >= u {
+                if let local = localByKey[k] { ctx.delete(local); localByKey[k] = nil }
+                continue
+            }
+            if let local = localByKey[k] {
+                if u > localUpdatedAt(local) {
+                    ctx.delete(local)
+                    insert(snap, u)
+                }
+            } else {
+                insert(snap, u)
+            }
+        }
+    }
+
+    /// Tombstone'u olan ve updatedAt'i tombstone'dan eski olan TÜM local kayıtları sil.
+    private func applyTombstonesToLocalRecords(_ tombs: [String: TombstoneSnapshot], ctx: ModelContext) {
+        guard !tombs.isEmpty else { return }
+        func purge<Model: PersistentModel>(_ type: Model.Type, key: (Model) -> String, updatedAt: (Model) -> Date) {
+            for m in (try? ctx.fetch(FetchDescriptor<Model>())) ?? [] {
+                if let t = tombs[key(m)], t.deletedAt >= updatedAt(m) { ctx.delete(m) }
+            }
+        }
+        purge(Measurement.self, key: { SyncKey.measurement($0.date) }, updatedAt: { $0.updatedAt })
+        purge(FoodEntry.self, key: { SyncKey.food($0.date, $0.name) }, updatedAt: { $0.updatedAt })
+        purge(StepEntry.self, key: { SyncKey.step($0.date) }, updatedAt: { $0.updatedAt })
+        purge(MonthlyGoal.self, key: { SyncKey.goal($0.anchorDate) }, updatedAt: { $0.updatedAt })
+        purge(Recipe.self, key: { SyncKey.recipe($0.createdAt) }, updatedAt: { $0.updatedAt })
+        purge(WorkoutSession.self, key: { SyncKey.workout($0.weekday) }, updatedAt: { $0.updatedAt })
+        purge(WorkoutProgramArchive.self, key: { SyncKey.archive($0.archivedAt, $0.title) }, updatedAt: { $0.archivedAt })
+        purge(WorkoutPlanOverride.self, key: { SyncKey.planOverride($0.createdAt, $0.weekday, $0.exerciseName) }, updatedAt: { $0.createdAt })
+        purge(WorkoutLog.self, key: { SyncKey.workoutLog($0.date, $0.name) }, updatedAt: { $0.updatedAt })
+        // FoodPreset/UserProfile silinmez (preset'ler seed, profil tekil) — tombstone uygulanmaz.
+    }
+
+    private func applyProfileSnapshot(_ ps: ProfileSnapshot, to p: UserProfile) {
+        p.name = ps.name
+        p.sex = Sex(rawValue: ps.sex) ?? .male
+        p.birthDate = ps.birthDate
+        p.height = ps.height
+        p.activity = ActivityLevel(rawValue: ps.activity) ?? .moderate
+        p.goal = Goal(rawValue: ps.goal) ?? .maintain
+        p.targetWeight = ps.targetWeight
+        p.manualBodyFat = ps.manualBodyFat
+        p.manualCalorieOffset = ps.manualCalorieOffset
+        p.manualCalorieOffsetMacro = ps.manualCalorieOffsetMacro.flatMap(CalorieOffsetMacro.init(rawValue:)) ?? .carbs
+        p.manualProteinGrams = ps.manualProteinGrams
+        p.manualCarbsGrams = ps.manualCarbsGrams
+        p.manualFatGrams = ps.manualFatGrams
+        p.about = ps.about ?? ""
+        p.supplements = (ps.supplements ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? UserProfile.defaultSupplements
+            : (ps.supplements ?? UserProfile.defaultSupplements)
+    }
+
+    // MARK: Kanonik sync (pull-merge + push) — kayıpsız, atomik.
+
+    /// Vault ile iki-yönlü senkron: (1) yerel silmeleri tombstone'a çevir, (2) vault'u
+    /// local'e KATARAK çek (merge), (3) birleşmiş local'i vault'a yaz. Sıra kritik:
+    /// silme tespiti merge'den ÖNCE olmalı, yoksa merge silineni vault'tan geri ekler.
+    func syncWithVault(into ctx: ModelContext) throws {
+        _ = recordPushDeletionsAndTombstones(ctx: ctx) // 1) pull öncesi silme tespiti
+        try withVaultRoot { root in                    // 2) PULL: union merge
+            try Self.ensureVaultLayout(
+                root: root,
+                snapshotRelativePath: vaultSnapshotRelativePath,
+                legacySnapshotName: vaultLegacySnapshotName,
+                manifestName: vaultManifestName,
+                readmeName: vaultReadmeName
+            )
+            if let candidate = bestVaultRestoreCandidate(root: root) {
+                writeMergeSafetyBackupOnce(into: root, from: ctx)
+                applyMerge(candidate.backup, into: ctx)
+            }
+        }
+        do {                                            // 3) PUSH: birleşmiş local → vault
+            _ = try exportToVault(from: ctx)
+        } catch BackupServiceError.emptyStoreExportSkipped {
+        } catch BackupServiceError.richerVaultSnapshotExists {
+            // merge sonrası olmamalı; zaten güncel say.
+        }
+    }
+
+    /// Oto-tetikleyiciler (launch/foreground/background) için throttle'lı sürüm —
+    /// 8 sn içinde tekrar çağrılırsa atlar. Manuel "Şimdi Senkronize Et" throttle'sızdır.
+    func autoSyncWithVault(into ctx: ModelContext) async {
+        guard UserDefaults.standard.data(forKey: vaultBookmarkKey) != nil else { return }
+        if let last = lastAutoSyncAt, Date().timeIntervalSince(last) < 8 { return }
+        lastAutoSyncAt = Date()
+        await syncWithVaultNonBlocking(into: ctx)
+    }
+
+    /// `syncWithVault`'un bloklamayan sürümü: iCloud dosyalarını arka planda ısıtır,
+    /// sonra senkronu main'de çalıştırır (ağır okuma ana thread'i dondurmaz).
+    func syncWithVaultNonBlocking(into ctx: ModelContext) async {
+        guard let bookmarkData = UserDefaults.standard.data(forKey: vaultBookmarkKey) else { return }
+        let relativePaths = [vaultSnapshotRelativePath, vaultLegacySnapshotName, vaultManifestName]
+        await Task.detached(priority: .utility) {
+            BackupService.warmVaultFilesDetached(bookmarkData: bookmarkData, relativePaths: relativePaths)
+        }.value
+        do { try syncWithVault(into: ctx) }
+        catch { AppLog.backup.error("[Sync] syncWithVault failed: \(String(describing: error))") }
+    }
+
+    private func writeMergeSafetyBackupOnce(into root: URL, from ctx: ModelContext) {
+        guard !didWriteMergeSafety else { return }
+        didWriteMergeSafety = true
+        try? writePreVaultRestoreSafetyBackup(into: root, from: ctx)
+    }
 }

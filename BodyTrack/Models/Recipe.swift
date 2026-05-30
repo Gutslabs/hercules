@@ -39,6 +39,8 @@ final class Recipe {
     var carbs: Double?
     var fat: Double?
     var createdAt: Date
+    /// Sync merge: son değişiklik zamanı (çakışmada yenisi kazanır).
+    var updatedAt: Date = Date.now
 
     init(
         title: String,

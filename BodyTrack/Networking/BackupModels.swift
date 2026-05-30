@@ -21,6 +21,19 @@ struct HerculesBackup: Codable {
     let supportFiles: [SupportFileSnapshot]?
     /// v3+: SwiftData dışında kalan küçük UserDefaults tercihleri.
     let preferences: [PreferenceSnapshot]?
+    /// v13+: kayıt başına son-değişiklik zamanı (mergeKey → updatedAt). Union-merge'de
+    /// aynı anahtar çakışırsa yenisi kazansın diye. Eski snapshot'larda nil.
+    let recordTimestamps: [String: Date]?
+    /// v13+: silinen kayıtların mezar taşları — silme propagate olsun, geri dirilmesin.
+    let tombstones: [TombstoneSnapshot]?
+}
+
+/// Bir kaydın silindiğini iki-yönlü merge'e bildiren kayıt. `key` = entity'nin
+/// türetilmiş merge anahtarı (örn. "f-1717180000000-kıyma").
+struct TombstoneSnapshot: Codable, Hashable {
+    let entity: String
+    let key: String
+    let deletedAt: Date
 }
 
 struct ProfileSnapshot: Codable {

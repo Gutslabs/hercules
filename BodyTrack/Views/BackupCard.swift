@@ -314,14 +314,16 @@ struct BackupCard: View {
     /// veriyi vault + iCloud'dan çek, sonra yerel veriyi tüm hedeflere yaz.
     private func syncNow() {
         importing = true
-        defer { importing = false }
-        BackupService.shared.restoreFromVaultIfNewer(into: ctx)
-        BackupService.shared.restoreFromICloudIfNewer(into: ctx)
-        FoodPresetSeed.upsertDefaults(ctx)
-        _ = BackupService.shared.export(from: ctx)
-        if vaultConfigured { try? BackupService.shared.exportToVault(from: ctx) }
-        statusMessage = "✓ Senkronize edildi"
-        refreshInfo()
+        Task { @MainActor in
+            // Tam iki-yönlü merge senkron (pull-merge + push), bloklamayan.
+            await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
+            BackupService.shared.restoreFromICloudIfNewer(into: ctx) // legacy iCloud mirror (gated)
+            FoodPresetSeed.upsertDefaults(ctx)
+            _ = BackupService.shared.export(from: ctx)                // yerel yedek
+            statusMessage = "✓ Senkronize edildi"
+            refreshInfo()
+            importing = false
+        }
     }
 
     private func revealInFinder() {
