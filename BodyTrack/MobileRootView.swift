@@ -24,6 +24,8 @@ struct MobileRootView: View {
     @State private var statusMessage: String? = nil
     @State private var saveErrors = SaveErrorReporter.shared
     @State private var openRouterKey = ""
+    /// Keychain'den geri okunarak doğrulanan gerçek kalıcılık durumu (text kutusu değil).
+    @State private var keyPersisted = false
     @State private var showProfileEditor = false
     @State private var showRecipeEditor = false
     @State private var recipeToEdit: Recipe?
@@ -111,7 +113,9 @@ struct MobileRootView: View {
         }
         .onAppear {
             restoreIfNewer()
+            // Getter Keychain'den okur — boş değilse key gerçekten kalıcı kayıtlı demektir.
             openRouterKey = AIKeyStore.shared.apiKey
+            keyPersisted = !openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         .onChange(of: scenePhase) { _, newPhase in
             // Aktive olunca OTOMATİK restore YOK — bellekteki düzenlemeleri ezebilir.
@@ -622,19 +626,23 @@ struct MobileRootView: View {
         MobileCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
-                    icon("sparkles", color: aiKeyConfigured ? Palette.positive : Palette.accent)
+                    icon("sparkles", color: aiKeyConfigured ? Palette.positive : (keyHasText ? Palette.warning : Palette.accent))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("AI Sağlayıcı — OpenRouter")
                             .font(Typography.titleSmall)
                             .foregroundStyle(Palette.textPrimary)
-                        Text(aiKeyConfigured ? "Bağlı — yemek AI hazır" : "API key gir, yemek tahmini çalışsın")
+                        Text(keyStatusText)
                             .font(Typography.caption)
-                            .foregroundStyle(aiKeyConfigured ? Palette.positive : Palette.textTertiary)
+                            .foregroundStyle(keyStatusColor)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
                     if aiKeyConfigured {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(Palette.positive)
+                    } else if keyHasText {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Palette.warning)
                     }
                 }
                 HStack(spacing: 8) {
@@ -647,17 +655,22 @@ struct MobileRootView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .onChange(of: openRouterKey) { _, value in
+                            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                             AIKeyStore.shared.apiKey = value
-                            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if !trimmed.isEmpty {
                                 AIKeyStore.shared.provider = .openRouter
                             }
+                            // Geri oku: getter Keychain'den döner. Eşleşiyorsa yazma TUTTU
+                            // demektir; tutmadıysa (sessiz Keychain hatası) rozet "Bağlı" demez.
+                            keyPersisted = !trimmed.isEmpty
+                                && AIKeyStore.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
                         }
                 }
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
                 .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
 
-                Text("openrouter.ai/keys adresinden API key al. Telefonda Codex/Terminal gerekmez.")
+                Text("openrouter.ai/keys adresinden API key al. Bir kere yapıştır — Keychain'e kalıcı kaydedilir, uygulamayı kapatsan da durur. Telefonda Codex/Terminal gerekmez.")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -665,8 +678,24 @@ struct MobileRootView: View {
         }
     }
 
-    private var aiKeyConfigured: Bool {
+    /// Kutuda metin var mı (henüz kalıcı olup olmadığından bağımsız).
+    private var keyHasText: Bool {
         !openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// "Bağlı ✓" yalnızca key GERÇEKTEN Keychain'e yazılıp geri okunabildiyse true.
+    private var aiKeyConfigured: Bool { keyHasText && keyPersisted }
+
+    private var keyStatusText: String {
+        if aiKeyConfigured { return "Bağlı — Keychain'e kaydedildi, kalıcı" }
+        if keyHasText { return "Kaydedilemedi — key'i tekrar yapıştır" }
+        return "API key gir, yemek tahmini çalışsın"
+    }
+
+    private var keyStatusColor: Color {
+        if aiKeyConfigured { return Palette.positive }
+        if keyHasText { return Palette.warning }
+        return Palette.textTertiary
     }
 
     /// Tek dokunuşla iki-yönlü senkron: önce vault daha yeni/zenginse çek (Mac verisi),

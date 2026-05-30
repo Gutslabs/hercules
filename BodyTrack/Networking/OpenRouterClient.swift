@@ -454,8 +454,12 @@ final class AIKeyStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
+        // AfterFirstUnlock: cihaz yeniden başlatılıp ilk kez açıldıktan sonra (kilitliyken
+        // bile) okunabilir ve kalıcı kalır — "bir kere gir, sonsuza dek dursun". update'e de
+        // koyuyoruz ki eski WhenUnlocked kayıtlar da bu eriişme seviyesine taşınsın.
         let update: [String: Any] = [
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
         let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
         if status == errSecSuccess { return true }
@@ -463,6 +467,7 @@ final class AIKeyStore {
 
         var addQuery = query
         addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         return SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess
     }
 
