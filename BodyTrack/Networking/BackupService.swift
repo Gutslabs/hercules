@@ -134,13 +134,13 @@ final class BackupService {
 
     var vaultBackupExists: Bool {
         (try? withVaultRoot { root in
-            bestVaultRestoreCandidate(root: root) != nil
+            canonicalVaultSnapshot(root: root) != nil
         }) ?? false
     }
 
     var vaultLastSyncDate: Date? {
         guard let value = try? withVaultRoot({ root in
-            bestVaultRestoreCandidate(root: root)?.backup.exportedAt
+            canonicalVaultSnapshot(root: root)?.backup.exportedAt
         }) else { return nil }
         return value
     }
@@ -551,7 +551,7 @@ final class BackupService {
                 manifestName: vaultManifestName,
                 readmeName: vaultReadmeName
             )
-            guard let candidate = bestVaultRestoreCandidate(root: root) else {
+            guard let candidate = canonicalVaultSnapshot(root: root) else {
                 throw BackupServiceError.vaultSnapshotMissing
             }
             try writePreVaultRestoreSafetyBackup(into: root, from: ctx)
@@ -658,11 +658,10 @@ final class BackupService {
         let legacyURL = root.appendingPathComponent(legacySnapshotName)
         let manifestURL = root.appendingPathComponent(manifestName)
 
-        let didWriteConflict = copyVaultConflictIfNeeded(
-            snapshotURL: snapshotURL,
-            conflictsDir: root.appendingPathComponent("conflicts", isDirectory: true),
-            lastSeenExportedAt: lastSeenExportedAt
-        )
+        // Merge modelinde çakışma-arşivi GEREKSİZ: push öncesi merge zaten mevcut canonical
+        // snapshot'ı okuyup local'e kattı → veri kaybı yok. Arşivi kaldırdık: conflicts/
+        // şişmesin ve eski arşiv yanlışlıkla "en zengin" diye okunmasın.
+        let didWriteConflict = false
 
         try data.write(to: snapshotURL, options: [.atomic])
         try data.write(to: legacyURL, options: [.atomic])
@@ -705,60 +704,6 @@ final class BackupService {
         try data.write(to: url, options: [.atomic])
     }
 
-    /// Güncel snapshot'ı overwrite etmeden önce `conflicts/`'e arşivler. SADECE bir
-    /// güvenlik kopyası — push'u ASLA kırmamalı (merge zaten o snapshot'ı okuyup
-    /// kattığı için veri kaybı yok). Aynı saniyede ikinci kopya / herhangi bir kopyalama
-    /// hatası SESSİZCE geçilir. (Code=516 "File exists" tüm push'u patlatıp senkronu
-    /// durduruyordu.)
-    nonisolated private static func copyVaultConflictIfNeeded(
-        snapshotURL: URL,
-        conflictsDir: URL,
-        lastSeenExportedAt: Date?
-    ) -> Bool {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: snapshotURL.path) else { return false }
-        guard let data = try? Data(contentsOf: snapshotURL) else { return false }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let existing = try? decoder.decode(HerculesBackup.self, from: data)
-        let existingDate = existing?.exportedAt ?? ((try? fm.attributesOfItem(atPath: snapshotURL.path)[.modificationDate]) as? Date)
-        let lastSeen = lastSeenExportedAt ?? .distantPast
-        guard let existingDate, existingDate.timeIntervalSince(lastSeen) > 2 else { return false }
-
-        try? fm.createDirectory(at: conflictsDir, withIntermediateDirectories: true)
-        let conflictURL = conflictsDir.appendingPathComponent("hercules-conflict-\(timestampForFilename()).json")
-        guard !fm.fileExists(atPath: conflictURL.path) else { return false }
-        do { try fm.copyItem(at: snapshotURL, to: conflictURL) } catch { return false }
-        return true
-    }
-
-    private func bestVaultRestoreCandidate(root: URL) -> (url: URL, backup: HerculesBackup)? {
-        let candidates = vaultCandidateURLs(root: root).compactMap { url -> (url: URL, backup: HerculesBackup)? in
-            guard let data = try? Data(contentsOf: url),
-                  let backup = try? decoder.decode(HerculesBackup.self, from: data)
-            else { return nil }
-            return (url, backup)
-        }
-        guard !candidates.isEmpty else { return nil }
-
-        let ranked = candidates
-            .map { candidate in
-                (url: candidate.url, backup: candidate.backup, score: Self.backupMeaningfulScore(candidate.backup))
-            }
-            .sorted {
-                if $0.score != $1.score {
-                    return $0.score > $1.score
-                }
-                return $0.backup.exportedAt > $1.backup.exportedAt
-            }
-
-        if let meaningful = ranked.first(where: { $0.score > 0 }) {
-            return (meaningful.url, meaningful.backup)
-        }
-
-        return ranked.first.map { ($0.url, $0.backup) }
-    }
-
     /// SADECE kanonik snapshot'ı okur (data/hercules-backup.json, yoksa legacy) — en yeni
     /// exportedAt'i seçer. `backups/` ve `conflicts/` TARANMAZ. Merge/pull ve diagnostic
     /// bunu kullanır: yoksa en "zengin" eski yedek seçilip SİLİNEN kayıtlar geri dirilir
@@ -786,30 +731,6 @@ final class BackupService {
             guard vaultScore >= localScore + minimumScoreDelta else { return nil }
             return candidate
         }) ?? nil
-    }
-
-    private func vaultCandidateURLs(root: URL) -> [URL] {
-        let fm = FileManager.default
-        let required = [
-            root.appendingPathComponent(vaultSnapshotRelativePath),
-            root.appendingPathComponent(vaultLegacySnapshotName)
-        ]
-        let generated = ["conflicts", "backups"].flatMap { directory -> [URL] in
-            let dir = root.appendingPathComponent(directory, isDirectory: true)
-            let files = (try? fm.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: [.skipsHiddenFiles]
-            )) ?? []
-            return files.filter { $0.pathExtension.lowercased() == "json" }
-        }
-
-        var seen = Set<String>()
-        return (required + generated).filter { url in
-            guard fm.fileExists(atPath: url.path), !seen.contains(url.path) else { return false }
-            seen.insert(url.path)
-            return true
-        }
     }
 
     nonisolated private static func backupMeaningfulScore(_ backup: HerculesBackup) -> Int {
@@ -1849,6 +1770,7 @@ extension BackupService {
                 manifestName: vaultManifestName,
                 readmeName: vaultReadmeName
             )
+            purgeVaultConflictsOnce(root: root)
             if let candidate = canonicalVaultSnapshot(root: root) {
                 writeMergeSafetyBackupOnce(into: root, from: ctx)
                 applyMerge(candidate.backup, into: ctx)
@@ -1887,6 +1809,22 @@ extension BackupService {
         guard !didWriteMergeSafety else { return }
         didWriteMergeSafety = true
         try? writePreVaultRestoreSafetyBackup(into: root, from: ctx)
+    }
+
+    /// `conflicts/` artık okunmuyor (canonical-only) ama eski bug'dan şişmiş olabilir —
+    /// tek seferlik temizle (yer aç).
+    private func purgeVaultConflictsOnce(root: URL) {
+        let key = "hercules.sync.conflictsPurged.v1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        let fm = FileManager.default
+        let dir = root.appendingPathComponent("conflicts", isDirectory: true)
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        var n = 0
+        for f in files where f.pathExtension.lowercased() == "json" {
+            if (try? fm.removeItem(at: f)) != nil { n += 1 }
+        }
+        if n > 0 { AppLog.backup.notice("[Sync] conflicts/ temizlendi: \(n) dosya") }
     }
 
     /// Teşhis: yerel ve vault'taki yemek/ölçüm sayısı + vault'un son yazılma zamanı.
