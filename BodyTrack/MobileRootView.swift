@@ -30,6 +30,8 @@ struct MobileRootView: View {
     @State private var showRecipeEditor = false
     @State private var recipeToEdit: Recipe?
     @State private var foodToDelete: FoodEntry?
+    @State private var measurementToDelete: Measurement?
+    @State private var workoutToDelete: WorkoutSession?
     @State private var calendarMonth: Date = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
     @State private var calendarSelectedDay: Date = Calendar.current.startOfDay(for: Date())
     @State private var isWorking = false
@@ -124,6 +126,26 @@ struct MobileRootView: View {
             Button("Vazgeç", role: .cancel) { foodToDelete = nil }
         } message: { food in
             Text("\"\(food.name)\" silinecek. Senkronla diğer cihazdan da silinir.")
+        }
+        .confirmationDialog(
+            "Ölçümü sil?",
+            isPresented: Binding(get: { measurementToDelete != nil }, set: { if !$0 { measurementToDelete = nil } }),
+            presenting: measurementToDelete
+        ) { m in
+            Button("Sil", role: .destructive) { deleteMeasurement(m); measurementToDelete = nil }
+            Button("Vazgeç", role: .cancel) { measurementToDelete = nil }
+        } message: { m in
+            Text("\(m.date.formatted(date: .abbreviated, time: .omitted)) ölçümü silinecek. Senkronla diğer cihazdan da silinir.")
+        }
+        .confirmationDialog(
+            "Antrenman gününü sil?",
+            isPresented: Binding(get: { workoutToDelete != nil }, set: { if !$0 { workoutToDelete = nil } }),
+            presenting: workoutToDelete
+        ) { w in
+            Button("Sil", role: .destructive) { deleteWorkout(w); workoutToDelete = nil }
+            Button("Vazgeç", role: .cancel) { workoutToDelete = nil }
+        } message: { w in
+            Text("\"\(w.name)\" (\(w.weekdayName)) ve hareketleri silinecek. Senkronla diğer cihazdan da silinir.")
         }
         .onAppear {
             restoreIfNewer()
@@ -1538,6 +1560,19 @@ struct MobileRootView: View {
                 Text("\(workout.durationMinutes) dk")
                     .font(Typography.captionBold)
                     .foregroundStyle(Palette.textTertiary)
+                if !compact {
+                    Button {
+                        workoutToDelete = workout
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.textTertiary)
+                            .padding(.leading, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Antrenman gününü sil")
+                }
             }
 
             if let focus = workout.focus, !focus.isEmpty {
@@ -1678,6 +1713,17 @@ struct MobileRootView: View {
                 Text(measurement.weight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "-")
                     .font(Typography.captionBold)
                     .foregroundStyle(Palette.textSecondary)
+                Button {
+                    measurementToDelete = measurement
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.leading, 6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ölçümü sil")
             }
 
             if measurement.isFullCheckIn {
@@ -1957,6 +2003,21 @@ struct MobileRootView: View {
     /// da silinir, geri dirilmez (bkz. merge sync).
     private func deleteFood(_ food: FoodEntry) {
         ctx.delete(food)
+        ctx.saveOrReport()
+        BackupService.shared.exportAsync(from: ctx)
+        refreshTick = UUID()
+    }
+
+    private func deleteMeasurement(_ m: Measurement) {
+        ctx.delete(m)
+        ctx.saveOrReport()
+        BackupService.shared.exportAsync(from: ctx)
+        refreshTick = UUID()
+    }
+
+    /// Antrenman programı gününü sil (hareketler cascade ile gider).
+    private func deleteWorkout(_ w: WorkoutSession) {
+        ctx.delete(w)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
         refreshTick = UUID()
