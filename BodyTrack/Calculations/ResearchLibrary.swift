@@ -1,6 +1,6 @@
 import Foundation
 
-struct ResearchTopic: Codable, Identifiable, Hashable {
+struct ResearchTopic: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let query: String
@@ -98,7 +98,9 @@ enum ResearchWindow: Int, CaseIterable, Identifiable {
 final class ResearchLibrary {
     static let shared = ResearchLibrary()
 
-    static let defaultTopics: [ResearchTopic] = [
+    // nonisolated: değişmez sabit seed verisi — MainActor izolasyonu gerekmez, böylece
+    // default argument (caller nonisolated bağlamı) ve Swift 6 modunda hatasız erişilir.
+    nonisolated static let defaultTopics: [ResearchTopic] = [
         ResearchTopic(
             id: "hypertrophy",
             title: "Hipertrofi",
