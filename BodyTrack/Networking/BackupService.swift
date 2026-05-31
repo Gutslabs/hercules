@@ -1846,4 +1846,20 @@ extension BackupService {
         didWriteMergeSafety = true
         try? writePreVaultRestoreSafetyBackup(into: root, from: ctx)
     }
+
+    /// Teşhis: yerel ve vault'taki yemek/ölçüm sayısı + vault'un son yazılma zamanı.
+    /// Sync sonrası UI'da gösterilir — kopmanın nerede olduğunu görmek için.
+    func syncDiagnostics(ctx: ModelContext) -> String {
+        let localFoods = (try? ctx.fetchCount(FetchDescriptor<FoodEntry>())) ?? -1
+        guard UserDefaults.standard.data(forKey: vaultBookmarkKey) != nil else {
+            return "Yerel \(localFoods) yemek · VAULT SEÇİLİ DEĞİL"
+        }
+        let info: (foods: Int, meas: Int, at: Date)? = (try? withVaultRoot { root in
+            guard let c = bestVaultRestoreCandidate(root: root) else { return nil }
+            return (c.backup.foods.count, c.backup.measurements.count, c.backup.exportedAt)
+        }) ?? nil
+        guard let info else { return "Yerel \(localFoods) yemek · vault dosyası OKUNAMADI" }
+        let t = info.at.formatted(date: .omitted, time: .standard)
+        return "Yerel \(localFoods) · Vault \(info.foods) yemek (\(t))"
+    }
 }

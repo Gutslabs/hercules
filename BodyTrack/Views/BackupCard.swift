@@ -320,7 +320,7 @@ struct BackupCard: View {
             BackupService.shared.restoreFromICloudIfNewer(into: ctx) // legacy iCloud mirror (gated)
             FoodPresetSeed.upsertDefaults(ctx)
             _ = BackupService.shared.export(from: ctx)                // yerel yedek
-            statusMessage = "✓ Senkronize edildi"
+            statusMessage = "✓ " + BackupService.shared.syncDiagnostics(ctx: ctx)
             refreshInfo()
             importing = false
         }

@@ -757,7 +757,7 @@ struct MobileRootView: View {
             statusMessage = "Senkronize ediliyor..."
             await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
             FoodPresetSeed.upsertDefaults(ctx)
-            statusMessage = "Senkronize edildi ✓"
+            statusMessage = BackupService.shared.syncDiagnostics(ctx: ctx)
             isWorking = false
             refreshTick = UUID()
         }
