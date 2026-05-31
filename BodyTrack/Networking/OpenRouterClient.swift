@@ -1035,6 +1035,33 @@ final class OpenRouterClient: AIClient {
         return accumulated
     }
 
+    /// Lean, tek-atışlık completion — araç/streaming yok. Hafıza çıkarımı için.
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+        let key = AIKeyStore.shared.apiKey
+        guard !key.isEmpty else { throw OpenRouterError.missingKey }
+        let body: [String: Any] = [
+            "model": AIKeyStore.shared.openRouterModel,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userPrompt]
+            ],
+            "temperature": 0.1
+        ]
+        let (data, http) = try await postJSON(body: body, key: key)
+        guard (200..<300).contains(http.statusCode) else {
+            throw OpenRouterError.badResponse(http.statusCode, String(data: data, encoding: .utf8) ?? "no body")
+        }
+        guard let outer = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = outer["choices"] as? [[String: Any]],
+              let first = choices.first,
+              let messageDict = first["message"] as? [String: Any],
+              let content = messageDict["content"] as? String
+        else {
+            throw OpenRouterError.decoding(String(data: data, encoding: .utf8) ?? "no body")
+        }
+        return content
+    }
+
     private func postJSON(body: [String: Any], key: String) async throws -> (Data, HTTPURLResponse) {
         var req = URLRequest(url: AIConfig.endpoint)
         req.httpMethod = "POST"

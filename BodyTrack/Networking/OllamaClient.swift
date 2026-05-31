@@ -147,6 +147,39 @@ final class OllamaClient: AIClient {
         return (AIFoodResult(message: accumulated), nil)
     }
 
+    /// Lean, tek-atışlık completion — streaming/araç/yemek-parse yok. Hafıza çıkarımı için.
+    /// Native /api/chat'e stream'siz istek atar, asistan mesajının içeriğini döner.
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userPrompt]
+            ],
+            "stream": false,
+            "format": "json",
+            "keep_alive": "30m",
+            "options": ["temperature": 0.1, "num_ctx": Self.contextWindow]
+        ]
+
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.timeoutInterval = 120
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw OllamaError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw OllamaError.httpError(http.statusCode) }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = json["message"] as? [String: Any],
+              let content = message["content"] as? String,
+              !content.isEmpty
+        else { throw OllamaError.emptyResponse }
+        return content
+    }
+
     /// Akan ham JSON içinden "message" alanının o ana kadarki değerini çıkarır.
     /// Henüz kapanmamışsa kısmi metni, kapanmışsa tam metni döndürür. Bulamazsa nil.
     static func partialMessage(from raw: String) -> String? {

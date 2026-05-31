@@ -117,6 +117,52 @@ final class CodexClient: AIClient {
         return (parseFood(finalText), searchQuery ?? stream.searchQuery)
     }
 
+    /// Lean completion — araç/yemek-parse yok, minimal reasoning. Streaming yolunu
+    /// no-op callback'lerle yeniden kullanır, asistanın ham metnini döner.
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+        let tokens = try await CodexAuth.shared.ensureFreshToken()
+        guard let accountId = tokens.chatGPTAccountId else {
+            throw CodexAuthError.noAccountId
+        }
+
+        var body: [String: Any] = [
+            "model": AIKeyStore.shared.model,
+            "instructions": systemPrompt,
+            "input": [["role": "user", "content": userPrompt]],
+            "store": false,
+            "stream": true
+        ]
+        body["reasoning"] = ["effort": "minimal", "summary": "auto"]
+        body["include"] = ["reasoning.encrypted_content"]
+
+        let stream = try await streamResponse(
+            body: body,
+            token: tokens.access_token,
+            accountId: accountId
+        )
+
+        var assistantText = ""
+        for item in stream.output where (item["type"] as? String) == "message" {
+            if let content = item["content"] as? [[String: Any]] {
+                for part in content {
+                    if let text = part["text"] as? String {
+                        assistantText += text
+                    } else if let text = part["output_text"] as? String {
+                        assistantText += text
+                    }
+                }
+            } else if let directText = item["text"] as? String {
+                assistantText += directText
+            }
+        }
+
+        let finalText = assistantText.isEmpty ? stream.accumulatedText : assistantText
+        guard !finalText.isEmpty else {
+            throw OpenRouterError.decoding("Boş yanıt")
+        }
+        return finalText
+    }
+
     struct StreamResult {
         var output: [[String: Any]]
         var accumulatedText: String  // text delta'larından toplanmış

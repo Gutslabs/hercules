@@ -36,6 +36,10 @@ struct BodyTrackApp: App {
                 BackupService.shared.restoreFromVaultIfNewer(into: ctx)
                 FoodPresetSeed.upsertDefaults(ctx)
                 ShortcutHealthSyncService.shared.startAutoImport(into: ctx)
+                // Embedding modeli zaten indirilmişse yükle (indirme TETİKLEMEZ) ve
+                // eksik hafıza embedding'lerini arka planda tamamla.
+                await EmbeddingService.shared.warmUpIfDownloaded()
+                await MemoryManager.shared.embedPendingMemories()
             }
             // 3) AppDelegate'e container'ı paylaş — quit'te yedek alacak
             #if os(macOS)

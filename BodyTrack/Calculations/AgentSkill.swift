@@ -244,7 +244,9 @@ final class AgentRouter {
     }
 
     func absorbConversation(userText: String, assistantText: String) {
-        memoryProvider.absorbConversation(userText: userText, assistantText: assistantText)
+        // LLM tabanlı hafıza çıkarımı (Mem0-tarzı); model/ağ hatasında MemoryManager
+        // içinde keyword-heuristik fallback'e düşer. Sohbeti bloklamamak için arka planda.
+        Task { await MemoryManager.shared.ingest(userText: userText, assistantText: assistantText) }
     }
 
     /// Operasyonu zaman aşımına karşı yarıştırır; süre dolarsa veya hata olursa nil döner.
@@ -275,7 +277,12 @@ struct MemoryRecallSkill: AgentSkill {
     }
 
     func run(query: String, context: AgentContext) async throws -> SkillResult? {
-        let memories = LocalMemoryProvider.shared.search(query: query, topK: 10)
+        // Semantik getirme: model yüklüyse sorgu embedding'iyle anlamca yakın hafızalar,
+        // değilse contextMemories lexical skorlamaya graceful düşer.
+        let queryEmbedding = await EmbeddingService.shared.embedQueryIfAvailable(query)
+        let memories = await LocalMemoryProvider.shared.contextMemories(
+            query: query, queryEmbedding: queryEmbedding, limit: 10
+        )
         guard !memories.isEmpty else { return nil }
 
         let lines = memories.map { memory in

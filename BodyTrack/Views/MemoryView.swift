@@ -13,6 +13,7 @@ struct MemoryView: View {
     @State private var researchUpdating = false
     @State private var researchMessage: String?
     @State private var researchWindow: ResearchWindow = .current
+    @State private var embeddingPhase: EmbeddingStatus.Phase = .idle
 
     private var filteredMemories: [AgentMemory] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -55,6 +56,7 @@ struct MemoryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 header
+                embeddingControl
                 controls
                 researchPanel
                 memoryGrid
@@ -64,14 +66,92 @@ struct MemoryView: View {
         .background(Palette.background.ignoresSafeArea())
         .onAppear {
             reload()
+            embeddingPhase = EmbeddingStatus.shared.phase
             Task { await updateResearchIfNeeded() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .localMemoryChanged)) { _ in
             reload()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .embeddingStatusChanged)) { _ in
+            embeddingPhase = EmbeddingStatus.shared.phase
+        }
         .sheet(isPresented: $showingEditor) {
             memoryEditor
                 .frame(width: 520)
+        }
+    }
+
+    private var embeddingControl: some View {
+        HStack(spacing: 12) {
+            Image(systemName: embeddingIcon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(embeddingTint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Semantik Hafıza Araması")
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textPrimary)
+                Text(embeddingDescription)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            embeddingAction
+        }
+        .padding(Spacing.lg)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
+            embeddingPhase == .ready ? Color.green.opacity(0.4) : Palette.border,
+            lineWidth: embeddingPhase == .ready ? 1 : 0.5))
+    }
+
+    @ViewBuilder private var embeddingAction: some View {
+        switch embeddingPhase {
+        case .idle, .unavailable:
+            Button("Etkinleştir") {
+                Task { await MemoryManager.shared.warmUpEmbeddingsAndBackfill() }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.accent)
+        case .downloading, .backfilling:
+            ProgressView().controlSize(.small)
+        case .ready:
+            Label("Aktif", systemImage: "checkmark.circle.fill")
+                .font(Typography.captionBold)
+                .foregroundStyle(.green)
+        }
+    }
+
+    private var embeddingIcon: String {
+        switch embeddingPhase {
+        case .ready: return "sparkles"
+        case .downloading, .backfilling: return "arrow.down.circle"
+        case .unavailable: return "exclamationmark.triangle"
+        case .idle: return "brain.head.profile"
+        }
+    }
+
+    private var embeddingTint: Color {
+        switch embeddingPhase {
+        case .ready: return .green
+        case .unavailable: return .orange
+        default: return Palette.accent
+        }
+    }
+
+    private var embeddingDescription: String {
+        switch embeddingPhase {
+        case .idle:
+            return "Anlamca yakın hafızaları getirmek için cihaz-içi model bir kez indirilir (~2.4 GB), sonra hep yerelde kalır. Şu an keyword araması aktif."
+        case .downloading(let fraction):
+            return "Model indiriliyor… %\(Int((fraction * 100).rounded()))"
+        case .backfilling(let done, let total):
+            return "Hafızalar işleniyor… \(done)/\(total)"
+        case .ready:
+            return "Aktif — sorgularında anlamca yakın hafızalar getiriliyor (cihaz-içi, çevrimdışı)."
+        case .unavailable:
+            return "Model yüklenemedi; keyword aramasına düşüldü. Tekrar deneyebilirsin."
         }
     }
 

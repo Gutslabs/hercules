@@ -28,14 +28,8 @@
 		A24E00000000000000000053 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000034 /* Preview Assets.xcassets */; };
 		A24E00000000000000000054 /* Recipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000036 /* Recipe.swift */; };
 		A24E00000000000000000055 /* RecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000037 /* RecipesView.swift */; };
-		A24E0000000000000000FF03 /* NutritionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF04 /* NutritionView.swift */; };
-		A24E0000000000000000FF05 /* GuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF06 /* GuideView.swift */; };
-		A24E0000000000000000FF07 /* GuideModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF08 /* GuideModels.swift */; };
-		A24E0000000000000000FF09 /* GuideModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF08 /* GuideModels.swift */; };
 		A24E00000000000000000056 /* FoodEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000038 /* FoodEntry.swift */; };
 		A24E00000000000000000057 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000039 /* OpenRouterClient.swift */; };
-		A24E0000000000000000FF01 /* OllamaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF00 /* OllamaClient.swift */; };
-		A24E0000000000000000FF02 /* OllamaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF00 /* OllamaClient.swift */; };
 		A24E00000000000000000058 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003A /* ChatStore.swift */; };
 		A24E00000000000000000059 /* ChatSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003B /* ChatSidebar.swift */; };
 		A24E0000000000000000005A /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003C /* AIProvider.swift */; };
@@ -58,6 +52,9 @@
 		A24E0000000000000000006D /* FoodLookupSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000083 /* FoodLookupSkill.swift */; };
 		A24E0000000000000000006E /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000084 /* MemoryView.swift */; };
 		A24E0000000000000000006F /* ResearchLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000085 /* ResearchLibrary.swift */; };
+		A24EFF000000000000000B01 /* AgentMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24EFF000000000000000A01 /* AgentMemory.swift */; };
+		A24EFF000000000000000B02 /* EmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24EFF000000000000000A02 /* EmbeddingService.swift */; };
+		A24EFF000000000000000B03 /* MemoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24EFF000000000000000A03 /* MemoryManager.swift */; };
 		A24E00000000000000000086 /* FoodPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000087 /* FoodPreset.swift */; };
 		A24E00000000000000000088 /* CoachIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000089 /* CoachIntelligence.swift */; };
 		A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000008B /* AgentDataSnapshot.swift */; };
@@ -85,16 +82,24 @@
 		A24E000000000000000000D1 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000039 /* OpenRouterClient.swift */; };
 		A24E000000000000000000D2 /* CodexAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003D /* CodexAuth.swift */; };
 		A24E000000000000000000D3 /* CodexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003E /* CodexClient.swift */; };
+		A24E0000000000000000FF01 /* OllamaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF00 /* OllamaClient.swift */; };
+		A24E0000000000000000FF02 /* OllamaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF00 /* OllamaClient.swift */; };
+		A24E0000000000000000FF03 /* NutritionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF04 /* NutritionView.swift */; };
+		A24E0000000000000000FF05 /* GuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF06 /* GuideView.swift */; };
+		A24E0000000000000000FF07 /* GuideModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF08 /* GuideModels.swift */; };
+		A24E0000000000000000FF09 /* GuideModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF08 /* GuideModels.swift */; };
 		A24E0000000000000000FF10 /* Exercise.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF11 /* Exercise.swift */; };
 		A24E0000000000000000FF12 /* Exercise.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF11 /* Exercise.swift */; };
-		A24E0000000000000000FF16 /* MuscleColorMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF17 /* MuscleColorMap.swift */; };
-		A24E0000000000000000FF18 /* MuscleColorMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF17 /* MuscleColorMap.swift */; };
 		A24E0000000000000000FF13 /* MuscleBodyDiagram.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF14 /* MuscleBodyDiagram.swift */; };
 		A24E0000000000000000FF15 /* MuscleBodyDiagram.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF14 /* MuscleBodyDiagram.swift */; };
+		A24E0000000000000000FF16 /* MuscleColorMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF17 /* MuscleColorMap.swift */; };
+		A24E0000000000000000FF18 /* MuscleColorMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF17 /* MuscleColorMap.swift */; };
 		A24E0000000000000000FF20 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF21 /* TrainingProgram.swift */; };
 		A24E0000000000000000FF22 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF21 /* TrainingProgram.swift */; };
 		A24E0000000000000000FF23 /* WorkoutProgramsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF24 /* WorkoutProgramsView.swift */; };
 		A24E0000000000000000FF25 /* WorkoutProgramsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000FF24 /* WorkoutProgramsView.swift */; };
+		DD148D752FCC56EB000E32FF /* Embeddings in Frameworks */ = {isa = PBXBuildFile; productRef = DD148D742FCC56EB000E32FF /* Embeddings */; };
+		DD148D782FCC5714000E32FF /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = DD148D772FCC5714000E32FF /* Hub */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -121,17 +126,8 @@
 		A24E00000000000000000035 /* BodyTrack.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BodyTrack.entitlements; sourceTree = "<group>"; };
 		A24E00000000000000000036 /* Recipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recipe.swift; sourceTree = "<group>"; };
 		A24E00000000000000000037 /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF04 /* NutritionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionView.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF06 /* GuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideView.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF08 /* GuideModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideModels.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF11 /* Exercise.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Exercise.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF14 /* MuscleBodyDiagram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuscleBodyDiagram.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF17 /* MuscleColorMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuscleColorMap.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF21 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF24 /* WorkoutProgramsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgramsView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000038 /* FoodEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodEntry.swift; sourceTree = "<group>"; };
 		A24E00000000000000000039 /* OpenRouterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterClient.swift; sourceTree = "<group>"; };
-		A24E0000000000000000FF00 /* OllamaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaClient.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003A /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003B /* ChatSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSidebar.swift; sourceTree = "<group>"; };
 		A24E0000000000000000003C /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
@@ -154,6 +150,9 @@
 		A24E00000000000000000083 /* FoodLookupSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLookupSkill.swift; sourceTree = "<group>"; };
 		A24E00000000000000000084 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000085 /* ResearchLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchLibrary.swift; sourceTree = "<group>"; };
+		A24EFF000000000000000A01 /* AgentMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMemory.swift; sourceTree = "<group>"; };
+		A24EFF000000000000000A02 /* EmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingService.swift; sourceTree = "<group>"; };
+		A24EFF000000000000000A03 /* MemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryManager.swift; sourceTree = "<group>"; };
 		A24E00000000000000000087 /* FoodPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodPreset.swift; sourceTree = "<group>"; };
 		A24E00000000000000000089 /* CoachIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachIntelligence.swift; sourceTree = "<group>"; };
 		A24E0000000000000000008B /* AgentDataSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDataSnapshot.swift; sourceTree = "<group>"; };
@@ -162,6 +161,15 @@
 		A24E00000000000000000092 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000093 /* SeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedData.swift; sourceTree = "<group>"; };
 		A24E000000000000000000B4 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A24E0000000000000000FF00 /* OllamaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaClient.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF04 /* NutritionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF06 /* GuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF08 /* GuideModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideModels.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF11 /* Exercise.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Exercise.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF14 /* MuscleBodyDiagram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuscleBodyDiagram.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF17 /* MuscleColorMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuscleColorMap.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF21 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
+		A24E0000000000000000FF24 /* WorkoutProgramsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgramsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -169,6 +177,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DD148D782FCC5714000E32FF /* Hub in Frameworks */,
+				DD148D752FCC56EB000E32FF /* Embeddings in Frameworks */,
 				A24E0000000000000000005F /* HealthKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -256,6 +266,9 @@
 				A24E00000000000000000082 /* PubMedResearchSkill.swift */,
 				A24E00000000000000000083 /* FoodLookupSkill.swift */,
 				A24E00000000000000000085 /* ResearchLibrary.swift */,
+				A24EFF000000000000000A01 /* AgentMemory.swift */,
+				A24EFF000000000000000A02 /* EmbeddingService.swift */,
+				A24EFF000000000000000A03 /* MemoryManager.swift */,
 				A24E00000000000000000089 /* CoachIntelligence.swift */,
 			);
 			path = Calculations;
@@ -398,6 +411,10 @@
 				tr,
 			);
 			mainGroup = A24E00000000000000000002;
+			packageReferences = (
+				DD148D732FCC56EB000E32FF /* XCRemoteSwiftPackageReference "swift-embeddings" */,
+				DD148D762FCC5714000E32FF /* XCRemoteSwiftPackageReference "swift-transformers" */,
+			);
 			productRefGroup = A24E00000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -481,6 +498,9 @@
 				A24E0000000000000000006D /* FoodLookupSkill.swift in Sources */,
 				A24E0000000000000000006E /* MemoryView.swift in Sources */,
 				A24E0000000000000000006F /* ResearchLibrary.swift in Sources */,
+				A24EFF000000000000000B01 /* AgentMemory.swift in Sources */,
+				A24EFF000000000000000B02 /* EmbeddingService.swift in Sources */,
+				A24EFF000000000000000B03 /* MemoryManager.swift in Sources */,
 				A24E00000000000000000088 /* CoachIntelligence.swift in Sources */,
 				A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */,
 				A24E00000000000000000094 /* SeedData.swift in Sources */,
@@ -671,9 +691,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSAppTransportSecurity = "<dict><key>NSAllowsLocalNetworking</key><true/></dict>";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hercules günlük adım sayını ve aktif yakılan kaloriyi okuyup kalori bütçene ekler.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSAppTransportSecurity = "<dict><key>NSAllowsLocalNetworking</key><true/></dict>";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -706,9 +726,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSAppTransportSecurity = "<dict><key>NSAllowsLocalNetworking</key><true/></dict>";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hercules günlük adım sayını ve aktif yakılan kaloriyi okuyup kalori bütçene ekler.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSAppTransportSecurity = "<dict><key>NSAllowsLocalNetworking</key><true/></dict>";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -735,8 +755,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSAppTransportSecurity = "<dict><key>NSAllowsLocalNetworking</key><true/></dict>";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -770,8 +790,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSAppTransportSecurity = "<dict><key>NSAllowsLocalNetworking</key><true/></dict>";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -823,6 +843,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DD148D732FCC56EB000E32FF /* XCRemoteSwiftPackageReference "swift-embeddings" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jkrukowski/swift-embeddings.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.0.28;
+			};
+		};
+		DD148D762FCC5714000E32FF /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.3.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DD148D742FCC56EB000E32FF /* Embeddings */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD148D732FCC56EB000E32FF /* XCRemoteSwiftPackageReference "swift-embeddings" */;
+			productName = Embeddings;
+		};
+		DD148D772FCC5714000E32FF /* Hub */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD148D762FCC5714000E32FF /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Hub;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A24E00000000000000000001 /* Project object */;
 }

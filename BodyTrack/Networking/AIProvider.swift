@@ -90,6 +90,10 @@ protocol AIClient {
         onSearchStart: @MainActor @escaping (String) -> Void,
         onMessageUpdate: @MainActor @escaping (String) -> Void
     ) async throws -> (AIFoodResult, String?)
+
+    /// Lean, tek-atışlık completion: streaming/araç/yemek-parse yok. Hafıza çıkarımı
+    /// gibi arka plan işleri için kullanılır. Modelin ham metin çıktısını (genelde JSON) döner.
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String
 }
 
 final class CodexFirstFallbackClient: AIClient {
@@ -142,6 +146,14 @@ final class CodexFirstFallbackClient: AIClient {
             } catch {
                 throw AIFallbackError(codexError: notice, openRouterError: error.localizedDescription)
             }
+        }
+    }
+
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+        do {
+            return try await codex.complete(systemPrompt: systemPrompt, userPrompt: userPrompt)
+        } catch {
+            return try await openRouter.complete(systemPrompt: systemPrompt, userPrompt: userPrompt)
         }
     }
 
