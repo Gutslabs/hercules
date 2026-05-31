@@ -569,11 +569,6 @@ struct ProfileView: View {
                         .foregroundStyle(Palette.textPrimary)
                 }
                 Spacer()
-                if let r = calorieResult {
-                    Text(r.formula)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textQuaternary)
-                }
             }
 
             if let r = calorieResult {

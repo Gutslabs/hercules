@@ -586,7 +586,6 @@ struct DashboardView: View {
                     )
                 }
                 Spacer()
-                PillTag(text: r.formula, tint: Palette.textSecondary)
             }
 
             if compact {

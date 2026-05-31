@@ -462,56 +462,65 @@ struct MacroLegend: View {
 
     private var progress: Double {
         guard grams > 0 else { return 0 }
-        return min(1.5, consumed / grams)  // 150% üstü clamp
+        return consumed / grams
     }
 
+    /// Hedefin %105'inin üstü = aşım.
+    private var isOver: Bool { consumed > grams * 1.05 }
+
+    /// İlerleme barının dolum rengi.
+    private var fillColor: Color { isOver ? Palette.negative : tint }
+
+    /// Alınan miktarın rengi (0 → soluk, hedefe yakın → pozitif, aşım → negatif).
     private var consumedColor: Color {
-        if consumed == 0 { return Palette.textQuaternary }
-        if consumed > grams * 1.05 { return Palette.negative }
+        if consumed <= 0 { return Palette.textTertiary }
+        if isOver { return Palette.negative }
         if consumed >= grams * 0.85 { return Palette.positive }
-        return Palette.textSecondary
+        return Palette.textPrimary
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Circle().fill(tint).frame(width: 6, height: 6)
+        VStack(alignment: .leading, spacing: 7) {
+            // Başlık: renk noktası + isim · sağda hedefin kalori payı %
+            HStack(spacing: 6) {
+                Circle().fill(tint).frame(width: 7, height: 7)
                 Text(name)
-                    .font(Typography.caption)
+                    .font(Typography.captionBold)
                     .foregroundStyle(Palette.textSecondary)
+                Spacer(minLength: 4)
+                Text("%\(Fmt.int(percent))")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
             }
-            HStack(alignment: .lastTextBaseline, spacing: 3) {
-                Text(Fmt.int(grams))
+            // Alınan / hedef — alınan vurgulu (loglandıkça artar)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(Fmt.int(consumed))
                     .font(Typography.monoLarge)
-                    .foregroundStyle(Palette.textPrimary)
-                Text("g")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                Text("· \(Fmt.int(percent))%")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-            // Bugün alınan miktar — minimal progress
-            HStack(spacing: 4) {
-                Text("\(Fmt.int(consumed))/\(Fmt.int(grams)) g")
-                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(consumedColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Spacer(minLength: 0)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.white.opacity(0.06))
-                            .frame(height: 3)
-                        Capsule()
-                            .fill(tint.opacity(0.85))
-                            .frame(width: geo.size.width * CGFloat(min(1, progress)), height: 3)
-                    }
-                }
-                .frame(width: 40, height: 3)
+                    .contentTransition(.numericText())
+                Text("/ \(Fmt.int(grams)) g")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
             }
+            // Tam genişlik, modern progress bar (yumuşak animasyonlu)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Palette.surfaceElevated)
+                    Capsule()
+                        .fill(fillColor)
+                        .frame(width: barWidth(total: geo.size.width))
+                }
+            }
+            .frame(height: 7)
+            .animation(.spring(response: 0.5, dampingFraction: 0.85), value: progress)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Dolum genişliği: 0'da görünmez, biraz alındıysa min görünür uç, %100'de tam.
+    private func barWidth(total: CGFloat) -> CGFloat {
+        guard progress > 0 else { return 0 }
+        return max(5, total * CGFloat(min(1, progress)))
     }
 }

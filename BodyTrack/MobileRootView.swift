@@ -19,8 +19,9 @@ struct MobileRootView: View {
     @State private var selectedTab: MobileTab = .dashboard
     @State private var showVaultImporter = false
     @State private var showRestoreConfirm = false
-    @State private var showAddFood = false
     @State private var showAddMeasurement = false
+    @State private var showFoodAIEstimator = false
+    @State private var showAllFoods = false
     @State private var statusMessage: String? = nil
     @State private var saveErrors = SaveErrorReporter.shared
     @State private var openRouterKey = ""
@@ -29,6 +30,10 @@ struct MobileRootView: View {
     @State private var showProfileEditor = false
     @State private var showRecipeEditor = false
     @State private var recipeToEdit: Recipe?
+    @State private var recipeToView: Recipe?
+    @State private var selectedRecipeCategory: RecipeCategory?
+    @State private var recipeSearch = ""
+    @State private var showFavoriteRecipesOnly = false
     @State private var foodToDelete: FoodEntry?
     @State private var measurementToDelete: Measurement?
     @State private var workoutToDelete: WorkoutSession?
@@ -39,17 +44,12 @@ struct MobileRootView: View {
     @State private var isWorking = false
     @State private var refreshTick = UUID()
 
-    @State private var foodName = ""
-    @State private var foodGrams = ""
-    @State private var foodCalories = ""
-    @State private var foodProtein = ""
-    @State private var foodCarbs = ""
-    @State private var foodFat = ""
     @State private var aiFoodInput = ""
     @State private var aiFoodResult: AIFoodResult?
     @State private var aiFoodStatus: String?
     @State private var aiFoodError: String?
     @State private var isEstimatingFood = false
+    @FocusState private var aiInputFocused: Bool
 
     @State private var measurementWeight = ""
     @State private var measurementBodyFat = ""
@@ -63,9 +63,6 @@ struct MobileRootView: View {
             Palette.background.ignoresSafeArea()
 
             selectedPage
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    mobileHeader
-                }
 
             mobileBottomBar
         }
@@ -93,9 +90,13 @@ struct MobileRootView: View {
         } message: {
             Text(saveErrors.message ?? "")
         }
-        .sheet(isPresented: $showAddFood) {
-            foodForm
-                .presentationDetents([.medium])
+        .sheet(isPresented: $showFoodAIEstimator) {
+            foodAIEstimatorSheet
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showAllFoods) {
+            foodHistorySheet
         }
         .sheet(isPresented: $showAddMeasurement) {
             measurementForm
@@ -116,7 +117,15 @@ struct MobileRootView: View {
                 onDelete: recipeToEdit.map { recipe in { deleteRecipe(recipe) } }
             )
         }
-        .confirmationDialog(
+        .sheet(item: $recipeToView) { recipe in
+            MobileRecipeDetailSheet(
+                recipe: recipe,
+                onSaveEdit: { fields in applyRecipeFields(fields, to: recipe) },
+                onDelete: { deleteRecipe(recipe); recipeToView = nil },
+                onToggleFavorite: { toggleRecipeFavorite(recipe) }
+            )
+        }
+        .alert(
             "Yemeği sil?",
             isPresented: Binding(get: { foodToDelete != nil }, set: { if !$0 { foodToDelete = nil } }),
             presenting: foodToDelete
@@ -181,58 +190,13 @@ struct MobileRootView: View {
             mobilePage { workoutPage }
         case .measurements:
             mobilePage { measurementsPage }
+        case .recipes:
+            mobilePage { recipesPage }
         case .calendar:
             mobilePage { calendarPage }
         case .profile:
             mobilePage { profilePage }
         }
-    }
-
-    private var mobileHeader: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(selectedTab.eyebrow)
-                    .font(Typography.label)
-                    .foregroundStyle(Palette.textQuaternary)
-                    .textCase(.uppercase)
-                Text(selectedTab.title)
-                    .font(.system(size: 23, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-
-            Spacer(minLength: 8)
-
-            if isWorking {
-                ProgressView()
-                    .controlSize(.small)
-            }
-
-            Button {
-                restoreIfNewer()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 38, height: 38)
-                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Palette.textPrimary)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Palette.surfaceElevated)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Palette.borderStrong, lineWidth: 0.5)
-            )
-            .disabled(isWorking)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
-        .background(Palette.background.opacity(0.96))
     }
 
     private var mobileBottomBar: some View {
@@ -298,15 +262,12 @@ struct MobileRootView: View {
 
     private var nutritionPage: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("Yemek", action: "Ekle", systemImage: "plus") {
-                showAddFood = true
+            sectionHeader("Yemek", action: "Öğün ekle", systemImage: "plus") {
+                showFoodAIEstimator = true
             }
             nutritionSummaryCard
             calorieTrendCard
-            foodAIEstimatorCard
-            foodQuickAddCard
             todayFoodCard
-            recipeCard
             recentFoodsCard
         }
     }
@@ -348,17 +309,21 @@ struct MobileRootView: View {
                         let isToday = wd == today
                         VStack(spacing: 6) {
                             Text(WorkoutSession.weekdayShortName(wd))
-                                .font(Typography.label)
-                                .foregroundStyle(isToday ? Palette.textPrimary : Palette.textTertiary)
+                                .font(isToday ? Typography.captionBold : Typography.label)
+                                .foregroundStyle(isToday ? Palette.accent : (has ? Palette.textSecondary : Palette.textTertiary))
                             Circle()
                                 .fill(has ? Palette.accent : Palette.borderStrong)
-                                .frame(width: 7, height: 7)
+                                .frame(width: isToday ? 8 : 7, height: isToday ? 8 : 7)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 9)
                         .background(
-                            RoundedRectangle(cornerRadius: Radius.sm)
-                                .fill(isToday ? Palette.surfaceElevated : .clear)
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .fill(isToday ? Palette.accent.opacity(0.16) : .clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                .strokeBorder(isToday ? Palette.accent : .clear, lineWidth: 1.2)
                         )
                     }
                 }
@@ -536,7 +501,38 @@ struct MobileRootView: View {
                     metric("Öğün", value: "\(dayFoods.count)", unit: "")
                 }
                 if let workout {
-                    heroStat("Antrenman", value: workout.name, systemImage: "dumbbell.fill")
+                    Button {
+                        selectedTab = .workout
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "dumbbell.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Palette.accent)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("ANTRENMAN")
+                                    .font(Typography.label)
+                                    .foregroundStyle(Palette.textQuaternary)
+                                Text(workout.name)
+                                    .font(Typography.captionBold)
+                                    .foregroundStyle(Palette.textPrimary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            Spacer(minLength: 4)
+                            Text("Programı aç")
+                                .font(Typography.label)
+                                .foregroundStyle(Palette.accent)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Palette.accent)
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Spor sayfasına gider")
                 }
                 if let measure, let w = measure.weight {
                     heroStat("Kilo", value: "\(Fmt.num(w, digits: 1)) kg", systemImage: "scalemass")
@@ -631,7 +627,10 @@ struct MobileRootView: View {
                         heroStat("Hedef", value: p.targetWeight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "—", systemImage: "target")
                     }
                     if let plan = calorieResult {
-                        HStack(spacing: 10) {
+                        LazyVGrid(
+                            columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                            spacing: 10
+                        ) {
                             metric("Günlük", value: Fmt.int(plan.goalCalories), unit: "kcal")
                             metric("Protein", value: Fmt.int(plan.protein.grams), unit: "g")
                             metric("Karb", value: Fmt.int(plan.carbs.grams), unit: "g")
@@ -798,7 +797,7 @@ struct MobileRootView: View {
                             heroMacroBar("Yağ", todayFat, plan.fat.grams, Palette.positive)
                         }
                     }
-                    Text("\(Fmt.int(todayCalories)) / \(Fmt.int(plan.goalCalories)) kcal alındı · \(plan.formula)")
+                    Text("\(Fmt.int(todayCalories)) / \(Fmt.int(plan.goalCalories)) kcal alındı")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
                 } else {
@@ -912,7 +911,7 @@ struct MobileRootView: View {
                             .font(Typography.captionBold)
                             .foregroundStyle(Palette.textTertiary)
                         Button {
-                            showAddFood = true
+                            showFoodAIEstimator = true
                         } label: {
                             Image(systemName: "plus")
                                 .font(.system(size: 11, weight: .bold))
@@ -921,6 +920,7 @@ struct MobileRootView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(Palette.textPrimary)
                         .background(Circle().fill(Palette.surfaceElevated))
+                        .accessibilityLabel("AI ile yemek ekle")
                     }
                 }
 
@@ -935,124 +935,255 @@ struct MobileRootView: View {
         }
     }
 
-    private var foodQuickAddCard: some View {
-        MobileCard {
-            HStack(alignment: .center, spacing: 12) {
-                icon("plus.circle.fill", color: Palette.accent)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Yemek ekle")
-                        .font(Typography.bodyBold)
-                        .foregroundStyle(Palette.textPrimary)
-                    Text("Kalori, gram ve makroları hızlıca bugüne kaydet.")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
+    /// "Öğün ekle" — Bugün/Yemek sekmesinden açılan AI yemek hesaplama penceresi (sheet).
+    private var foodAIEstimatorSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    aiSheetIntro
+                    aiSheetInputSection
+                    if aiFoodResult == nil {
+                        aiSheetSuggestions
+                    }
+                    aiSheetCTA
+                    if let result = aiFoodResult {
+                        aiFoodResultCard(result)
+                    }
+                    aiSheetStatus
+                    if aiFoodResult == nil && aiFoodError == nil {
+                        aiSheetTip
+                    }
                 }
-                Spacer(minLength: 8)
-                Button {
-                    showAddFood = true
-                } label: {
-                    Text("Ekle")
-                        .font(Typography.captionBold)
-                        .frame(minWidth: 58)
+                .padding(16)
+                .padding(.bottom, 24)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.background.ignoresSafeArea())
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("Öğün ekle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Kapat") { showFoodAIEstimator = false }
                 }
-                .buttonStyle(.borderedProminent)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button {
+                        aiInputFocused = false
+                        Task { await estimateFoodWithAI() }
+                    } label: {
+                        Label("Hesapla", systemImage: "wand.and.stars")
+                    }
+                    .disabled(aiFoodInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isEstimatingFood)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    /// Dostça başlık — nav title "Öğün ekle" ile tekrar etmesin diye "Ne yedin?" sorusu.
+    private var aiSheetIntro: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Palette.accentSoft)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+            }
+            .frame(width: 56, height: 56)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Ne yedin?")
+                    .font(Typography.hero(26))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("Doğal dille yaz; AI kcal ve makroyu hesaplayıp bugüne eklesin.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Büyük, odaklanınca accent çerçeveli giriş + bugünkü kalan bütçe çipleri.
+    private var aiSheetInputSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("örn: 160g pişmiş pirinç + 500g tavuk göğsü", text: $aiFoodInput, axis: .vertical)
+                .font(Typography.body)
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(3...7)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($aiInputFocused)
+                .padding(14)
+                .frame(minHeight: 104, alignment: .topLeading)
+                .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .strokeBorder(aiInputFocused ? Palette.accent : Palette.borderStrong, lineWidth: aiInputFocused ? 1.5 : 0.5)
+                )
+                .animation(.easeInOut(duration: 0.15), value: aiInputFocused)
+
+            if let plan = calorieResult {
+                HStack(spacing: 8) {
+                    aiBudgetPill(icon: "flame.fill", label: "Kalan", value: "\(Fmt.int(max(0, plan.goalCalories - todayCalories))) kcal")
+                    aiBudgetPill(icon: "bolt.fill", label: "Protein", value: "\(Fmt.int(todayProtein))/\(Fmt.int(plan.protein.grams))g")
+                    Spacer(minLength: 0)
+                }
             }
         }
     }
 
-    private var foodAIEstimatorCard: some View {
-        MobileCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    icon("sparkles", color: Palette.accent)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("AI ile hesapla")
-                            .font(Typography.titleSmall)
-                            .foregroundStyle(Palette.textPrimary)
-                        Text("Yemeği doğal yaz, kcal ve makroyu tahmin edip bugüne ekle.")
+    private func aiBudgetPill(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+            Text(label)
+                .font(Typography.label)
+                .foregroundStyle(Palette.textQuaternary)
+            Text(value)
+                .font(Typography.captionBold)
+                .foregroundStyle(Palette.textSecondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(Palette.surfaceElevated))
+    }
+
+    /// 2 sütunlu örnek öğün ızgarası — dokununca girişi doldurup odaklar.
+    private var aiSheetSuggestions: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("HIZLI ÖRNEKLER")
+                .font(Typography.label)
+                .foregroundStyle(Palette.textQuaternary)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                ForEach(foodAISuggestions, id: \.self) { suggestion in
+                    Button {
+                        aiFoodInput = suggestion
+                        aiInputFocused = true
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Palette.accent)
+                            Text(suggestion)
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textSecondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 11)
+                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.surfaceElevated))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// Tam genişlik büyük hesapla butonu.
+    private var aiSheetCTA: some View {
+        Button {
+            aiInputFocused = false
+            Task { await estimateFoodWithAI() }
+        } label: {
+            HStack(spacing: 8) {
+                if isEstimatingFood {
+                    ProgressView().controlSize(.small).tint(.white)
+                } else {
+                    Image(systemName: "wand.and.stars")
+                }
+                Text(isEstimatingFood ? "Hesaplanıyor..." : "Hesapla")
+            }
+            .font(Typography.bodyBold)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(aiFoodInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isEstimatingFood)
+    }
+
+    @ViewBuilder
+    private var aiSheetStatus: some View {
+        if let aiFoodStatus {
+            HStack(spacing: 7) {
+                if isEstimatingFood { ProgressView().controlSize(.small) }
+                Text(aiFoodStatus)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+        }
+        if let aiFoodError {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.negative)
+                Text(aiFoodError)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.negative)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// Alttaki boşluğu dolduran kısa ipucu (sonuç/hata yokken).
+    private var aiSheetTip: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "lightbulb.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.warning)
+            Text("İpucu: pişmiş mi çiğ mi belirt, markayı yaz. Birden fazla yiyeceği + ile ayır — AI tek kayıtta toplar.")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
+    }
+
+    /// Tek dokunuşla giriş kutusunu dolduran örnek yemekler.
+    private var foodAISuggestions: [String] {
+        [
+            "2 yumurta + 1 dilim tam buğday ekmek",
+            "100g yulaf + 1 muz",
+            "200g ızgara tavuk + 150g pirinç",
+            "1 kase mercimek çorbası"
+        ]
+    }
+
+    private func aiFoodResultCard(_ result: AIFoodResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("AI TAHMİNİ")
+                        .font(Typography.label)
+                        .foregroundStyle(Palette.accent)
+                    Text(result.name?.nilIfBlank ?? "Yemek tahmini")
+                        .font(Typography.titleSmall)
+                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let message = result.message.nilIfBlank {
+                        Text(message)
                             .font(Typography.caption)
                             .foregroundStyle(Palette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer(minLength: 0)
-                    if isEstimatingFood {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-
-                TextField("örn: 160g pişmiş pirinç + 500g haşlanmış tavuk göğsü", text: $aiFoodInput, axis: .vertical)
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(2...4)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surfaceElevated))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                            .strokeBorder(Palette.borderStrong, lineWidth: 0.5)
-                    )
-
-                HStack(spacing: 8) {
-                    Button {
-                        Task { await estimateFoodWithAI() }
-                    } label: {
-                        Label(isEstimatingFood ? "Hesaplanıyor" : "Hesapla", systemImage: "wand.and.stars")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(aiFoodInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isEstimatingFood)
-
-                    Button {
-                        showAddFood = true
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .frame(width: 44)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Manuel yemek ekle")
-                }
-                .font(Typography.captionBold)
-
-                if let result = aiFoodResult {
-                    aiFoodResultCard(result)
-                }
-
-                if let aiFoodStatus {
-                    Text(aiFoodStatus)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if let aiFoodError {
-                    Text(aiFoodError)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.negative)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-
-    private func aiFoodResultCard(_ result: AIFoodResult) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(result.name?.nilIfBlank ?? "AI yemek tahmini")
-                        .font(Typography.bodyBold)
-                        .foregroundStyle(Palette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(result.message.nilIfBlank ?? "Tahmini değerler hazır.")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 0) {
                     Text("\(Fmt.int(result.calories ?? 0))")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(Palette.textPrimary)
                     Text("kcal")
                         .font(Typography.caption)
@@ -1067,19 +1198,24 @@ struct MobileRootView: View {
                 if let grams = result.grams {
                     macroPill("g", grams, color: Palette.textSecondary)
                 }
+                Spacer(minLength: 0)
             }
 
             Button {
                 addAIFoodResult(result)
             } label: {
-                Label("Bugüne ekle", systemImage: "plus")
+                Label("Bugüne ekle", systemImage: "plus.circle.fill")
+                    .font(Typography.bodyBold)
                     .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .disabled((result.calories ?? 0) <= 0)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surfaceElevated))
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.accent.opacity(0.4), lineWidth: 1))
     }
 
     private var presetCard: some View {
@@ -1102,83 +1238,305 @@ struct MobileRootView: View {
         }
     }
 
-    private var recipeCard: some View {
+    // MARK: - Tarifler sekmesi (Mac paritesi: özet + arama + kategori filtresi + favori + detay)
+
+    private var recipesPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader("Tarifler", action: "Ekle", systemImage: "plus") {
+                recipeToEdit = nil
+                showRecipeEditor = true
+            }
+            recipeSummaryStrip
+            recipeSearchField
+            recipeCategoryChips
+            if filteredRecipes.isEmpty {
+                MobileCard {
+                    emptyText(recipes.isEmpty
+                        ? "Tarif kaydı yok. + ile ekle ya da AI koçtan iste."
+                        : "Bu filtreye uyan tarif yok.")
+                }
+            } else {
+                ForEach(filteredRecipes, id: \.persistentModelID) { recipe in
+                    recipeListCard(recipe)
+                }
+            }
+        }
+    }
+
+    private var recipeSummaryStrip: some View {
+        let favorites = recipes.filter(\.isFavorite).count
+        let detailed = recipes.filter(\.hasDetail).count
+        return MobileCard {
+            HStack(spacing: 10) {
+                metric("Toplam", value: "\(recipes.count)", unit: "")
+                metric("Favori", value: "\(favorites)", unit: "")
+                metric("Detaylı", value: "\(detailed)", unit: "")
+            }
+        }
+    }
+
+    private var recipeSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.textTertiary)
+            TextField("Tarif, malzeme veya özet ara", text: $recipeSearch)
+                .font(Typography.body)
+                .foregroundStyle(Palette.textPrimary)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if !recipeSearch.isEmpty {
+                Button {
+                    recipeSearch = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Palette.textQuaternary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.borderStrong, lineWidth: 0.5))
+    }
+
+    private var recipeCategoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                recipeChip(title: "Tümü", icon: "square.grid.2x2", isSelected: selectedRecipeCategory == nil && !showFavoriteRecipesOnly) {
+                    selectedRecipeCategory = nil
+                    showFavoriteRecipesOnly = false
+                }
+                ForEach(RecipeCategory.allCases) { category in
+                    recipeChip(title: category.label, icon: category.icon, isSelected: selectedRecipeCategory == category) {
+                        selectedRecipeCategory = (selectedRecipeCategory == category) ? nil : category
+                    }
+                }
+                recipeChip(
+                    title: "Favoriler",
+                    icon: showFavoriteRecipesOnly ? "heart.fill" : "heart",
+                    isSelected: showFavoriteRecipesOnly,
+                    tint: Palette.warning
+                ) {
+                    showFavoriteRecipesOnly.toggle()
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+    }
+
+    private func recipeChip(title: String, icon: String, isSelected: Bool, tint: Color = Palette.accent, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(Typography.captionBold)
+            }
+            .foregroundStyle(isSelected ? Palette.background : Palette.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(isSelected ? tint : Palette.surfaceElevated))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func recipeListCard(_ recipe: Recipe) -> some View {
+        MobileCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: recipe.category.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
+                        .frame(width: 34, height: 34)
+                        .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.accentSoft))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(recipe.title)
+                            .font(Typography.bodyBold)
+                            .foregroundStyle(Palette.textPrimary)
+                            .lineLimit(2)
+                        Text(recipe.summary?.nilIfBlank ?? recipe.category.label)
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    Button {
+                        toggleRecipeFavorite(recipe)
+                    } label: {
+                        Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textQuaternary)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
+                }
+
+                if recipe.calories != nil || recipe.protein != nil || recipe.prepMinutes != nil {
+                    HStack(spacing: 6) {
+                        if let kcal = recipe.calories {
+                            recipeTag("\(Fmt.int(kcal)) kcal", icon: "flame.fill")
+                        }
+                        if let protein = recipe.protein {
+                            recipeTag("P \(Fmt.int(protein))g", icon: "bolt.fill")
+                        }
+                        if let prep = recipe.prepMinutes {
+                            recipeTag("\(prep) dk", icon: "clock")
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { recipeToView = recipe }
+    }
+
+    private func recipeTag(_ text: String, icon: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(Typography.label)
+        }
+        .foregroundStyle(Palette.textSecondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Palette.surfaceElevated))
+    }
+
+    private var filteredRecipes: [Recipe] {
+        var result = recipes
+        if showFavoriteRecipesOnly { result = result.filter(\.isFavorite) }
+        if let category = selectedRecipeCategory { result = result.filter { $0.category == category } }
+        let query = recipeSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !query.isEmpty {
+            result = result.filter { recipe in
+                recipe.title.lowercased().contains(query)
+                    || (recipe.summary?.lowercased().contains(query) ?? false)
+                    || (recipe.ingredientsText?.lowercased().contains(query) ?? false)
+                    || (recipe.instructionsText?.lowercased().contains(query) ?? false)
+            }
+        }
+        return result.sorted { lhs, rhs in
+            if lhs.isFavorite != rhs.isFavorite { return lhs.isFavorite && !rhs.isFavorite }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    private func toggleRecipeFavorite(_ recipe: Recipe) {
+        recipe.isFavorite.toggle()
+        recipe.updatedAt = .now
+        ctx.saveOrReport()
+        BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
+        refreshTick = UUID()
+    }
+
+    private var recentFoodsCard: some View {
         MobileCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Tarifler")
+                    Text("Son yemek kayıtları")
                         .font(Typography.titleSmall)
                         .foregroundStyle(Palette.textPrimary)
                     Spacer()
-                    Text("\(recipes.count)")
-                        .font(Typography.captionBold)
-                        .foregroundStyle(Palette.textTertiary)
-                    Button {
-                        recipeToEdit = nil
-                        showRecipeEditor = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .bold))
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Palette.textPrimary)
-                    .background(Circle().fill(Palette.surfaceElevated))
-                    .accessibilityLabel("Tarif ekle")
-                }
-                if recipes.isEmpty {
-                    emptyText("Tarif kaydı yok. + ile ekle ya da AI koçtan iste.")
-                } else {
-                    ForEach(recipes.prefix(10), id: \.persistentModelID) { recipe in
+                    if foods.count > 3 {
                         Button {
-                            recipeToEdit = recipe
-                            showRecipeEditor = true
+                            showAllFoods = true
                         } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: recipe.category.icon)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Palette.accent)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(recipe.title)
-                                        .font(Typography.bodyBold)
-                                        .foregroundStyle(Palette.textPrimary)
-                                        .lineLimit(1)
-                                    Text(recipe.summary?.nilIfBlank ?? recipe.category.label)
-                                        .font(Typography.caption)
-                                        .foregroundStyle(Palette.textTertiary)
-                                        .lineLimit(1)
-                                }
-                                Spacer(minLength: 0)
+                            HStack(spacing: 3) {
+                                Text("Tümünü gör")
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Palette.textQuaternary)
+                                    .font(.system(size: 10, weight: .bold))
                             }
-                            .padding(.vertical, 6)
-                            .contentShape(Rectangle())
+                            .font(Typography.captionBold)
+                            .foregroundStyle(Palette.accent)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Tüm yemek kayıtlarını gör")
+                    }
+                }
+                if foods.isEmpty {
+                    emptyText("Yemek kaydı yok.")
+                } else {
+                    ForEach(foods.prefix(3), id: \.persistentModelID) { food in
+                        foodRow(food)
                     }
                 }
             }
         }
     }
 
-    private var recentFoodsCard: some View {
-        MobileCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Son yemek kayıtları")
-                    .font(Typography.titleSmall)
-                    .foregroundStyle(Palette.textPrimary)
-                if foods.isEmpty {
-                    emptyText("Yemek kaydı yok.")
-                } else {
-                    ForEach(foods.prefix(12), id: \.persistentModelID) { food in
-                        foodRow(food)
+    /// "Tümünü gör" ile açılan tam yemek geçmişi — güne göre gruplu (yeni sayfa, sheet).
+    private var foodHistorySheet: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if foods.isEmpty {
+                        MobileCard { emptyText("Yemek kaydı yok.") }
+                    } else {
+                        ForEach(foodsByDay, id: \.day) { group in
+                            MobileCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack {
+                                        Text(foodDayTitle(group.day))
+                                            .font(Typography.titleSmall)
+                                            .foregroundStyle(Palette.textPrimary)
+                                        Spacer()
+                                        Text("\(Fmt.int(group.totalCalories)) kcal")
+                                            .font(Typography.captionBold)
+                                            .foregroundStyle(Palette.textTertiary)
+                                    }
+                                    ForEach(group.items, id: \.persistentModelID) { food in
+                                        foodRow(food)
+                                    }
+                                }
+                            }
+                        }
                     }
+                }
+                .padding(16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.background.ignoresSafeArea())
+            .navigationTitle("Tüm yemek kayıtları")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Kapat") { showAllFoods = false }
                 }
             }
         }
+        .preferredColorScheme(.dark)
+    }
+
+    private struct FoodDayGroup {
+        let day: Date
+        let items: [FoodEntry]
+        var totalCalories: Double { items.reduce(0) { $0 + $1.calories } }
+    }
+
+    /// Yemekleri güne göre grupla (yeni → eski), gün içinde de yeni → eski.
+    private var foodsByDay: [FoodDayGroup] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: foods) { cal.startOfDay(for: $0.date) }
+        return grouped.keys.sorted(by: >).map { day in
+            FoodDayGroup(day: day, items: (grouped[day] ?? []).sorted { $0.date > $1.date })
+        }
+    }
+
+    private func foodDayTitle(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Bugün" }
+        if cal.isDateInYesterday(date) { return "Dün" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMMM EEEE"
+        return f.string(from: date)
     }
 
     /// Ölçüm sekmesi hero'su: büyük kilo + önceki ölçüme göre delta + mini trend + yağ/bel/hedef.
@@ -1410,35 +1768,6 @@ struct MobileRootView: View {
         }
     }
 
-    private var foodForm: some View {
-        NavigationStack {
-            Form {
-                TextField("Yemek", text: $foodName)
-                TextField("Gram", text: $foodGrams)
-                    .keyboardType(.decimalPad)
-                TextField("Kalori", text: $foodCalories)
-                    .keyboardType(.decimalPad)
-                TextField("Protein", text: $foodProtein)
-                    .keyboardType(.decimalPad)
-                TextField("Karbonhidrat", text: $foodCarbs)
-                    .keyboardType(.decimalPad)
-                TextField("Yağ", text: $foodFat)
-                    .keyboardType(.decimalPad)
-            }
-            .navigationTitle("Yemek Ekle")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Kapat") { showAddFood = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Kaydet") { addManualFood() }
-                        .disabled(foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-
     private var measurementForm: some View {
         NavigationStack {
             Form {
@@ -1464,6 +1793,9 @@ struct MobileRootView: View {
                             .keyboardType(.decimalPad)
                         TextField("Boyun", text: $measurementNeck)
                             .keyboardType(.decimalPad)
+                        Link(destination: URL(string: "https://www.agirsaglam.com/vucut-yag-orani-hesaplama/")!) {
+                            Label("Yağ oranı hesapla", systemImage: "arrow.up.right")
+                        }
                     }
                 }
             }
@@ -1662,34 +1994,27 @@ struct MobileRootView: View {
         .padding(.top, 4)
     }
 
+    /// Yemek satırı — sola kaydırınca Sil çıkar, basınca "emin misin" alert'i açılır.
     private func foodRow(_ food: FoodEntry) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(food.name)
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                Text(food.grams.map { "\(Fmt.num($0, digits: 0)) g" } ?? food.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
+        MobileSwipeToDelete(onDelete: { foodToDelete = food }) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(food.name)
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                    Text(food.grams.map { "\(Fmt.num($0, digits: 0)) g" } ?? food.date.formatted(date: .abbreviated, time: .shortened))
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                Spacer()
+                Text("\(Fmt.int(food.calories)) kcal")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
             }
-            Spacer()
-            Text("\(Fmt.int(food.calories)) kcal")
-                .font(Typography.captionBold)
-                .foregroundStyle(Palette.textSecondary)
-            Button {
-                foodToDelete = food
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.textTertiary)
-                    .padding(.leading, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(food.name) sil")
+            .padding(.vertical, 8)
+            .padding(.horizontal, 2)
         }
-        .padding(.vertical, 3)
     }
 
     private func measurementRow(_ measurement: Measurement) -> some View {
@@ -1753,6 +2078,8 @@ struct MobileRootView: View {
                 Text(value)
                     .font(Typography.monoLarge)
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 if !unit.isEmpty {
                     Text(unit)
                         .font(Typography.caption)
@@ -1955,29 +2282,6 @@ struct MobileRootView: View {
         scheduleVaultPush()
     }
 
-    private func addManualFood() {
-        let entry = FoodEntry(
-            date: .now,
-            name: foodName.trimmingCharacters(in: .whitespacesAndNewlines),
-            grams: number(foodGrams),
-            calories: number(foodCalories) ?? 0,
-            protein: number(foodProtein),
-            carbs: number(foodCarbs),
-            fat: number(foodFat)
-        )
-        ctx.insert(entry)
-        ctx.saveOrReport()
-        BackupService.shared.exportAsync(from: ctx)
-        scheduleVaultPush()
-        foodName = ""
-        foodGrams = ""
-        foodCalories = ""
-        foodProtein = ""
-        foodCarbs = ""
-        foodFat = ""
-        showAddFood = false
-    }
-
     private func applyRecipeFields(_ f: RecipeFields, to existing: Recipe?) {
         let recipe = existing ?? Recipe(title: f.title, urlString: f.url, category: f.category)
         recipe.title = f.title
@@ -2149,6 +2453,8 @@ struct MobileRootView: View {
         aiFoodResult = nil
         aiFoodError = nil
         aiFoodStatus = "Bugüne eklendi."
+        // Bugün sekmesinin + sheet'inden eklendiyse kapat; inline kartta no-op.
+        showFoodAIEstimator = false
     }
 
     private func mobileAIErrorMessage(_ error: Error) -> String {
@@ -2435,6 +2741,188 @@ struct MobileRecipeEditor: View {
             fat: parse(fat)
         ))
         dismiss()
+    }
+}
+
+/// Mobil tarif detay sayfası (oku-odaklı, Mac RecipeDetailSheet paritesi):
+/// makro kutuları, özet/malzeme/yapılış, kaynak linki + favori ve düzenle.
+struct MobileRecipeDetailSheet: View {
+    let recipe: Recipe
+    var onSaveEdit: (RecipeFields) -> Void
+    var onDelete: () -> Void
+    var onToggleFavorite: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var showEditor = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    if hasMacros { macroRow }
+                    if let summary = recipe.summary?.nilIfBlank {
+                        detailSection("Özet", text: summary)
+                    }
+                    if let ingredients = recipe.ingredientsText?.nilIfBlank {
+                        detailSection("Malzemeler", text: ingredients)
+                    }
+                    if let instructions = recipe.instructionsText?.nilIfBlank {
+                        detailSection("Yapılış", text: instructions)
+                    }
+                    if let url = recipe.url {
+                        Link(destination: url) {
+                            Label("Kaynağı aç", systemImage: "arrow.up.right.square")
+                                .font(Typography.captionBold)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    if !recipe.hasDetail && !hasMacros {
+                        Text("Bu tarifte henüz detay yok. Düzenle ile malzeme, yapılış ve makro ekleyebilirsin.")
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.background.ignoresSafeArea())
+            .navigationTitle("Tarif")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Kapat") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showEditor = true } label: {
+                        Label("Düzenle", systemImage: "pencil")
+                    }
+                }
+            }
+            .sheet(isPresented: $showEditor) {
+                MobileRecipeEditor(
+                    existing: recipe,
+                    onSave: onSaveEdit,
+                    onDelete: {
+                        onDelete()
+                        dismiss()
+                    }
+                )
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var hasMacros: Bool {
+        recipe.calories != nil || recipe.protein != nil || recipe.carbs != nil || recipe.fat != nil
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: recipe.category.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 44, height: 44)
+                    .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.accentSoft))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recipe.category.label)
+                        .font(Typography.label)
+                        .foregroundStyle(Palette.textQuaternary)
+                        .textCase(.uppercase)
+                    Text(recipe.title)
+                        .font(Typography.hero(24))
+                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    onToggleFavorite()
+                } label: {
+                    Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textQuaternary)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Palette.surfaceElevated))
+                }
+                .buttonStyle(.plain)
+            }
+            if recipe.servings != nil || recipe.prepMinutes != nil {
+                HStack(spacing: 8) {
+                    if let servings = recipe.servings {
+                        metaTag("\(servings) porsiyon", icon: "person.2.fill")
+                    }
+                    if let prep = recipe.prepMinutes {
+                        metaTag("\(prep) dk hazırlık", icon: "clock.fill")
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func metaTag(_ text: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+            Text(text)
+                .font(Typography.captionBold)
+        }
+        .foregroundStyle(Palette.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Palette.surfaceElevated))
+    }
+
+    private var macroRow: some View {
+        HStack(spacing: 10) {
+            macroBox("Kalori", recipe.calories.map { Fmt.int($0) } ?? "—", "kcal")
+            macroBox("Protein", recipe.protein.map { Fmt.int($0) } ?? "—", "g")
+            macroBox("Karb", recipe.carbs.map { Fmt.int($0) } ?? "—", "g")
+            macroBox("Yağ", recipe.fat.map { Fmt.int($0) } ?? "—", "g")
+        }
+    }
+
+    private func macroBox(_ label: String, _ value: String, _ unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(Typography.label)
+                .foregroundStyle(Palette.textQuaternary)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(Typography.monoLarge)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(unit)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.surfaceElevated))
+    }
+
+    private func detailSection(_ title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(Typography.label)
+                .foregroundStyle(Palette.textQuaternary)
+                .textCase(.uppercase)
+            Text(text)
+                .font(Typography.body)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
     }
 }
 
