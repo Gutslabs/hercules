@@ -658,7 +658,7 @@ final class BackupService {
         let legacyURL = root.appendingPathComponent(legacySnapshotName)
         let manifestURL = root.appendingPathComponent(manifestName)
 
-        let didWriteConflict = try copyVaultConflictIfNeeded(
+        let didWriteConflict = copyVaultConflictIfNeeded(
             snapshotURL: snapshotURL,
             conflictsDir: root.appendingPathComponent("conflicts", isDirectory: true),
             lastSeenExportedAt: lastSeenExportedAt
@@ -705,15 +705,19 @@ final class BackupService {
         try data.write(to: url, options: [.atomic])
     }
 
+    /// Güncel snapshot'ı overwrite etmeden önce `conflicts/`'e arşivler. SADECE bir
+    /// güvenlik kopyası — push'u ASLA kırmamalı (merge zaten o snapshot'ı okuyup
+    /// kattığı için veri kaybı yok). Aynı saniyede ikinci kopya / herhangi bir kopyalama
+    /// hatası SESSİZCE geçilir. (Code=516 "File exists" tüm push'u patlatıp senkronu
+    /// durduruyordu.)
     nonisolated private static func copyVaultConflictIfNeeded(
         snapshotURL: URL,
         conflictsDir: URL,
         lastSeenExportedAt: Date?
-    ) throws -> Bool {
+    ) -> Bool {
         let fm = FileManager.default
         guard fm.fileExists(atPath: snapshotURL.path) else { return false }
-
-        let data = try Data(contentsOf: snapshotURL)
+        guard let data = try? Data(contentsOf: snapshotURL) else { return false }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let existing = try? decoder.decode(HerculesBackup.self, from: data)
@@ -721,9 +725,10 @@ final class BackupService {
         let lastSeen = lastSeenExportedAt ?? .distantPast
         guard let existingDate, existingDate.timeIntervalSince(lastSeen) > 2 else { return false }
 
-        try fm.createDirectory(at: conflictsDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: conflictsDir, withIntermediateDirectories: true)
         let conflictURL = conflictsDir.appendingPathComponent("hercules-conflict-\(timestampForFilename()).json")
-        try fm.copyItem(at: snapshotURL, to: conflictURL)
+        guard !fm.fileExists(atPath: conflictURL.path) else { return false }
+        do { try fm.copyItem(at: snapshotURL, to: conflictURL) } catch { return false }
         return true
     }
 
