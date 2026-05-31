@@ -32,6 +32,8 @@ struct MobileRootView: View {
     @State private var foodToDelete: FoodEntry?
     @State private var measurementToDelete: Measurement?
     @State private var workoutToDelete: WorkoutSession?
+    /// Mutation sonrası debounce'lı vault push (force-quit'e güvenmeden, foreground'da).
+    @State private var pendingSyncTask: Task<Void, Never>?
     @State private var calendarMonth: Date = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
     @State private var calendarSelectedDay: Date = Calendar.current.startOfDay(for: Date())
     @State private var isWorking = false
@@ -1950,6 +1952,7 @@ struct MobileRootView: View {
         ctx.insert(preset.makeFoodEntry(servings: servings))
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
     }
 
     private func addManualFood() {
@@ -1965,6 +1968,7 @@ struct MobileRootView: View {
         ctx.insert(entry)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         foodName = ""
         foodGrams = ""
         foodCalories = ""
@@ -1989,6 +1993,7 @@ struct MobileRootView: View {
         if existing == nil { ctx.insert(recipe) }
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         refreshTick = UUID()
     }
 
@@ -1996,6 +2001,7 @@ struct MobileRootView: View {
         ctx.delete(recipe)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         refreshTick = UUID()
     }
 
@@ -2005,6 +2011,7 @@ struct MobileRootView: View {
         ctx.delete(food)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         refreshTick = UUID()
     }
 
@@ -2012,6 +2019,7 @@ struct MobileRootView: View {
         ctx.delete(m)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         refreshTick = UUID()
     }
 
@@ -2020,7 +2028,20 @@ struct MobileRootView: View {
         ctx.delete(w)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         refreshTick = UUID()
+    }
+
+    /// Veri değişince ~1.5 sn sonra vault'a push et (ardışık değişiklikleri birleştirir).
+    /// Foreground'da çalışır → uygulamayı force-quit etsen bile değişiklik zaten gitmiştir.
+    private func scheduleVaultPush() {
+        guard vaultConfigured else { return }
+        pendingSyncTask?.cancel()
+        pendingSyncTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
+        }
     }
 
     @MainActor
@@ -2123,6 +2144,7 @@ struct MobileRootView: View {
         ctx.insert(entry)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         aiFoodInput = ""
         aiFoodResult = nil
         aiFoodError = nil
@@ -2163,6 +2185,7 @@ struct MobileRootView: View {
         ))
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
+        scheduleVaultPush()
         showAddMeasurement = false
     }
 
