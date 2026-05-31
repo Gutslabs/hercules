@@ -754,9 +754,28 @@ final class BackupService {
         return ranked.first.map { ($0.url, $0.backup) }
     }
 
+    /// SADECE kanonik snapshot'ı okur (data/hercules-backup.json, yoksa legacy) — en yeni
+    /// exportedAt'i seçer. `backups/` ve `conflicts/` TARANMAZ. Merge/pull ve diagnostic
+    /// bunu kullanır: yoksa en "zengin" eski yedek seçilip SİLİNEN kayıtlar geri dirilir
+    /// ve cihazlar güncel snapshot'a yakınsamaz. bestVaultRestoreCandidate (backups dahil)
+    /// yalnız elle "tam geri yükle" kurtarması içindir.
+    private func canonicalVaultSnapshot(root: URL) -> (url: URL, backup: HerculesBackup)? {
+        let urls = [
+            root.appendingPathComponent(vaultSnapshotRelativePath),
+            root.appendingPathComponent(vaultLegacySnapshotName)
+        ]
+        return urls.compactMap { url -> (url: URL, backup: HerculesBackup)? in
+            guard let data = try? Data(contentsOf: url),
+                  let b = try? decoder.decode(HerculesBackup.self, from: data) else { return nil }
+            return (url, b)
+        }
+        .sorted { $0.backup.exportedAt > $1.backup.exportedAt }
+        .first
+    }
+
     private func richerVaultCandidate(than backup: HerculesBackup, minimumScoreDelta: Int = 25) -> (url: URL, backup: HerculesBackup)? {
         (try? withVaultRoot { root in
-            guard let candidate = bestVaultRestoreCandidate(root: root) else { return nil }
+            guard let candidate = canonicalVaultSnapshot(root: root) else { return nil }
             let vaultScore = Self.backupMeaningfulScore(candidate.backup)
             let localScore = Self.backupMeaningfulScore(backup)
             guard vaultScore >= localScore + minimumScoreDelta else { return nil }
@@ -1825,7 +1844,7 @@ extension BackupService {
                 manifestName: vaultManifestName,
                 readmeName: vaultReadmeName
             )
-            if let candidate = bestVaultRestoreCandidate(root: root) {
+            if let candidate = canonicalVaultSnapshot(root: root) {
                 writeMergeSafetyBackupOnce(into: root, from: ctx)
                 applyMerge(candidate.backup, into: ctx)
             }
@@ -1873,7 +1892,7 @@ extension BackupService {
             return "Yerel \(localFoods) yemek · VAULT SEÇİLİ DEĞİL"
         }
         let info: (foods: Int, meas: Int, at: Date)? = (try? withVaultRoot { root in
-            guard let c = bestVaultRestoreCandidate(root: root) else { return nil }
+            guard let c = canonicalVaultSnapshot(root: root) else { return nil }
             return (c.backup.foods.count, c.backup.measurements.count, c.backup.exportedAt)
         }) ?? nil
         guard let info else { return "Yerel \(localFoods) yemek · vault dosyası OKUNAMADI" }
