@@ -1422,7 +1422,10 @@ extension Notification.Name {
 extension BackupService {
 
     enum SyncKey {
-        static func ms(_ date: Date) -> Int { Int((date.timeIntervalSince1970 * 1000).rounded()) }
+        // SANİYE hassasiyeti (ms DEĞİL): snapshot JSON'u iso8601 ile yazıldığından Date
+        // round-trip'te milisaniye KAYBOLUR. ms kullansaydık aynı kayıt her turda farklı
+        // anahtar alır → union/dedup bozulur, cihazlar yakınsamaz. Saniye round-trip'te sabit.
+        static func ms(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded()) }
         static func day(_ date: Date) -> String {
             let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
             return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
@@ -1481,6 +1484,19 @@ extension BackupService {
         if let data = try? encoder.encode(Array(keys)) {
             try? data.write(to: lastKeysFileURL, options: [.atomic])
         }
+    }
+
+    /// Anahtar formatı değişince (ms→saniye) eski lastSyncedKeys/tombstone'lar GEÇERSİZ —
+    /// bir kez sıfırla. Yoksa eski ms-anahtarlar yeni saniye-anahtarlarla eşleşmez, hepsi
+    /// "silinmiş" sanılıp kütlesel tombstone üretilir (mevcut veri yok olur).
+    private func migrateSyncKeyFormatIfNeeded() {
+        let k = "hercules.sync.keyformat"
+        let current = 2
+        guard UserDefaults.standard.integer(forKey: k) != current else { return }
+        try? FileManager.default.removeItem(at: lastKeysFileURL)
+        try? FileManager.default.removeItem(at: tombstonesFileURL)
+        UserDefaults.standard.set(current, forKey: k)
+        AppLog.backup.notice("[Sync] anahtar formatı geçişi → baseline + tombstone sıfırlandı")
     }
 
     /// Tüm canlı kayıtların merge anahtarları + updatedAt'leri.
@@ -1733,6 +1749,7 @@ extension BackupService {
         for m in (try? ctx.fetch(FetchDescriptor<Model>())) ?? [] {
             let k = localKey(m)
             if localByKey[k] == nil { localByKey[k] = m }
+            else { ctx.delete(m) } // aynı anahtarlı yerel çift (kararsız-anahtar döneminden) → temizle
         }
         for snap in incoming {
             let k = key(snap)
@@ -1798,6 +1815,7 @@ extension BackupService {
     /// local'e KATARAK çek (merge), (3) birleşmiş local'i vault'a yaz. Sıra kritik:
     /// silme tespiti merge'den ÖNCE olmalı, yoksa merge silineni vault'tan geri ekler.
     func syncWithVault(into ctx: ModelContext) throws {
+        migrateSyncKeyFormatIfNeeded()                  // 0) eski ms-anahtar baseline'ını sıfırla
         _ = recordPushDeletionsAndTombstones(ctx: ctx) // 1) pull öncesi silme tespiti
         try withVaultRoot { root in                    // 2) PULL: union merge
             try Self.ensureVaultLayout(
