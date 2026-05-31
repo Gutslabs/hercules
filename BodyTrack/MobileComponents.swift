@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 enum MobileTab: Hashable, CaseIterable {
     case dashboard
     case nutrition
+    case recipes
     case workout
     case measurements
     case calendar
@@ -14,6 +15,7 @@ enum MobileTab: Hashable, CaseIterable {
         switch self {
         case .dashboard: return "Hercules"
         case .nutrition: return "Yemek"
+        case .recipes: return "Tarifler"
         case .workout: return "Antrenman"
         case .measurements: return "Ölçümler"
         case .calendar: return "Takvim"
@@ -25,6 +27,7 @@ enum MobileTab: Hashable, CaseIterable {
         switch self {
         case .dashboard: return "Bugün"
         case .nutrition: return "Yemek"
+        case .recipes: return "Tarif"
         case .workout: return "Spor"
         case .measurements: return "Ölçüm"
         case .calendar: return "Takvim"
@@ -36,6 +39,7 @@ enum MobileTab: Hashable, CaseIterable {
         switch self {
         case .dashboard: return "Mobil"
         case .nutrition: return "Beslenme"
+        case .recipes: return "Mutfak"
         case .workout: return "Program"
         case .measurements: return "Takip"
         case .calendar: return "Ay"
@@ -47,6 +51,7 @@ enum MobileTab: Hashable, CaseIterable {
         switch self {
         case .dashboard: return "house.fill"
         case .nutrition: return "fork.knife"
+        case .recipes: return "book.closed.fill"
         case .workout: return "dumbbell.fill"
         case .measurements: return "chart.line.uptrend.xyaxis"
         case .calendar: return "calendar"
@@ -145,5 +150,67 @@ struct MobileProgressRing<Center: View>: View {
             center()
         }
         .frame(width: size, height: size)
+    }
+}
+
+/// Sola kaydırınca kırmızı "Sil" aksiyonu açan satır sarmalayıcı (List gerektirmez,
+/// custom kart UI ile uyumlu). Butona basınca onDelete tetiklenir; "emin misin" onayını
+/// üst katman (alert) gösterir. Satır arka planı kart rengiyle (surface) aynı olmalı.
+struct MobileSwipeToDelete<Content: View>: View {
+    var onDelete: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    @State private var offset: CGFloat = 0
+    @State private var startOffset: CGFloat = 0
+    private let revealWidth: CGFloat = 88
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.negative)
+                .overlay(alignment: .trailing) {
+                    Button {
+                        close()
+                        onDelete()
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: "trash.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                            Text("Sil")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(width: revealWidth)
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.surface)
+                .offset(x: offset)
+                .gesture(
+                    DragGesture(minimumDistance: 14)
+                        .onChanged { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            offset = min(0, max(startOffset + value.translation.width, -revealWidth))
+                        }
+                        .onEnded { value in
+                            let projected = startOffset + value.translation.width
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                offset = projected < -revealWidth / 2 ? -revealWidth : 0
+                            }
+                            startOffset = offset
+                        }
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+    }
+
+    private func close() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { offset = 0 }
+        startOffset = 0
     }
 }
