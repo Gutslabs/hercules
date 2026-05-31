@@ -1,21 +1,44 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Workout Tab
+
+private enum WorkoutTab: String, CaseIterable {
+    case overview  = "Genel Bakış"
+    case programs  = "Programlar"
+    case library   = "Kütüphane"
+
+    var icon: String {
+        switch self {
+        case .overview:  return "calendar"
+        case .programs:  return "list.bullet.clipboard"
+        case .library:   return "books.vertical"
+        }
+    }
+}
+
 struct WorkoutView: View {
     @Environment(\.modelContext) private var ctx
     @Query(sort: \WorkoutLog.date, order: .reverse) private var logs: [WorkoutLog]
     @Query(sort: \WorkoutSession.weekday) private var templates: [WorkoutSession]
     @Query(sort: \WorkoutPlanOverride.createdAt) private var planOverrides: [WorkoutPlanOverride]
     @Query(sort: \WorkoutProgramArchive.archivedAt, order: .reverse) private var archivedPrograms: [WorkoutProgramArchive]
+    @Query(sort: \Exercise.name) private var exercises: [Exercise]
+    @Query(filter: #Predicate<TrainingProgram> { $0.isActive }) private var activePrograms: [TrainingProgram]
 
+    @State private var workoutTab: WorkoutTab = .overview
     @State private var currentMonth: Date = Self.startOfMonth(.now)
     @State private var selectedDay: Date = Calendar.current.startOfDay(for: .now)
     @State private var editing: WorkoutLog? = nil
     @State private var creatingForDate: Date? = nil
     @State private var creatingPrefill: WorkoutLog? = nil
+    @State private var creatingPlanned: [PlannedExercise] = []
     @State private var editingProgramSession: WorkoutSession? = nil
     @State private var showingArchives = false
     @State private var highlightedProgramWeekday: Int? = nil
+    @State private var showingExerciseForm = false
+    @State private var editingExercise: Exercise? = nil
+    @Namespace private var tabNamespace
 
     /// Exact log dict: startOfDay → log (her gün için doğrudan kayıt).
     private var exactLogByDay: [Date: WorkoutLog] {
@@ -72,40 +95,77 @@ struct WorkoutView: View {
             let compact = contentWidth < 980
             let expansive = contentWidth >= 1500
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: compact ? Spacing.lg : Spacing.xl) {
-                        header(compact: compact)
-                        workoutCalendarSection(exact: exact, templatesByWeekday: tplsByWeekday) { date in
-                            focusProgramDay(for: date, proxy: proxy)
+            VStack(spacing: 0) {
+                // ── Tab bar ──
+                workoutTabBar(compact: compact)
+
+                // ── İçerik ──
+                switch workoutTab {
+                case .overview:
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: compact ? Spacing.lg : Spacing.xl) {
+                                header(compact: compact)
+                                workoutCalendarSection(exact: exact, templatesByWeekday: tplsByWeekday) { date in
+                                    focusProgramDay(for: date, proxy: proxy)
+                                }
+                                programDaySection(exact: exact)
+                                if activeProgram == nil {
+                                    activeProgramSection(compact: compact, expansive: expansive)
+                                        .id("active-program")
+                                }
+                                statsStrip(exact: exact, templatesByWeekday: tplsByWeekday, compact: compact)
+                                Spacer(minLength: 24)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, compact ? Spacing.lg : (expansive ? 44 : Spacing.xxl))
+                            .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
                         }
-                        activeProgramSection(compact: compact, expansive: expansive)
-                            .id("active-program")
-                        workoutTermsSection(compact: compact)
-                        statsStrip(exact: exact, templatesByWeekday: tplsByWeekday, compact: compact)
-                        Spacer(minLength: 24)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, compact ? Spacing.lg : (expansive ? 44 : Spacing.xxl))
-                    .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
+                case .programs:
+                    WorkoutProgramsView(exercises: exercises, compact: compact, expansive: expansive)
+                case .library:
+                    ExerciseLibraryView(
+                        exercises: exercises,
+                        compact: compact,
+                        expansive: expansive,
+                        onAdd: { showingExerciseForm = true },
+                        onEdit: { editingExercise = $0 },
+                        onDelete: { ex in
+                            ctx.delete(ex)
+                            try? ctx.save()
+                        }
+                    )
                 }
             }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    let eff = effectiveLog(for: selectedDay)
-                    if let exact = eff.log, !eff.isTemplate {
-                        editing = exact
-                    } else {
-                        creatingForDate = selectedDay
-                        creatingPrefill = eff.log  // template log varsa prefill
+                switch workoutTab {
+                case .overview:
+                    Button {
+                        let eff = effectiveLog(for: selectedDay)
+                        if let exact = eff.log, !eff.isTemplate {
+                            editing = exact
+                        } else {
+                            creatingPlanned = plannedExercises(for: selectedDay)
+                            creatingForDate = selectedDay
+                            creatingPrefill = eff.log
+                        }
+                    } label: {
+                        Label("Yeni Seans", systemImage: "plus")
                     }
-                } label: {
-                    Label("Yeni Seans", systemImage: "plus")
+                    .keyboardShortcut("n", modifiers: .command)
+                    .help("Bu güne antrenman ekle (⌘N)")
+                case .programs:
+                    EmptyView()
+                case .library:
+                    Button { showingExerciseForm = true } label: {
+                        Label("Hareket Ekle", systemImage: "plus")
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
+                    .help("Yeni hareket ekle (⌘N)")
                 }
-                .keyboardShortcut("n", modifiers: .command)
-                .help("Bu güne antrenman ekle (⌘N) — kayıt varsa düzenle, yoksa template'ten oluştur")
             }
         }
         .background(Palette.background.ignoresSafeArea())
@@ -121,7 +181,7 @@ struct WorkoutView: View {
             get: { creatingForDate.map { CreateDate(date: $0) } },
             set: {
                 creatingForDate = $0?.date
-                if $0 == nil { creatingPrefill = nil }
+                if $0 == nil { creatingPrefill = nil; creatingPlanned = [] }
             }
         )) { wrap in
             WorkoutLogEditor(
@@ -129,7 +189,8 @@ struct WorkoutView: View {
                     date: wrap.date,
                     suggestedName: creatingPrefill?.name ?? suggestedName(for: wrap.date),
                     prefillFrom: creatingPrefill,
-                    planOverrides: overrides(for: wrap.date)
+                    planOverrides: overrides(for: wrap.date),
+                    plannedExercises: creatingPlanned
                 )
             ) { log in
                 ctx.insert(log)
@@ -152,6 +213,67 @@ struct WorkoutView: View {
                 }
             )
         }
+        .sheet(isPresented: $showingExerciseForm) {
+            ExerciseFormSheet(mode: .create, allExercises: exercises) { exercise in
+                ctx.insert(exercise)
+                try? ctx.save()
+            }
+        }
+        .sheet(item: $editingExercise) { exercise in
+            ExerciseFormSheet(mode: .edit(exercise), allExercises: exercises) { _ in
+                try? ctx.save()
+            }
+        }
+    }
+
+    // MARK: Tab Bar
+
+    private func workoutTabBar(compact: Bool) -> some View {
+        HStack(spacing: 4) {
+            ForEach(WorkoutTab.allCases, id: \.rawValue) { tab in
+                let isSelected = workoutTab == tab
+                Button {
+                    withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
+                        workoutTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(tab.rawValue)
+                            .font(Typography.bodyBold)
+                    }
+                    .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 7)
+                    .background(
+                        Group {
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                                    .fill(Palette.surfaceElevated)
+                                    .matchedGeometryEffect(id: "workout-tab", in: tabNamespace)
+                            }
+                        }
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Palette.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 0.5)
+        )
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, compact ? Spacing.lg : Spacing.xxl)
+        .padding(.top, compact ? Spacing.md : Spacing.lg)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Header
@@ -322,6 +444,112 @@ struct WorkoutView: View {
             RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
                 .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
         )
+    }
+
+    /// Aktif programın seçili güne denk gelen antrenmanını gösterir + kaydetme aksiyonu.
+    @ViewBuilder
+    private func programDaySection(exact: [Date: WorkoutLog]) -> some View {
+        if let program = activeProgram, let start = program.startDate {
+            let day = trainingDay(for: selectedDay)
+            let logged = exact[Calendar.current.startOfDay(for: selectedDay)]
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(program.name).eyebrow()
+                        Text(Self.fullDayFormatter.string(from: selectedDay))
+                            .font(Typography.title)
+                            .foregroundStyle(Palette.textPrimary)
+                    }
+                    Spacer()
+                    if let day, let week = day.week {
+                        PillTag(text: "Hafta \(week.weekNumber) · Gün \(day.dayNumber)", tint: Palette.accent)
+                    }
+                }
+
+                if let day {
+                    if day.isRestDay {
+                        programRestRow
+                    } else if day.sortedBlocks.isEmpty {
+                        Text("Bu gün için program boş.")
+                            .font(Typography.body)
+                            .foregroundStyle(Palette.textTertiary)
+                            .frame(maxWidth: .infinity, minHeight: 60, alignment: .center)
+                    } else {
+                        VStack(spacing: 6) {
+                            ForEach(day.sortedBlocks) { block in
+                                ProgramDayBlockRow(block: block)
+                            }
+                        }
+                        logActionRow(logged: logged)
+                    }
+                } else {
+                    let cal = Calendar.current
+                    let before = cal.startOfDay(for: selectedDay) < cal.startOfDay(for: start)
+                    Text(before
+                         ? "Program \(start.formatted(date: .abbreviated, time: .omitted)) tarihinde başlıyor."
+                         : "Program bu tarihte sona ermiş.")
+                        .font(Typography.body)
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .center)
+                }
+            }
+            .padding(Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                    .fill(Palette.surface.opacity(0.74))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+                    .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
+            )
+        }
+    }
+
+    private var programRestRow: some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "moon.zzz.fill").foregroundStyle(Palette.textSecondary)
+            Text("Dinlenme günü — toparlanmaya odaklan.")
+                .font(Typography.body)
+                .foregroundStyle(Palette.textSecondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, minHeight: 60)
+        .padding(.horizontal, Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surfaceElevated.opacity(0.45)))
+    }
+
+    @ViewBuilder
+    private func logActionRow(logged: WorkoutLog?) -> some View {
+        HStack(spacing: Spacing.md) {
+            if let logged {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.positive)
+                    Text("Kaydedildi · \(logged.exercises.count) hareket · \(logged.durationMinutes) dk")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+                Spacer()
+                Button {
+                    editing = logged
+                } label: {
+                    Label("Düzenle", systemImage: "pencil").font(Typography.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            } else {
+                Spacer()
+                Button {
+                    creatingPlanned = plannedExercises(for: selectedDay)
+                    creatingForDate = selectedDay
+                    creatingPrefill = nil
+                } label: {
+                    Label("Bu Günü Kaydet", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.accent)
+            }
+        }
+        .padding(.top, 4)
     }
 
     private func activeProgramTitle(dayCount: Int, exerciseCount: Int, totalMinutes: Int) -> some View {
@@ -794,7 +1022,7 @@ struct WorkoutView: View {
                         isSelected: cal.isDate(date, inSameDayAs: selectedDay),
                         log: eff.log,
                         isTemplate: eff.isTemplate,
-                        scheduleHint: templateName(for: date),
+                        scheduleHint: programScheduleHint(for: date) ?? templateName(for: date),
                         overrideCount: overrides(for: date).count
                     ) {
                         selectedDay = cal.startOfDay(for: date)
@@ -1073,6 +1301,64 @@ struct WorkoutView: View {
     private func programSession(for day: Date) -> WorkoutSession? {
         let weekday = Calendar.current.component(.weekday, from: day)
         return templates.first(where: { $0.weekday == weekday })
+    }
+
+    // MARK: Aktif program → takvim eşlemesi
+
+    private var activeProgram: TrainingProgram? { activePrograms.first }
+
+    /// Verilen tarihin aktif programdaki hangi antrenman gününe denk geldiğini döndürür.
+    /// Gün 1 = başlangıç tarihi; sonra ardışık günler. Program bitince nil.
+    private func trainingDay(for date: Date) -> TrainingDay? {
+        guard let program = activeProgram, let start = program.startDate else { return nil }
+        let cal = Calendar.current
+        let startDay = cal.startOfDay(for: start)
+        let target = cal.startOfDay(for: date)
+        guard target >= startDay else { return nil }
+        let offset = cal.dateComponents([.day], from: startDay, to: target).day ?? 0
+        let weeks = program.sortedWeeks
+        guard !weeks.isEmpty, offset < weeks.count * 7 else { return nil }
+        let week = weeks[offset / 7]
+        return week.day(offset % 7 + 1)
+    }
+
+    /// Takvim hücresinde gösterilecek program ipucu (gün adı / "Dinlenme").
+    private func programScheduleHint(for date: Date) -> String? {
+        guard let day = trainingDay(for: date) else { return nil }
+        if day.isRestDay { return "Dinlenme" }
+        guard !day.blocks.isEmpty else { return nil }
+        return day.name?.isEmpty == false ? day.name : "Antrenman"
+    }
+
+    /// Program gününün hareket reçetesini kayıt formu için PlannedExercise listesine çevirir.
+    private func plannedExercises(for date: Date) -> [PlannedExercise] {
+        guard let day = trainingDay(for: date), !day.isRestDay else { return [] }
+        return day.sortedBlocks
+            .filter { $0.type == .exercise }
+            .compactMap { block in
+                guard let name = block.exerciseName, !name.isEmpty else { return nil }
+                return PlannedExercise(
+                    name: name,
+                    sets: block.sets ?? 3,
+                    reps: Self.firstInt(block.repsRaw) ?? 10,
+                    weight: Self.firstDouble(block.load)
+                )
+            }
+    }
+
+    /// "8-10", "AMRAP", "12" gibi metinden ilk tam sayıyı çeker.
+    private static func firstInt(_ s: String?) -> Int? {
+        guard let s else { return nil }
+        let digits = s.prefix { $0.isNumber }
+        return Int(digits)
+    }
+
+    /// "60 kg", "%75", "RPE 8" gibi metinden ilk ondalık sayıyı çeker (yoksa nil).
+    private static func firstDouble(_ s: String?) -> Double? {
+        guard let s, !s.contains("%"), s.lowercased().contains("kg") else { return nil }
+        let num = s.prefix { $0.isNumber || $0 == "." || $0 == "," }
+            .replacingOccurrences(of: ",", with: ".")
+        return Double(num)
     }
 
     private func suggestedName(for day: Date) -> String {
@@ -1715,6 +2001,56 @@ private struct WorkoutProgramArchiveSheet: View {
 
 // MARK: - Day cell
 
+/// Genel bakıştaki program günü kartında tek bir reçete satırı.
+private struct ProgramDayBlockRow: View {
+    let block: TrainingBlock
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Spacing.md) {
+            if block.type == .exercise {
+                Image(systemName: "dumbbell.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(block.exerciseName ?? "—")
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.textPrimary)
+                    if let intensity = block.intensityText {
+                        Text(intensity)
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(block.summaryText)
+                        .font(Typography.mono)
+                        .foregroundStyle(Palette.textPrimary)
+                    if let rest = block.restSeconds {
+                        Text(TrainingBlock.formatSeconds(rest))
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+            } else {
+                Image(systemName: "timer")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textSecondary)
+                Text("Dinlenme · \(block.summaryText)")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textSecondary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(block.type == .exercise ? Palette.accentSoft.opacity(0.5) : Palette.surfaceElevated.opacity(0.4))
+        )
+    }
+}
+
 private struct WorkoutDayCell: View {
     let date: Date
     let inMonth: Bool
@@ -1836,9 +2172,18 @@ private struct WorkoutDayCell: View {
 
 // MARK: - Editor sheet
 
+/// Aktif programdaki bir günün reçetesinden kayıt formunu önden doldurmak için.
+struct PlannedExercise {
+    let name: String
+    let sets: Int
+    let reps: Int
+    let weight: Double?
+}
+
 enum WorkoutEditorMode {
     /// `prefillFrom`: template / başka bir günden kopyalanacak log (örn. recurring workout).
-    case create(date: Date, suggestedName: String, prefillFrom: WorkoutLog?, planOverrides: [WorkoutPlanOverride])
+    /// `plannedExercises`: aktif programdaki günün reçetesi (set/tekrar hedefleri).
+    case create(date: Date, suggestedName: String, prefillFrom: WorkoutLog?, planOverrides: [WorkoutPlanOverride], plannedExercises: [PlannedExercise])
     case edit(WorkoutLog)
 }
 
@@ -1862,19 +2207,19 @@ struct WorkoutLogEditor: View {
         self.onSave = onSave
         self.onDelete = onDelete
         switch mode {
-        case .create(let d, let sugg, let prefill, let planOverrides):
+        case .create(let d, let sugg, let prefill, let planOverrides, let planned):
             _date = State(initialValue: d)
             _name = State(initialValue: sugg)
             if let p = prefill {
                 _duration = State(initialValue: p.durationMinutes)
                 _calories = State(initialValue: p.estimatedCalories)
                 _notes = State(initialValue: p.notes ?? "")
-                _exercises = State(initialValue: Self.initialExercises(prefill: p, planOverrides: planOverrides))
+                _exercises = State(initialValue: Self.initialExercises(prefill: p, planOverrides: planOverrides, planned: planned))
             } else {
                 _duration = State(initialValue: 60)
                 _calories = State(initialValue: 300)
                 _notes = State(initialValue: "")
-                _exercises = State(initialValue: Self.initialExercises(prefill: nil, planOverrides: planOverrides))
+                _exercises = State(initialValue: Self.initialExercises(prefill: nil, planOverrides: planOverrides, planned: planned))
             }
         case .edit(let log):
             _date = State(initialValue: log.date)
@@ -1895,7 +2240,8 @@ struct WorkoutLogEditor: View {
 
     private static func initialExercises(
         prefill: WorkoutLog?,
-        planOverrides: [WorkoutPlanOverride]
+        planOverrides: [WorkoutPlanOverride],
+        planned: [PlannedExercise]
     ) -> [DraftExercise] {
         var drafts = prefill?.exercises
             .sorted { $0.order < $1.order }
@@ -1907,6 +2253,17 @@ struct WorkoutLogEditor: View {
             } ?? []
 
         var existingNames = Set(drafts.map { normalizedExerciseKey($0.name) })
+        // Aktif programdaki günün hareketleri (set/tekrar hedefleriyle).
+        for item in planned {
+            let key = normalizedExerciseKey(item.name)
+            guard !existingNames.contains(key) else { continue }
+            let setCount = max(item.sets, 1)
+            drafts.append(DraftExercise(
+                name: item.name,
+                sets: (0..<setCount).map { _ in DraftSet(reps: item.reps, weight: item.weight) }
+            ))
+            existingNames.insert(key)
+        }
         for item in planOverrides {
             let key = normalizedExerciseKey(item.exerciseName)
             guard !existingNames.contains(key) else { continue }
@@ -2198,6 +2555,1583 @@ private struct LabeledControl<Content: View>: View {
                 .tracking(0.6)
                 .foregroundStyle(Palette.textQuaternary)
             content
+        }
+    }
+}
+
+// MARK: - Workout Programs View
+
+// MARK: - Exercise Library View
+
+private enum LibraryGroupMode: String, CaseIterable {
+    case muscle   = "Kas Grubu"
+    case category = "Hareket Tipi"
+
+    var icon: String {
+        switch self {
+        case .muscle:   return "figure.arms.open"
+        case .category: return "rectangle.3.group"
+        }
+    }
+}
+
+/// Unique geniş kas grubu listesi — sabit sıra
+private let muscleGroupOrder: [String] = [
+    "Göğüs", "Sırt", "Omuzlar", "Kollar", "Karın", "Bacaklar", "Diğer"
+]
+
+private struct ExerciseLibraryView: View {
+    let exercises: [Exercise]
+    let compact: Bool
+    let expansive: Bool
+    let onAdd: () -> Void
+    let onEdit: (Exercise) -> Void
+    let onDelete: (Exercise) -> Void
+
+    @State private var searchText = ""
+    @State private var filterEquipment: Set<Equipment> = []
+    @State private var filterMuscleGroup: Set<String> = []
+    @State private var filterDifficulty: Set<Difficulty> = []
+    @State private var groupMode: LibraryGroupMode = .muscle
+    @State private var showFilterPopover = false
+    @Namespace private var modeNS
+
+    // MARK: Active filter count (badge)
+    private var activeFilterCount: Int {
+        (filterEquipment.isEmpty ? 0 : 1) +
+        (filterMuscleGroup.isEmpty ? 0 : 1) +
+        (filterDifficulty.isEmpty ? 0 : 1)
+    }
+
+    // MARK: Filtered list
+    private var filtered: [Exercise] {
+        exercises.filter { ex in
+            let matchSearch = searchText.isEmpty ||
+                ex.name.localizedCaseInsensitiveContains(searchText)
+            let matchEq = filterEquipment.isEmpty || filterEquipment.contains(ex.equipment)
+            let matchMuscle = filterMuscleGroup.isEmpty ||
+                ex.primaryMuscles.contains { filterMuscleGroup.contains($0.muscleGroup) } ||
+                ex.secondaryMuscles.contains { filterMuscleGroup.contains($0.muscleGroup) }
+            let matchDiff = filterDifficulty.isEmpty ||
+                ex.difficulty.map { filterDifficulty.contains($0) } ?? false
+            return matchSearch && matchEq && matchMuscle && matchDiff
+        }
+    }
+
+    // MARK: Grouped
+    private var groupedByMuscle: [(String, [Exercise])] {
+        var groups: [String: [Exercise]] = [:]
+        for ex in filtered { groups[ex.primaryMuscleGroup, default: []].append(ex) }
+        return muscleGroupOrder.compactMap { key in
+            guard let list = groups[key], !list.isEmpty else { return nil }
+            return (key, list)
+        }
+    }
+
+    private var groupedByCategory: [(String, [Exercise])] {
+        var groups: [String: [Exercise]] = [:]
+        for ex in filtered { groups[ex.category?.label ?? "Kategorisiz", default: []].append(ex) }
+        let order = ExerciseCategory.allCases.map(\.label) + ["Kategorisiz"]
+        return order.compactMap { key in
+            guard let list = groups[key], !list.isEmpty else { return nil }
+            return (key, list)
+        }
+    }
+
+    private var activeGroups: [(String, [Exercise])] {
+        groupMode == .muscle ? groupedByMuscle : groupedByCategory
+    }
+
+    private var availableMuscleGroups: [String] {
+        let used = Set(exercises.flatMap { ($0.primaryMuscles + $0.secondaryMuscles).map(\.muscleGroup) })
+        return muscleGroupOrder.filter { used.contains($0) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                libraryHeader
+                searchAndControls
+                // Aktif filtre özetini göster
+                if activeFilterCount > 0 { activeFilterSummary }
+                if filtered.isEmpty { libraryEmptyState } else { libraryContent }
+                Spacer(minLength: 24)
+            }
+            .padding(.horizontal, compact ? Spacing.lg : (expansive ? 44 : Spacing.xxl))
+            .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
+        }
+    }
+
+    // MARK: Header
+    private var libraryHeader: some View {
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hareket Kütüphanesi").eyebrow()
+                Text("Egzersizler")
+                    .font(Typography.display(36))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("\(exercises.count) hareket kayıtlı")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+            Spacer()
+            Button(action: onAdd) {
+                Label("Yeni Hareket", systemImage: "plus")
+                    .font(Typography.bodyBold)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.accent))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+
+    // MARK: Search + controls row
+    private var searchAndControls: some View {
+        HStack(spacing: Spacing.sm) {
+            // Arama
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Palette.textTertiary)
+                    .font(.system(size: 13))
+                TextField("Hareket ara…", text: $searchText)
+                    .font(Typography.body)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.textTertiary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.surface))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
+
+            // Filtre butonu
+            Button { showFilterPopover.toggle() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Filtre")
+                        .font(Typography.captionBold)
+                    if activeFilterCount > 0 {
+                        Text("\(activeFilterCount)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 16, height: 16)
+                            .background(Circle().fill(Palette.accent))
+                    }
+                }
+                .foregroundStyle(activeFilterCount > 0 ? Palette.accent : Palette.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(activeFilterCount > 0 ? Palette.accentSoft : Palette.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .strokeBorder(activeFilterCount > 0 ? Palette.accent.opacity(0.4) : Palette.border, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .popover(isPresented: $showFilterPopover, arrowEdge: .bottom) {
+                ExerciseFilterPopover(
+                    availableMuscleGroups: availableMuscleGroups,
+                    filterEquipment: $filterEquipment,
+                    filterMuscleGroup: $filterMuscleGroup,
+                    filterDifficulty: $filterDifficulty
+                )
+            }
+
+            // Gruplama modu
+            groupModePicker
+        }
+    }
+
+    // MARK: Active filter summary chips
+    private var activeFilterSummary: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(filterEquipment), id: \.rawValue) { eq in
+                    activeChip(label: eq.label) { filterEquipment.remove(eq) }
+                }
+                ForEach(Array(filterMuscleGroup), id: \.self) { g in
+                    activeChip(label: g) { filterMuscleGroup.remove(g) }
+                }
+                ForEach(Array(filterDifficulty), id: \.rawValue) { d in
+                    activeChip(label: d.label) { filterDifficulty.remove(d) }
+                }
+                if activeFilterCount > 1 {
+                    Button {
+                        filterEquipment.removeAll()
+                        filterMuscleGroup.removeAll()
+                        filterDifficulty.removeAll()
+                    } label: {
+                        Text("Tümünü Temizle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func activeChip(label: String, onRemove: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.accent)
+            Button(action: onRemove) {
+                Image(systemName: "xmark").font(.system(size: 7, weight: .bold)).foregroundStyle(Palette.accent.opacity(0.7))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Palette.accentSoft))
+        .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.25), lineWidth: 0.5))
+    }
+
+    // MARK: Group mode picker
+    private var groupModePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(LibraryGroupMode.allCases, id: \.rawValue) { mode in
+                let sel = groupMode == mode
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.80)) { groupMode = mode }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: mode.icon).font(.system(size: 10, weight: .semibold))
+                        Text(mode.rawValue).font(Typography.captionBold)
+                    }
+                    .foregroundStyle(sel ? Palette.textPrimary : Palette.textSecondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(
+                        Group {
+                            if sel {
+                                RoundedRectangle(cornerRadius: Radius.sm - 3, style: .continuous)
+                                    .fill(Palette.surfaceElevated)
+                                    .matchedGeometryEffect(id: "lib-mode", in: modeNS)
+                            }
+                        }
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
+        .fixedSize(horizontal: true, vertical: true)
+    }
+
+    // MARK: Content
+    private var libraryContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            ForEach(activeGroups, id: \.0) { group, groupExercises in
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    HStack(spacing: 8) {
+                        Text(group).eyebrow()
+                        Text("\(groupExercises.count)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Palette.textQuaternary)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Capsule().fill(Palette.surfaceElevated))
+                    }
+                    .padding(.bottom, 2)
+
+                    if compact {
+                        LazyVStack(spacing: Spacing.sm) {
+                            ForEach(groupExercises) { ex in
+                                ExerciseRow(exercise: ex, allExercises: exercises, onEdit: { onEdit(ex) }, onDelete: { onDelete(ex) })
+                            }
+                        }
+                    } else {
+                        LazyVGrid(
+                            columns: [GridItem(.flexible(), spacing: Spacing.sm), GridItem(.flexible(), spacing: Spacing.sm)],
+                            spacing: Spacing.sm
+                        ) {
+                            ForEach(groupExercises) { ex in
+                                ExerciseRow(exercise: ex, allExercises: exercises, onEdit: { onEdit(ex) }, onDelete: { onDelete(ex) })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Empty state
+    private var libraryEmptyState: some View {
+        VStack(spacing: Spacing.lg) {
+            Image(systemName: "books.vertical")
+                .font(.system(size: 36, weight: .light))
+                .foregroundStyle(Palette.textTertiary)
+            VStack(spacing: 6) {
+                Text(searchText.isEmpty && activeFilterCount == 0 ? "Henüz hareket yok" : "Sonuç bulunamadı")
+                    .font(Typography.title).foregroundStyle(Palette.textPrimary)
+                Text(searchText.isEmpty && activeFilterCount == 0
+                     ? "\"Yeni Hareket\" ile kütüphaneni oluşturmaya başla."
+                     : "Arama veya filtre kriterini değiştir.")
+                    .font(Typography.body).foregroundStyle(Palette.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            if searchText.isEmpty && activeFilterCount == 0 {
+                Button(action: onAdd) {
+                    Label("İlk Hareketi Ekle", systemImage: "plus")
+                }
+                .buttonStyle(PlainButtonStyle())
+                .foregroundStyle(Palette.accent)
+                .font(Typography.bodyBold)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
+    }
+}
+
+// MARK: - Filter Popover
+
+private struct ExerciseFilterPopover: View {
+    let availableMuscleGroups: [String]
+    @Binding var filterEquipment: Set<Equipment>
+    @Binding var filterMuscleGroup: Set<String>
+    @Binding var filterDifficulty: Set<Difficulty>
+
+    private var totalActive: Int {
+        (filterEquipment.isEmpty ? 0 : filterEquipment.count) +
+        filterMuscleGroup.count + filterDifficulty.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Başlık
+            HStack {
+                Text("Filtrele")
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textPrimary)
+                Spacer()
+                if totalActive > 0 {
+                    Button("Temizle") {
+                        filterEquipment.removeAll()
+                        filterMuscleGroup.removeAll()
+                        filterDifficulty.removeAll()
+                    }
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.accent)
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    // Ekipman
+                    filterSection(title: "Ekipman") {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                            ForEach(Equipment.allCases) { eq in
+                                filterToggleRow(
+                                    icon: eq.icon,
+                                    label: eq.label,
+                                    active: filterEquipment.contains(eq)
+                                ) {
+                                    if filterEquipment.contains(eq) { filterEquipment.remove(eq) }
+                                    else { filterEquipment.insert(eq) }
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    // Kas grubu
+                    if !availableMuscleGroups.isEmpty {
+                        filterSection(title: "Kas Grubu") {
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                                ForEach(availableMuscleGroups, id: \.self) { g in
+                                    filterToggleRow(
+                                        icon: "figure.arms.open",
+                                        label: g,
+                                        active: filterMuscleGroup.contains(g)
+                                    ) {
+                                        if filterMuscleGroup.contains(g) { filterMuscleGroup.remove(g) }
+                                        else { filterMuscleGroup.insert(g) }
+                                    }
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+
+                    // Zorluk
+                    filterSection(title: "Zorluk") {
+                        HStack(spacing: 8) {
+                            ForEach(Difficulty.allCases) { diff in
+                                let active = filterDifficulty.contains(diff)
+                                let c: Color = diff == .beginner ? .green : (diff == .intermediate ? .orange : .red)
+                                Button {
+                                    if active { filterDifficulty.remove(diff) }
+                                    else { filterDifficulty.insert(diff) }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: diff.icon).font(.system(size: 10, weight: .semibold))
+                                        Text(diff.label).font(Typography.captionBold)
+                                    }
+                                    .foregroundStyle(active ? .white : Palette.textSecondary)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity)
+                                    .background(RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                                        .fill(active ? c : Palette.surface))
+                                    .overlay(RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                                        .strokeBorder(active ? c : Palette.border, lineWidth: 0.5))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                    }
+                }
+                .padding(Spacing.lg)
+            }
+        }
+        .frame(width: 320)
+        .background(Palette.background)
+    }
+
+    private func filterSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(title).eyebrow()
+            content()
+        }
+    }
+
+    private func filterToggleRow(icon: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: active ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(active ? Palette.accent : Palette.textTertiary)
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.textSecondary)
+                Text(label)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .fill(active ? Palette.accentSoft : Palette.surface.opacity(0.5))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .strokeBorder(active ? Palette.accent.opacity(0.3) : Palette.border, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Exercise Row
+
+private struct ExerciseRow: View {
+    let exercise: Exercise
+    let allExercises: [Exercise]
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    @State private var hovering = false
+    @State private var showingDetail = false
+
+    var body: some View {
+        Button { showingDetail = true } label: {
+            HStack(spacing: Spacing.md) {
+                // Ekipman ikonu
+                ZStack {
+                    RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                        .fill(Palette.accentSoft)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: exercise.equipment.icon)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Palette.accent)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(exercise.name)
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        Text(exercise.equipment.label)
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                        if let cat = exercise.category {
+                            Text("·").foregroundStyle(Palette.textQuaternary)
+                            Text(cat.shortLabel)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Palette.accent.opacity(0.85))
+                        }
+                        if !exercise.primaryMuscles.isEmpty {
+                            Text("·")
+                                .foregroundStyle(Palette.textQuaternary)
+                            Text(exercise.primaryMuscles.map(\.label).joined(separator: ", "))
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textTertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                // Zorluk rozeti
+                if let diff = exercise.difficulty {
+                    let c: Color = diff == .beginner ? .green : (diff == .intermediate ? .orange : .red)
+                    Image(systemName: diff.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(c)
+                }
+
+                // Kas görseli (küçük)
+                if !exercise.allMuscles.isEmpty {
+                    muscleDots
+                }
+
+                // Aksiyon butonları
+                if hovering {
+                    HStack(spacing: 4) {
+                        Button { onEdit() } label: {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(width: 28, height: 28)
+                                .background(Palette.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button { onDelete() } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(width: 28, height: 28)
+                                .background(Palette.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .foregroundStyle(Palette.negative)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+            }
+            .padding(Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(hovering ? Palette.surfaceElevated : Palette.surface.opacity(0.82))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering = $0 }
+        .animation(.spring(response: 0.22, dampingFraction: 0.82), value: hovering)
+        .sheet(isPresented: $showingDetail) {
+            ExerciseDetailSheet(exercise: exercise, allExercises: allExercises, onEdit: onEdit)
+        }
+    }
+
+    private var muscleDots: some View {
+        HStack(spacing: 2) {
+            ForEach(exercise.primaryMuscles.prefix(3), id: \.rawValue) { _ in
+                Circle().fill(Color.red.opacity(0.65)).frame(width: 5, height: 5)
+            }
+            ForEach(exercise.secondaryMuscles.prefix(2), id: \.rawValue) { _ in
+                Circle().fill(Color.orange.opacity(0.55)).frame(width: 5, height: 5)
+            }
+        }
+    }
+}
+
+// MARK: - Exercise Progress Chart
+
+/// Bir hareketin geçmiş antrenman kayıtlarından ileriye dönük gelişim grafiği.
+private struct ExerciseProgressChart: View {
+    let exerciseName: String
+    @Query(sort: \WorkoutLog.date) private var logs: [WorkoutLog]
+    @State private var metric: Metric = .maxWeight
+
+    enum Metric: String, CaseIterable, Identifiable {
+        case maxWeight, volume, oneRM, reps
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .maxWeight: return "Maks kg"
+            case .volume:    return "Hacim"
+            case .oneRM:     return "1RM"
+            case .reps:      return "Tekrar"
+            }
+        }
+        var unit: String {
+            switch self {
+            case .maxWeight, .oneRM: return "kg"
+            case .volume:            return "kg·tekrar"
+            case .reps:              return "tekrar"
+            }
+        }
+    }
+
+    private static func normalizedKey(_ value: String) -> String {
+        value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private var points: [TrendPoint] {
+        let key = Self.normalizedKey(exerciseName)
+        var result: [TrendPoint] = []
+        for log in logs {
+            let matching = log.exercises.filter { Self.normalizedKey($0.name) == key }
+            guard !matching.isEmpty else { continue }
+            let sets = matching.flatMap { $0.setEntries }
+            guard !sets.isEmpty else { continue }
+            let value: Double
+            switch metric {
+            case .maxWeight:
+                value = sets.compactMap { $0.weight }.max() ?? 0
+            case .volume:
+                value = sets.reduce(0) { $0 + Double($1.reps) * ($1.weight ?? 0) }
+            case .oneRM:
+                value = sets.compactMap { set -> Double? in
+                    guard let w = set.weight, w > 0, set.reps > 0 else { return nil }
+                    return w * (1 + Double(set.reps) / 30)
+                }.max() ?? 0
+            case .reps:
+                value = Double(sets.reduce(0) { $0 + $1.reps })
+            }
+            guard value > 0 else { continue }
+            result.append(TrendPoint(date: log.date, value: value))
+        }
+        return result.sorted { $0.date < $1.date }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Picker("", selection: $metric) {
+                ForEach(Metric.allCases) { m in
+                    Text(m.label).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            MetricChart(title: "Gelişim", unit: metric.unit, points: points, height: 200)
+        }
+    }
+}
+
+// MARK: - Exercise Detail Sheet
+
+/// İki fotoğrafı (başlangıç/bitiş) belirli aralıkla değiştirerek "gif" hissi verir.
+private struct AnimatedExerciseImage: View {
+    let urls: [URL]
+    @State private var index = 0
+    private let timer = Timer.publish(every: 0.9, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        AsyncImage(url: urls[index % urls.count]) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().scaledToFit()
+            case .empty:
+                ProgressView()
+            case .failure:
+                Image(systemName: "photo")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Palette.textQuaternary)
+            @unknown default:
+                EmptyView()
+            }
+        }
+        .padding(Spacing.sm)
+        .onReceive(timer) { _ in
+            guard urls.count > 1 else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                index = (index + 1) % urls.count
+            }
+        }
+    }
+}
+
+private struct ExerciseDetailSheet: View {
+    let exercise: Exercise
+    let allExercises: [Exercise]
+    let onEdit: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var navigationStack: [Exercise] = []   // varyasyon navigasyonu
+
+    /// Şu an gösterilen egzersiz: stack varsa en üstteki, yoksa ana egzersiz
+    private var current: Exercise {
+        navigationStack.last ?? exercise
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Başlık
+            HStack {
+                HStack(spacing: Spacing.sm) {
+                    // Geri butonu (stack'te önceki varsa)
+                    if !navigationStack.isEmpty {
+                        Button {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.82)) {
+                                _ = navigationStack.removeLast()
+                            }
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Palette.accent)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Breadcrumb
+                        if !navigationStack.isEmpty {
+                            Button {
+                                withAnimation { navigationStack.removeAll() }
+                            } label: {
+                                Text(exercise.name)
+                                    .font(Typography.caption)
+                                    .foregroundStyle(Palette.accent.opacity(0.7))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                        Text(current.name)
+                            .font(Typography.title)
+                            .foregroundStyle(Palette.textPrimary)
+                        HStack(spacing: 6) {
+                            Text(current.equipment.label)
+                                .font(Typography.body)
+                                .foregroundStyle(Palette.textSecondary)
+                            if let cat = current.category {
+                                Text("·").foregroundStyle(Palette.textQuaternary)
+                                Text(cat.label)
+                                    .font(Typography.body)
+                                    .foregroundStyle(Palette.accent.opacity(0.85))
+                            }
+                        }
+                    }
+                }
+                Spacer()
+                HStack(spacing: Spacing.sm) {
+                    Button("Düzenle") { dismiss(); onEdit() }
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.accent)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+            }
+            .padding(Spacing.xl)
+
+            Divider().background(Palette.border)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    // Meta bilgiler (zorluk + kategori)
+                    if current.difficulty != nil || current.category != nil {
+                        HStack(spacing: 8) {
+                            if let diff = current.difficulty {
+                                let c: Color = diff == .beginner ? .green : (diff == .intermediate ? .orange : .red)
+                                HStack(spacing: 5) {
+                                    Image(systemName: diff.icon).font(.system(size: 10, weight: .semibold))
+                                    Text(diff.label).font(Typography.captionBold)
+                                }
+                                .foregroundStyle(c)
+                                .padding(.horizontal, 9).padding(.vertical, 5)
+                                .background(Capsule().fill(c.opacity(0.12)))
+                                .overlay(Capsule().strokeBorder(c.opacity(0.3), lineWidth: 0.5))
+                            }
+                            if let cat = current.category {
+                                HStack(spacing: 5) {
+                                    Image(systemName: cat.icon).font(.system(size: 10, weight: .semibold))
+                                    Text(cat.shortLabel).font(Typography.captionBold)
+                                }
+                                .foregroundStyle(Palette.accent)
+                                .padding(.horizontal, 9).padding(.vertical, 5)
+                                .background(Capsule().fill(Palette.accentSoft))
+                                .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.3), lineWidth: 0.5))
+                            }
+                        }
+                    }
+
+                    // Hareket görseli (başlangıç/bitiş fotoğraflarını sırayla gösterir)
+                    if !current.imageURLs.isEmpty {
+                        AnimatedExerciseImage(urls: current.imageURLs)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 260)
+                            .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                .fill(Palette.surfaceElevated.opacity(0.5)))
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                .strokeBorder(Palette.border, lineWidth: 0.5))
+                    }
+
+                    // Vücut diyagramı
+                    MuscleBodyDisplay(
+                        primaryMuscles: Set(current.primaryMuscles),
+                        secondaryMuscles: Set(current.secondaryMuscles)
+                    )
+
+                    // Kas listesi
+                    if !current.primaryMuscles.isEmpty || !current.secondaryMuscles.isEmpty {
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            if !current.primaryMuscles.isEmpty {
+                                muscleChips(label: "Birincil", muscles: current.primaryMuscles, color: .red.opacity(0.75))
+                            }
+                            if !current.secondaryMuscles.isEmpty {
+                                muscleChips(label: "İkincil", muscles: current.secondaryMuscles, color: .orange.opacity(0.75))
+                            }
+                        }
+                    }
+
+                    // Gelişim grafiği (geçmiş antrenman kayıtlarından)
+                    ExerciseProgressChart(exerciseName: current.name)
+
+                    // Teknik notlar
+                    if let notesText = current.notes, !notesText.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Teknik Notlar").eyebrow()
+                            Text(notesText)
+                                .font(Typography.body)
+                                .foregroundStyle(Palette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(Spacing.md)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .fill(Palette.surfaceElevated.opacity(0.5)))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: 0.5))
+                    }
+
+                    // Varyasyonlar
+                    if !current.variations.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Varyasyonlar").eyebrow()
+                            FlowLayout(spacing: 6) {
+                                ForEach(current.variations, id: \.self) { v in
+                                    let linked = allExercises.first { $0.name == v }
+                                    Button {
+                                        if let target = linked {
+                                            withAnimation(.spring(response: 0.25, dampingFraction: 0.82)) {
+                                                navigationStack.append(target)
+                                            }
+                                        }
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text(v)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(linked != nil ? Palette.accent : Palette.textSecondary)
+                                            if linked != nil {
+                                                Image(systemName: "arrow.right")
+                                                    .font(.system(size: 8, weight: .semibold))
+                                                    .foregroundStyle(Palette.accent.opacity(0.7))
+                                            }
+                                        }
+                                        .padding(.horizontal, 9).padding(.vertical, 5)
+                                        .background(Capsule().fill(linked != nil ? Palette.accentSoft : Palette.surfaceElevated))
+                                        .overlay(Capsule().strokeBorder(linked != nil ? Palette.accent.opacity(0.3) : Palette.border, lineWidth: 0.5))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .disabled(linked == nil)
+                                }
+                            }
+                        }
+                    }
+
+                    // Referans linki
+                    if let rawURL = current.sourceURL, !rawURL.isEmpty, let url = URL(string: rawURL) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Referans").eyebrow()
+                            Link(destination: url) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "link")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text(rawURL)
+                                        .font(Typography.caption)
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(Palette.accent)
+                            }
+                        }
+                    }
+                }
+                .padding(Spacing.xl)
+            }
+        }
+        .frame(width: 540, height: 680)
+        .background(Palette.background)
+    }
+
+    private func muscleChips(label: String, muscles: [MuscleRegion], color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            Text(label)
+                .font(Typography.captionBold)
+                .foregroundStyle(color)
+                .frame(width: 52, alignment: .trailing)
+            FlowLayout(spacing: 6) {
+                ForEach(muscles, id: \.rawValue) { muscle in
+                    Text(muscle.label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule().fill(color.opacity(0.15))
+                        )
+                        .overlay(
+                            Capsule().strokeBorder(color.opacity(0.35), lineWidth: 0.5)
+                        )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Exercise Form Sheet
+
+enum ExerciseFormMode {
+    case create
+    case edit(Exercise)
+}
+
+struct ExerciseFormSheet: View {
+    let mode: ExerciseFormMode
+    let allExercises: [Exercise]   // varyasyon seçimi için kütüphane listesi
+    let onSave: (Exercise) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @State private var equipment: Equipment = .barbell
+    @State private var category: ExerciseCategory? = nil
+    @State private var difficulty: Difficulty? = nil
+    @State private var notes: String = ""
+    @State private var sourceURL: String = ""
+    @State private var variations: [String] = []
+    @State private var showVariationPicker = false
+    @State private var primaryMuscles: Set<MuscleRegion> = []
+    @State private var secondaryMuscles: Set<MuscleRegion> = []
+
+    private var isEditing: Bool {
+        if case .edit = mode { return true }
+        return false
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty && !primaryMuscles.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Başlık
+            HStack {
+                Text(isEditing ? "Hareketi Düzenle" : "Yeni Hareket")
+                    .font(Typography.title)
+                    .foregroundStyle(Palette.textPrimary)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(Spacing.xl)
+
+            Divider().background(Palette.border)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    // Ad + Ekipman
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        Text("Temel Bilgiler").eyebrow()
+
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            Text("Hareket Adı")
+                                .font(Typography.captionBold)
+                                .foregroundStyle(Palette.textSecondary)
+                            TextField("örn. Bench Press", text: $name)
+                                .font(Typography.body)
+                                .textFieldStyle(.plain)
+                                .padding(Spacing.md)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                        .fill(Palette.surface)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                        .strokeBorder(Palette.border, lineWidth: 0.5)
+                                )
+                        }
+
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            Text("Ekipman")
+                                .font(Typography.captionBold)
+                                .foregroundStyle(Palette.textSecondary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(Equipment.allCases) { eq in
+                                        equipmentChip(eq)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            HStack {
+                                Text("Hareket Tipi")
+                                    .font(Typography.captionBold)
+                                    .foregroundStyle(Palette.textSecondary)
+                                Text("(isteğe bağlı)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Palette.textQuaternary)
+                            }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(ExerciseCategory.allCases) { cat in
+                                        categoryChip(cat)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                    .padding(Spacing.lg)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .fill(Palette.surface.opacity(0.6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: 0.5)
+                    )
+
+                    // Kas seçimi
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("Çalışılan Kaslar").eyebrow()
+                            if primaryMuscles.isEmpty {
+                                Text("· En az 1 birincil kas gerekli")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(Color.red.opacity(0.7))
+                            }
+                        }
+                        Text("Kas bölgesine dokun: 1. tap birincil 🔴 · 2. tap ikincil 🟠 · 3. tap kaldır")
+                            .font(Typography.caption)
+                            .foregroundStyle(Palette.textTertiary)
+
+                        MuscleBodyDiagram(
+                            primaryMuscles: $primaryMuscles,
+                            secondaryMuscles: $secondaryMuscles
+                        )
+                    }
+                    .padding(Spacing.lg)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .fill(Palette.surface.opacity(0.6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: 0.5)
+                    )
+
+                    // Detaylar
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        Text("Detaylar").eyebrow()
+
+                        // Zorluk seviyesi
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            HStack {
+                                Text("Zorluk Seviyesi")
+                                    .font(Typography.captionBold)
+                                    .foregroundStyle(Palette.textSecondary)
+                                Text("(isteğe bağlı)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Palette.textQuaternary)
+                            }
+                            HStack(spacing: 8) {
+                                ForEach(Difficulty.allCases) { diff in
+                                    difficultyChip(diff)
+                                }
+                            }
+                        }
+
+                        Hairline()
+
+                        // Teknik notlar
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            Text("Teknik Notlar / Cue'lar")
+                                .font(Typography.captionBold)
+                                .foregroundStyle(Palette.textSecondary)
+                            TextField(
+                                "örn. Dirsekler içe, göğsü sıkıştır, nötr sırt...",
+                                text: $notes,
+                                axis: .vertical
+                            )
+                            .font(Typography.body)
+                            .textFieldStyle(.plain)
+                            .lineLimit(3...6)
+                            .padding(Spacing.md)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .fill(Palette.surface)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .strokeBorder(Palette.border, lineWidth: 0.5)
+                            )
+                        }
+
+                        Hairline()
+
+                        // Referans linki
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            Text("Referans Linki")
+                                .font(Typography.captionBold)
+                                .foregroundStyle(Palette.textSecondary)
+                            TextField("https://exrx.net/...", text: $sourceURL)
+                                .font(Typography.body)
+                                .textFieldStyle(.plain)
+                                .textContentType(.URL)
+                                .padding(Spacing.md)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                        .fill(Palette.surface)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                        .strokeBorder(Palette.border, lineWidth: 0.5)
+                                )
+                        }
+
+                        Hairline()
+
+                        // Varyasyonlar
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            HStack {
+                                Text("Varyasyonlar")
+                                    .font(Typography.captionBold)
+                                    .foregroundStyle(Palette.textSecondary)
+                                Text("(isteğe bağlı)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Palette.textQuaternary)
+                                Spacer()
+                                Button {
+                                    showVariationPicker = true
+                                } label: {
+                                    Label("Hareket Seç", systemImage: "plus")
+                                        .font(Typography.captionBold)
+                                        .foregroundStyle(Palette.accent)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+
+                            if variations.isEmpty {
+                                Text("Bu hareketin varyasyonlarını kütüphaneden seçerek ekle")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(Palette.textQuaternary)
+                            } else {
+                                FlowLayout(spacing: 6) {
+                                    ForEach(variations, id: \.self) { v in
+                                        HStack(spacing: 4) {
+                                            Text(v)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(Palette.textSecondary)
+                                            Button {
+                                                variations.removeAll { $0 == v }
+                                            } label: {
+                                                Image(systemName: "xmark")
+                                                    .font(.system(size: 8, weight: .bold))
+                                                    .foregroundStyle(Palette.textTertiary)
+                                            }
+                                            .buttonStyle(PlainButtonStyle())
+                                        }
+                                        .padding(.horizontal, 9).padding(.vertical, 5)
+                                        .background(Capsule().fill(Palette.surfaceElevated))
+                                        .overlay(Capsule().strokeBorder(Palette.border, lineWidth: 0.5))
+                                    }
+                                }
+                            }
+                        }
+                        .sheet(isPresented: $showVariationPicker) {
+                            VariationPickerSheet(
+                                allExercises: allExercises,
+                                currentName: { if case .edit(let ex) = mode { return ex.name } else { return name } }(),
+                                selected: variations
+                            ) { picked in
+                                for p in picked where !variations.contains(p) {
+                                    variations.append(p)
+                                }
+                            }
+                        }
+                    }
+                    .padding(Spacing.lg)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .fill(Palette.surface.opacity(0.6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: 0.5)
+                    )
+                }
+                .padding(Spacing.xl)
+            }
+
+            Divider().background(Palette.border)
+
+            // Kaydet butonu
+            HStack {
+                Spacer()
+                Button("İptal") { dismiss() }
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textSecondary)
+                    .buttonStyle(PlainButtonStyle())
+
+                Button(isEditing ? "Kaydet" : "Ekle") {
+                    save()
+                }
+                .font(Typography.bodyBold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(canSave ? Palette.accent : Palette.textTertiary)
+                )
+                .buttonStyle(PlainButtonStyle())
+                .disabled(!canSave)
+            }
+            .padding(Spacing.xl)
+        }
+        .frame(width: 580, height: 740)
+        .background(Palette.background)
+        .onAppear { loadIfEditing() }
+    }
+
+    private func difficultyChip(_ diff: Difficulty) -> some View {
+        let selected = difficulty == diff
+        let accentColor: Color = diff == .beginner ? .green : (diff == .intermediate ? .orange : .red)
+        return Button {
+            difficulty = difficulty == diff ? nil : diff
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: diff.icon).font(.system(size: 11, weight: .semibold))
+                Text(diff.label).font(Typography.captionBold)
+            }
+            .foregroundStyle(selected ? .white : Palette.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .fill(selected ? accentColor : Palette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .strokeBorder(selected ? accentColor : Palette.border, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func categoryChip(_ cat: ExerciseCategory) -> some View {
+        let selected = category == cat
+        return Button {
+            category = category == cat ? nil : cat
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: cat.icon).font(.system(size: 11, weight: .semibold))
+                Text(cat.shortLabel).font(Typography.captionBold)
+            }
+            .foregroundStyle(selected ? .white : Palette.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .fill(selected ? Palette.accent : Palette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .strokeBorder(selected ? Palette.accent : Palette.border, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func equipmentChip(_ eq: Equipment) -> some View {
+        let selected = equipment == eq
+        return Button { equipment = eq } label: {
+            HStack(spacing: 6) {
+                Image(systemName: eq.icon).font(.system(size: 11, weight: .semibold))
+                Text(eq.label).font(Typography.captionBold)
+            }
+            .foregroundStyle(selected ? .white : Palette.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .fill(selected ? Palette.accent : Palette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
+                    .strokeBorder(selected ? Palette.accent : Palette.border, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func loadIfEditing() {
+        if case .edit(let ex) = mode {
+            name = ex.name
+            equipment = ex.equipment
+            category = ex.category
+            difficulty = ex.difficulty
+            notes = ex.notes ?? ""
+            sourceURL = ex.sourceURL ?? ""
+            variations = ex.variations
+            primaryMuscles = Set(ex.primaryMuscles)
+            secondaryMuscles = Set(ex.secondaryMuscles)
+        }
+    }
+
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !primaryMuscles.isEmpty else { return }
+
+        switch mode {
+        case .create:
+            let ex = Exercise(
+                name: trimmed,
+                equipment: equipment,
+                primaryMuscles: Array(primaryMuscles),
+                secondaryMuscles: Array(secondaryMuscles),
+                category: category,
+                difficulty: difficulty,
+                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                sourceURL: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                variations: variations
+            )
+            onSave(ex)
+        case .edit(let ex):
+            ex.name = trimmed
+            ex.equipment = equipment
+            ex.primaryMuscles = Array(primaryMuscles)
+            ex.secondaryMuscles = Array(secondaryMuscles)
+            ex.category = category
+            ex.difficulty = difficulty
+            let nt = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            let su = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            ex.notes = nt.isEmpty ? nil : nt
+            ex.sourceURL = su.isEmpty ? nil : su
+            ex.variations = variations
+            onSave(ex)
+        }
+        dismiss()
+    }
+}
+
+// MARK: - Variation Picker Sheet
+
+private struct VariationPickerSheet: View {
+    let allExercises: [Exercise]
+    let currentName: String          // düzenlenen hareketin adı — listeden çıkarılır
+    let selected: [String]           // zaten seçili olanlar
+    let onAdd: ([String]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var pending: Set<String> = []
+
+    private var available: [Exercise] {
+        allExercises.filter { ex in
+            ex.name != currentName &&
+            !selected.contains(ex.name) &&
+            (searchText.isEmpty || ex.name.localizedCaseInsensitiveContains(searchText))
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Başlık
+            HStack {
+                Text("Varyasyon Ekle")
+                    .font(Typography.title)
+                    .foregroundStyle(Palette.textPrimary)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(Spacing.xl)
+
+            Divider()
+
+            // Arama
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Palette.textTertiary)
+                    .font(.system(size: 13))
+                TextField("Hareket ara…", text: $searchText)
+                    .font(Typography.body)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.textTertiary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
+
+            Divider()
+
+            // Liste
+            if available.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(Palette.textTertiary)
+                    Text(searchText.isEmpty ? "Eklenecek hareket yok" : "Sonuç bulunamadı")
+                        .font(Typography.body)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(available) { ex in
+                    let isPending = pending.contains(ex.name)
+                    Button {
+                        if isPending { pending.remove(ex.name) }
+                        else { pending.insert(ex.name) }
+                    } label: {
+                        HStack(spacing: Spacing.md) {
+                            Image(systemName: isPending ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 16))
+                                .foregroundStyle(isPending ? Palette.accent : Palette.textTertiary)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ex.name)
+                                    .font(Typography.bodyBold)
+                                    .foregroundStyle(Palette.textPrimary)
+                                HStack(spacing: 4) {
+                                    Text(ex.equipment.label)
+                                        .font(Typography.caption)
+                                        .foregroundStyle(Palette.textTertiary)
+                                    if !ex.primaryMuscles.isEmpty {
+                                        Text("·").foregroundStyle(Palette.textQuaternary)
+                                        Text(ex.primaryMuscles.prefix(2).map(\.label).joined(separator: ", "))
+                                            .font(Typography.caption)
+                                            .foregroundStyle(Palette.textTertiary)
+                                    }
+                                }
+                            }
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .listStyle(.plain)
+            }
+
+            Divider()
+
+            // Alt butonlar
+            HStack {
+                if !pending.isEmpty {
+                    Text("\(pending.count) seçildi")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+                Spacer()
+                Button("İptal") { dismiss() }
+                    .foregroundStyle(Palette.textSecondary)
+                    .buttonStyle(PlainButtonStyle())
+                Button("Ekle") {
+                    onAdd(Array(pending))
+                    dismiss()
+                }
+                .font(Typography.bodyBold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18).padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(pending.isEmpty ? Palette.textTertiary : Palette.accent)
+                )
+                .buttonStyle(PlainButtonStyle())
+                .disabled(pending.isEmpty)
+            }
+            .padding(Spacing.xl)
+        }
+        .frame(width: 480, height: 540)
+        .background(Palette.background)
+    }
+}
+
+// MARK: - Flow Layout (kas chip'leri için)
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var height: CGFloat = 0
+        var x: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > width && x > 0 {
+                height += rowHeight + spacing
+                x = 0; rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        height += rowHeight
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX && x > bounds.minX {
+                y += rowHeight + spacing
+                x = bounds.minX; rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }

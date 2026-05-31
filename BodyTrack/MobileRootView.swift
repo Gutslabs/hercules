@@ -1286,7 +1286,22 @@ struct MobileRootView: View {
             calories: result.calories ?? 0,
             protein: result.protein_g,
             carbs: result.carbs_g,
-            fat: result.fat_g
+            fat: result.fat_g,
+            vitaminC_mg: result.vitamin_c_mg,
+            vitaminB1_mg: result.vitamin_b1_mg,
+            vitaminB6_mg: result.vitamin_b6_mg,
+            potassium_mg: result.potassium_mg,
+            magnesium_mg: result.magnesium_mg,
+            vitaminA_ug: result.vitamin_a_ug,
+            vitaminD_ug: result.vitamin_d_ug,
+            vitaminE_mg: result.vitamin_e_mg,
+            vitaminK_ug: result.vitamin_k_ug,
+            vitaminB12_ug: result.vitamin_b12_ug,
+            folate_ug: result.folate_ug,
+            iron_mg: result.iron_mg,
+            zinc_mg: result.zinc_mg,
+            calcium_mg: result.calcium_mg,
+            omega3_g: result.omega3_g
         )
         ctx.insert(entry)
         try? ctx.save()

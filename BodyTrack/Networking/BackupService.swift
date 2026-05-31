@@ -415,22 +415,17 @@ final class BackupService {
         let archiveCount = (try? ctx.fetchCount(FetchDescriptor<WorkoutProgramArchive>())) ?? 0
         let workoutOverrideCount = (try? ctx.fetchCount(FetchDescriptor<WorkoutPlanOverride>())) ?? 0
         let profile = (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first
-        let hasProfileData = {
+        let hasProfileData: Bool = {
             guard let profile else { return false }
             let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let about = profile.about.trimmingCharacters(in: .whitespacesAndNewlines)
             let supplements = profile.supplements.trimmingCharacters(in: .whitespacesAndNewlines)
-            let hasCustomSupplements = !supplements.isEmpty && supplements != UserProfile.defaultSupplements
-            return !name.isEmpty
-                || !about.isEmpty
-                || hasCustomSupplements
-                || profile.targetWeight != nil
-                || profile.manualBodyFat != nil
-                || profile.manualCalorieOffset != 0
-                || profile.manualCalorieOffsetMacro != .carbs
-                || profile.manualProteinGrams != nil
-                || profile.manualCarbsGrams != nil
-                || profile.manualFatGrams != nil
+            let hasCustomSupplements: Bool = !supplements.isEmpty && supplements != UserProfile.defaultSupplements
+            let hasNameOrAbout: Bool = !name.isEmpty || !about.isEmpty
+            let hasWeightOrFat: Bool = profile.targetWeight != nil || profile.manualBodyFat != nil
+            let hasOffsets: Bool = profile.manualCalorieOffset != 0 || profile.manualCalorieOffsetMacro != .carbs
+            let hasMacros: Bool = profile.manualProteinGrams != nil || profile.manualCarbsGrams != nil || profile.manualFatGrams != nil
+            return hasNameOrAbout || hasCustomSupplements || hasWeightOrFat || hasOffsets || hasMacros
         }()
         let presets = (try? ctx.fetch(FetchDescriptor<FoodPreset>())) ?? []
         let hasCustomPreset = presets.contains { !FoodPresetSeed.defaultPresetIDs.contains($0.presetID) }
@@ -567,129 +562,77 @@ final class BackupService {
         let monthlyGoals = (try? ctx.fetch(FetchDescriptor<MonthlyGoal>())) ?? []
         let workoutLogs = (try? ctx.fetch(FetchDescriptor<WorkoutLog>(sortBy: [SortDescriptor(\.date)]))) ?? []
 
+        let measurementSnapshots: [MeasurementSnapshot] = measurements.map {
+            MeasurementSnapshot(date: $0.date, weight: $0.weight, bodyFat: $0.bodyFat,
+                                waist: $0.waist, chest: $0.chest, neck: $0.neck, note: $0.note)
+        }
+        let foodSnapshots: [FoodSnapshot] = foods.map {
+            FoodSnapshot(date: $0.date, name: $0.name, grams: $0.grams,
+                         calories: $0.calories, protein: $0.protein, carbs: $0.carbs, fat: $0.fat)
+        }
+        let foodPresetSnapshots: [FoodPresetSnapshot] = foodPresets.map {
+            FoodPresetSnapshot(presetID: $0.presetID, name: $0.name, brand: $0.brand,
+                               category: $0.category, servingLabel: $0.servingLabel,
+                               servingGrams: $0.servingGrams, defaultServings: $0.defaultServings,
+                               calories: $0.calories, protein: $0.protein, carbs: $0.carbs, fat: $0.fat,
+                               note: $0.note, searchText: $0.searchText, sortOrder: $0.sortOrder,
+                               createdAt: $0.createdAt, updatedAt: $0.updatedAt)
+        }
+        let workoutSnapshots: [WorkoutSnapshot] = workouts.map {
+            WorkoutSnapshot(weekday: $0.weekday, name: $0.name, estimatedCalories: $0.estimatedCalories,
+                            durationMinutes: $0.durationMinutes, focus: $0.focus, warmup: $0.warmup,
+                            progression: $0.progression, notes: $0.notes,
+                            exercises: $0.sortedTemplateExercises.map(\.snapshot))
+        }
+        let workoutArchiveSnapshots: [WorkoutArchiveSnapshot] = workoutArchives.map {
+            WorkoutArchiveSnapshot(title: $0.title, summary: $0.summary, notes: $0.notes,
+                                   source: $0.source, archivedAt: $0.archivedAt, sessionsJSON: $0.sessionsJSON)
+        }
+        let workoutPlanOverrideSnapshots: [WorkoutPlanOverrideSnapshot] = workoutPlanOverrides.map {
+            WorkoutPlanOverrideSnapshot(weekday: $0.weekday, operationRaw: $0.operationRaw,
+                                        exerciseName: $0.exerciseName, sets: $0.sets, reps: $0.reps,
+                                        weight: $0.weight, note: $0.note, source: $0.source, createdAt: $0.createdAt)
+        }
+        let recipeSnapshots: [RecipeSnapshot] = recipes.map {
+            RecipeSnapshot(title: $0.title, urlString: $0.urlString, category: $0.category.rawValue,
+                           isFavorite: $0.isFavorite, summary: $0.summary,
+                           ingredientsText: $0.ingredientsText, instructionsText: $0.instructionsText,
+                           servings: $0.servings, prepMinutes: $0.prepMinutes,
+                           calories: $0.calories, protein: $0.protein, carbs: $0.carbs, fat: $0.fat,
+                           createdAt: $0.createdAt)
+        }
+        let stepSnapshots: [StepSnapshot] = steps.map {
+            StepSnapshot(date: $0.date, steps: $0.steps, source: $0.source,
+                         distanceMeters: $0.distanceMeters, activeEnergyKcal: $0.activeEnergyKcal,
+                         syncedAt: $0.syncedAt)
+        }
+        let monthlyGoalSnapshots: [MonthlyGoalSnapshot] = monthlyGoals.map {
+            MonthlyGoalSnapshot(anchorDate: $0.anchorDate, targetWeight: $0.targetWeight, note: $0.note)
+        }
+        let workoutLogSnapshots: [WorkoutLogSnapshot] = workoutLogs.map { log in
+            let exs: [WorkoutExerciseSnapshot] = log.exercises.sorted { $0.order < $1.order }.map { ex in
+                let sets: [ExerciseSetSnapshot] = ex.setEntries.sorted { $0.order < $1.order }.map { s in
+                    ExerciseSetSnapshot(order: s.order, reps: s.reps, weight: s.weight)
+                }
+                return WorkoutExerciseSnapshot(name: ex.name, order: ex.order, sets: sets)
+            }
+            return WorkoutLogSnapshot(date: log.date, name: log.name, durationMinutes: log.durationMinutes,
+                                      estimatedCalories: log.estimatedCalories, notes: log.notes, exercises: exs)
+        }
         return HerculesBackup(
             version: 12,
             exportedAt: .now,
             profile: profileData,
-            measurements: measurements.map {
-                MeasurementSnapshot(
-                    date: $0.date, weight: $0.weight, bodyFat: $0.bodyFat,
-                    waist: $0.waist, chest: $0.chest, neck: $0.neck, note: $0.note
-                )
-            },
-            foods: foods.map {
-                FoodSnapshot(
-                    date: $0.date, name: $0.name, grams: $0.grams,
-                    calories: $0.calories, protein: $0.protein,
-                    carbs: $0.carbs, fat: $0.fat
-                )
-            },
-            foodPresets: foodPresets.map {
-                FoodPresetSnapshot(
-                    presetID: $0.presetID,
-                    name: $0.name,
-                    brand: $0.brand,
-                    category: $0.category,
-                    servingLabel: $0.servingLabel,
-                    servingGrams: $0.servingGrams,
-                    defaultServings: $0.defaultServings,
-                    calories: $0.calories,
-                    protein: $0.protein,
-                    carbs: $0.carbs,
-                    fat: $0.fat,
-                    note: $0.note,
-                    searchText: $0.searchText,
-                    sortOrder: $0.sortOrder,
-                    createdAt: $0.createdAt,
-                    updatedAt: $0.updatedAt
-                )
-            },
-            workouts: workouts.map {
-                WorkoutSnapshot(
-                    weekday: $0.weekday,
-                    name: $0.name,
-                    estimatedCalories: $0.estimatedCalories,
-                    durationMinutes: $0.durationMinutes,
-                    focus: $0.focus,
-                    warmup: $0.warmup,
-                    progression: $0.progression,
-                    notes: $0.notes,
-                    exercises: $0.sortedTemplateExercises.map(\.snapshot)
-                )
-            },
-            workoutArchives: workoutArchives.map {
-                WorkoutArchiveSnapshot(
-                    title: $0.title,
-                    summary: $0.summary,
-                    notes: $0.notes,
-                    source: $0.source,
-                    archivedAt: $0.archivedAt,
-                    sessionsJSON: $0.sessionsJSON
-                )
-            },
-            workoutPlanOverrides: workoutPlanOverrides.map {
-                WorkoutPlanOverrideSnapshot(
-                    weekday: $0.weekday,
-                    operationRaw: $0.operationRaw,
-                    exerciseName: $0.exerciseName,
-                    sets: $0.sets,
-                    reps: $0.reps,
-                    weight: $0.weight,
-                    note: $0.note,
-                    source: $0.source,
-                    createdAt: $0.createdAt
-                )
-            },
-            recipes: recipes.map {
-                RecipeSnapshot(
-                    title: $0.title,
-                    urlString: $0.urlString,
-                    category: $0.category.rawValue,
-                    isFavorite: $0.isFavorite,
-                    summary: $0.summary,
-                    ingredientsText: $0.ingredientsText,
-                    instructionsText: $0.instructionsText,
-                    servings: $0.servings,
-                    prepMinutes: $0.prepMinutes,
-                    calories: $0.calories,
-                    protein: $0.protein,
-                    carbs: $0.carbs,
-                    fat: $0.fat,
-                    createdAt: $0.createdAt
-                )
-            },
-            steps: steps.map {
-                StepSnapshot(
-                    date: $0.date,
-                    steps: $0.steps,
-                    source: $0.source,
-                    distanceMeters: $0.distanceMeters,
-                    activeEnergyKcal: $0.activeEnergyKcal,
-                    syncedAt: $0.syncedAt
-                )
-            },
-            monthlyGoals: monthlyGoals.map {
-                MonthlyGoalSnapshot(anchorDate: $0.anchorDate, targetWeight: $0.targetWeight, note: $0.note)
-            },
-            workoutLogs: workoutLogs.map { log in
-                let exs = log.exercises.sorted { $0.order < $1.order }.map { ex in
-                    WorkoutExerciseSnapshot(
-                        name: ex.name,
-                        order: ex.order,
-                        sets: ex.setEntries.sorted { $0.order < $1.order }.map { s in
-                            ExerciseSetSnapshot(order: s.order, reps: s.reps, weight: s.weight)
-                        }
-                    )
-                }
-                return WorkoutLogSnapshot(
-                    date: log.date,
-                    name: log.name,
-                    durationMinutes: log.durationMinutes,
-                    estimatedCalories: log.estimatedCalories,
-                    notes: log.notes,
-                    exercises: exs
-                )
-            },
+            measurements: measurementSnapshots,
+            foods: foodSnapshots,
+            foodPresets: foodPresetSnapshots,
+            workouts: workoutSnapshots,
+            workoutArchives: workoutArchiveSnapshots,
+            workoutPlanOverrides: workoutPlanOverrideSnapshots,
+            recipes: recipeSnapshots,
+            steps: stepSnapshots,
+            monthlyGoals: monthlyGoalSnapshots,
+            workoutLogs: workoutLogSnapshots,
             supportFiles: buildSupportFileSnapshots(),
             preferences: buildPreferenceSnapshots()
         )
@@ -992,17 +935,16 @@ final class BackupService {
             .filter { !FoodPresetSeed.defaultPresetIDs.contains($0.presetID) }
             .count
 
-        return profileScore
-            + backup.measurements.count * 4
-            + backup.foods.count * 2
-            + backup.recipes.count * 3
-            + backup.steps.count
-            + (backup.monthlyGoals?.count ?? 0)
-            + (backup.workoutPlanOverrides?.count ?? 0)
-            + (backup.workoutLogs?.count ?? 0) * 3
-            + (backup.workoutArchives?.count ?? 0) * 2
-            + (backup.supportFiles?.count ?? 0)
-            + customPresetCount
+        let s1: Int = backup.measurements.count * 4
+        let s2: Int = backup.foods.count * 2
+        let s3: Int = backup.recipes.count * 3
+        let s4: Int = backup.steps.count
+        let s5: Int = backup.monthlyGoals?.count ?? 0
+        let s6: Int = backup.workoutPlanOverrides?.count ?? 0
+        let s7: Int = (backup.workoutLogs?.count ?? 0) * 3
+        let s8: Int = (backup.workoutArchives?.count ?? 0) * 2
+        let s9: Int = backup.supportFiles?.count ?? 0
+        return profileScore + s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9 + customPresetCount
     }
 
     nonisolated private static func ensureVaultLayout(

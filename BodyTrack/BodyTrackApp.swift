@@ -22,7 +22,7 @@ struct BodyTrackApp: App {
             let storeURL = dir.appendingPathComponent("Hercules.store")
             let config = ModelConfiguration(url: storeURL)
             container = try ModelContainer(
-                for: Measurement.self, UserProfile.self, Recipe.self, FoodEntry.self, FoodPreset.self, WorkoutSession.self, WorkoutTemplateExercise.self, WorkoutProgramArchive.self, WorkoutPlanOverride.self, StepEntry.self, MonthlyGoal.self, WorkoutLog.self, WorkoutExerciseEntry.self, ExerciseSet.self,
+                for: Measurement.self, UserProfile.self, Recipe.self, FoodEntry.self, FoodPreset.self, WorkoutSession.self, WorkoutTemplateExercise.self, WorkoutProgramArchive.self, WorkoutPlanOverride.self, StepEntry.self, MonthlyGoal.self, WorkoutLog.self, WorkoutExerciseEntry.self, ExerciseSet.self, UserGuideSection.self, UserGuideCard.self, Exercise.self, TrainingProgram.self, TrainingWeek.self, TrainingDay.self, TrainingBlock.self,
                 configurations: config
             )
             // 1) Önce default profil/workout seed (boşsa)

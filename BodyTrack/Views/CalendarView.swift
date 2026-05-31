@@ -1071,6 +1071,13 @@ private struct DayCell: View {
                         HStack(spacing: 5) {
                             Image(systemName: "scope")
                                 .font(.system(size: 8.5, weight: .semibold))
+                            if let bf = g.targetBodyFat {
+                                Text("\(Fmt.num(bf, digits: 1))%")
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .monospacedDigit()
+                                Text("·")
+                                    .font(.system(size: 9, weight: .light))
+                            }
                             Text("\(Fmt.num(g.targetWeight, digits: 1)) kg")
                                 .font(.system(size: 9.5, weight: .medium))
                                 .monospacedDigit()
@@ -1185,9 +1192,18 @@ private struct GoalRoadmapRow: View {
                                 .foregroundStyle(Palette.positive)
                         }
                     }
-                    Text("\(Fmt.num(goal.targetWeight, digits: 1)) kg")
-                        .font(Typography.titleSmall)
-                        .foregroundStyle(Palette.textPrimary)
+                    HStack(spacing: 6) {
+                        Text("\(Fmt.num(goal.targetWeight, digits: 1)) kg")
+                            .font(Typography.titleSmall)
+                            .foregroundStyle(Palette.textPrimary)
+                        if let bf = goal.targetBodyFat {
+                            Text("·")
+                                .foregroundStyle(Palette.textTertiary)
+                            Text("\(Fmt.num(bf, digits: 1))% yağ")
+                                .font(Typography.caption)
+                                .foregroundStyle(Palette.textSecondary)
+                        }
+                    }
                 }
 
                 Spacer(minLength: Spacing.sm)
@@ -1721,6 +1737,7 @@ struct GoalEditorSheet: View {
     let onCancel: () -> Void
 
     @State private var weightInput: Double
+    @State private var bodyFatInput: Double?
     @State private var dateInput: Date
     @State private var noteInput: String
     @State private var showDeleteConfirm = false
@@ -1736,6 +1753,7 @@ struct GoalEditorSheet: View {
         self.onDelete = onDelete
         self.onCancel = onCancel
         _weightInput = State(initialValue: goal.targetWeight)
+        _bodyFatInput = State(initialValue: goal.targetBodyFat)
         _dateInput = State(initialValue: goal.anchorDate)
         _noteInput = State(initialValue: goal.note ?? "")
     }
@@ -1747,6 +1765,12 @@ struct GoalEditorSheet: View {
                     DatePicker("Tarih", selection: $dateInput, displayedComponents: .date)
                     LabeledContent("Hedef kilo (kg)") {
                         TextField("", value: $weightInput, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    LabeledContent("Hedef yağ oranı (%)") {
+                        TextField("opsiyonel", value: $bodyFatInput, format: .number)
                             .textFieldStyle(.roundedBorder)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
@@ -1773,6 +1797,7 @@ struct GoalEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Kaydet") {
                         goal.targetWeight = weightInput
+                        goal.targetBodyFat = bodyFatInput
                         goal.anchorDate = dateInput
                         let trimmed = noteInput.trimmingCharacters(in: .whitespaces)
                         goal.note = trimmed.isEmpty ? nil : trimmed

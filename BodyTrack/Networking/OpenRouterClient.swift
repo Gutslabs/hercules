@@ -2,10 +2,10 @@ import Foundation
 import Security
 
 enum AIConfig {
-    static let defaultAPIKey = ""
-    static let defaultModel = "x-ai/grok-4.1-fast"
-    static let searchModel = "x-ai/grok-4.1-fast:online"
-    static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
+    static let defaultAPIKey = "ollama"
+    static let defaultModel = "llama3.1:latest"
+    static let searchModel = "llama3.1:latest"
+    static let endpoint = URL(string: "http://localhost:11434/v1/chat/completions")!
     static let appReferer = "https://hercules.local"
     static let appTitle = "Hercules"
 
@@ -57,7 +57,8 @@ enum AIConfig {
         Üç mod var:
 
         1) YEMEK MODU — kullanıcı bir yemek + miktar yazarsa (örn. "200g tavuk göğsü", "1 dilim ekmek", "Burger King double whopper"):
-           {"name": "yemek adı", "grams": <gram>, "calories": <kcal>, "protein_g": <p>, "carbs_g": <c>, "fat_g": <y>, "message": "kısa Türkçe açıklama"}
+           {"name": "yemek adı", "grams": <gram>, "calories": <kcal>, "protein_g": <p>, "carbs_g": <c>, "fat_g": <y>, "message": "kısa Türkçe açıklama", "vitamin_c_mg": <mg veya null>, "vitamin_b1_mg": <mg veya null>, "vitamin_b6_mg": <mg veya null>, "potassium_mg": <mg veya null>, "magnesium_mg": <mg veya null>, "vitamin_a_ug": <ug veya null>, "vitamin_d_ug": <ug veya null>, "vitamin_e_mg": <mg veya null>, "vitamin_k_ug": <ug veya null>, "vitamin_b12_ug": <ug veya null>, "folate_ug": <ug veya null>, "iron_mg": <mg veya null>, "zinc_mg": <mg veya null>, "calcium_mg": <mg veya null>, "omega3_g": <g veya null>}
+           Vitamin/mineral değerlerini gerçekçi tahmin et. Emin olmadığında null yaz, asla uydurma.
 
         2) SOHBET MODU — diğer her şey (selamlama, soru-cevap, fitness/diyet teorisi, antrenman önerisi, plato sorusu, motivasyon, genel sohbet):
            {"message": "Türkçe cevap"}
@@ -130,6 +131,25 @@ struct AIFoodResult: Codable, Equatable, Sendable {
     var message: String
     var actions: [AIAppAction]?
 
+    // Günlük vitaminler
+    var vitamin_c_mg: Double?
+    var vitamin_b1_mg: Double?
+    var vitamin_b6_mg: Double?
+    var potassium_mg: Double?
+    var magnesium_mg: Double?
+
+    // Haftalık vitaminler & mineraller
+    var vitamin_a_ug: Double?
+    var vitamin_d_ug: Double?
+    var vitamin_e_mg: Double?
+    var vitamin_k_ug: Double?
+    var vitamin_b12_ug: Double?
+    var folate_ug: Double?
+    var iron_mg: Double?
+    var zinc_mg: Double?
+    var calcium_mg: Double?
+    var omega3_g: Double?
+
     var isFood: Bool {
         calories != nil && (name?.isEmpty == false)
     }
@@ -146,7 +166,22 @@ struct AIFoodResult: Codable, Equatable, Sendable {
         carbs_g: Double? = nil,
         fat_g: Double? = nil,
         message: String,
-        actions: [AIAppAction]? = nil
+        actions: [AIAppAction]? = nil,
+        vitamin_c_mg: Double? = nil,
+        vitamin_b1_mg: Double? = nil,
+        vitamin_b6_mg: Double? = nil,
+        potassium_mg: Double? = nil,
+        magnesium_mg: Double? = nil,
+        vitamin_a_ug: Double? = nil,
+        vitamin_d_ug: Double? = nil,
+        vitamin_e_mg: Double? = nil,
+        vitamin_k_ug: Double? = nil,
+        vitamin_b12_ug: Double? = nil,
+        folate_ug: Double? = nil,
+        iron_mg: Double? = nil,
+        zinc_mg: Double? = nil,
+        calcium_mg: Double? = nil,
+        omega3_g: Double? = nil
     ) {
         self.name = name
         self.grams = grams
@@ -156,10 +191,28 @@ struct AIFoodResult: Codable, Equatable, Sendable {
         self.fat_g = fat_g
         self.message = message
         self.actions = actions
+        self.vitamin_c_mg = vitamin_c_mg
+        self.vitamin_b1_mg = vitamin_b1_mg
+        self.vitamin_b6_mg = vitamin_b6_mg
+        self.potassium_mg = potassium_mg
+        self.magnesium_mg = magnesium_mg
+        self.vitamin_a_ug = vitamin_a_ug
+        self.vitamin_d_ug = vitamin_d_ug
+        self.vitamin_e_mg = vitamin_e_mg
+        self.vitamin_k_ug = vitamin_k_ug
+        self.vitamin_b12_ug = vitamin_b12_ug
+        self.folate_ug = folate_ug
+        self.iron_mg = iron_mg
+        self.zinc_mg = zinc_mg
+        self.calcium_mg = calcium_mg
+        self.omega3_g = omega3_g
     }
 
     private enum CodingKeys: String, CodingKey {
         case name, grams, calories, protein_g, carbs_g, fat_g, message, actions
+        case vitamin_c_mg, vitamin_b1_mg, vitamin_b6_mg, potassium_mg, magnesium_mg
+        case vitamin_a_ug, vitamin_d_ug, vitamin_e_mg, vitamin_k_ug, vitamin_b12_ug
+        case folate_ug, iron_mg, zinc_mg, calcium_mg, omega3_g
     }
 
     init(from decoder: Decoder) throws {
@@ -173,6 +226,21 @@ struct AIFoodResult: Codable, Equatable, Sendable {
         message = (try? c.decodeIfPresent(String.self, forKey: .message)) ?? ""
         let decodedActions = ((try? c.decodeIfPresent(LossyAIActionList.self, forKey: .actions))?.values) ?? []
         actions = decodedActions.isEmpty ? nil : decodedActions
+        vitamin_c_mg = try? c.decodeIfPresent(Double.self, forKey: .vitamin_c_mg)
+        vitamin_b1_mg = try? c.decodeIfPresent(Double.self, forKey: .vitamin_b1_mg)
+        vitamin_b6_mg = try? c.decodeIfPresent(Double.self, forKey: .vitamin_b6_mg)
+        potassium_mg = try? c.decodeIfPresent(Double.self, forKey: .potassium_mg)
+        magnesium_mg = try? c.decodeIfPresent(Double.self, forKey: .magnesium_mg)
+        vitamin_a_ug = try? c.decodeIfPresent(Double.self, forKey: .vitamin_a_ug)
+        vitamin_d_ug = try? c.decodeIfPresent(Double.self, forKey: .vitamin_d_ug)
+        vitamin_e_mg = try? c.decodeIfPresent(Double.self, forKey: .vitamin_e_mg)
+        vitamin_k_ug = try? c.decodeIfPresent(Double.self, forKey: .vitamin_k_ug)
+        vitamin_b12_ug = try? c.decodeIfPresent(Double.self, forKey: .vitamin_b12_ug)
+        folate_ug = try? c.decodeIfPresent(Double.self, forKey: .folate_ug)
+        iron_mg = try? c.decodeIfPresent(Double.self, forKey: .iron_mg)
+        zinc_mg = try? c.decodeIfPresent(Double.self, forKey: .zinc_mg)
+        calcium_mg = try? c.decodeIfPresent(Double.self, forKey: .calcium_mg)
+        omega3_g = try? c.decodeIfPresent(Double.self, forKey: .omega3_g)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -185,6 +253,21 @@ struct AIFoodResult: Codable, Equatable, Sendable {
         try c.encodeIfPresent(fat_g, forKey: .fat_g)
         try c.encode(message, forKey: .message)
         try c.encodeIfPresent(actions, forKey: .actions)
+        try c.encodeIfPresent(vitamin_c_mg, forKey: .vitamin_c_mg)
+        try c.encodeIfPresent(vitamin_b1_mg, forKey: .vitamin_b1_mg)
+        try c.encodeIfPresent(vitamin_b6_mg, forKey: .vitamin_b6_mg)
+        try c.encodeIfPresent(potassium_mg, forKey: .potassium_mg)
+        try c.encodeIfPresent(magnesium_mg, forKey: .magnesium_mg)
+        try c.encodeIfPresent(vitamin_a_ug, forKey: .vitamin_a_ug)
+        try c.encodeIfPresent(vitamin_d_ug, forKey: .vitamin_d_ug)
+        try c.encodeIfPresent(vitamin_e_mg, forKey: .vitamin_e_mg)
+        try c.encodeIfPresent(vitamin_k_ug, forKey: .vitamin_k_ug)
+        try c.encodeIfPresent(vitamin_b12_ug, forKey: .vitamin_b12_ug)
+        try c.encodeIfPresent(folate_ug, forKey: .folate_ug)
+        try c.encodeIfPresent(iron_mg, forKey: .iron_mg)
+        try c.encodeIfPresent(zinc_mg, forKey: .zinc_mg)
+        try c.encodeIfPresent(calcium_mg, forKey: .calcium_mg)
+        try c.encodeIfPresent(omega3_g, forKey: .omega3_g)
     }
 }
 
@@ -413,6 +496,23 @@ struct AIAppAction: Identifiable, Equatable, Codable, Sendable {
     var carbsG: Double?
     var fatG: Double?
 
+    // Vitaminler & mineraller
+    var vitaminC_mg: Double?
+    var vitaminB1_mg: Double?
+    var vitaminB6_mg: Double?
+    var potassium_mg: Double?
+    var magnesium_mg: Double?
+    var vitaminA_ug: Double?
+    var vitaminD_ug: Double?
+    var vitaminE_mg: Double?
+    var vitaminK_ug: Double?
+    var vitaminB12_ug: Double?
+    var folate_ug: Double?
+    var iron_mg: Double?
+    var zinc_mg: Double?
+    var calcium_mg: Double?
+    var omega3_g: Double?
+
     var requiresConfirmation: Bool {
         tool == .updateWorkoutPlan
     }
@@ -490,6 +590,21 @@ struct AIAppAction: Identifiable, Equatable, Codable, Sendable {
         case proteinG, protein_g
         case carbsG, carbs_g
         case fatG, fat_g
+        case vitaminC_mg = "vitamin_c_mg"
+        case vitaminB1_mg = "vitamin_b1_mg"
+        case vitaminB6_mg = "vitamin_b6_mg"
+        case potassium_mg
+        case magnesium_mg
+        case vitaminA_ug = "vitamin_a_ug"
+        case vitaminD_ug = "vitamin_d_ug"
+        case vitaminE_mg = "vitamin_e_mg"
+        case vitaminK_ug = "vitamin_k_ug"
+        case vitaminB12_ug = "vitamin_b12_ug"
+        case folate_ug
+        case iron_mg
+        case zinc_mg
+        case calcium_mg
+        case omega3_g
     }
 
     init(from decoder: Decoder) throws {
@@ -561,6 +676,21 @@ struct AIAppAction: Identifiable, Equatable, Codable, Sendable {
             ?? (try? c.decodeIfPresent(Double.self, forKey: .carbs_g))
         fatG = (try? c.decodeIfPresent(Double.self, forKey: .fatG))
             ?? (try? c.decodeIfPresent(Double.self, forKey: .fat_g))
+        vitaminC_mg = try? c.decodeIfPresent(Double.self, forKey: .vitaminC_mg)
+        vitaminB1_mg = try? c.decodeIfPresent(Double.self, forKey: .vitaminB1_mg)
+        vitaminB6_mg = try? c.decodeIfPresent(Double.self, forKey: .vitaminB6_mg)
+        potassium_mg = try? c.decodeIfPresent(Double.self, forKey: .potassium_mg)
+        magnesium_mg = try? c.decodeIfPresent(Double.self, forKey: .magnesium_mg)
+        vitaminA_ug = try? c.decodeIfPresent(Double.self, forKey: .vitaminA_ug)
+        vitaminD_ug = try? c.decodeIfPresent(Double.self, forKey: .vitaminD_ug)
+        vitaminE_mg = try? c.decodeIfPresent(Double.self, forKey: .vitaminE_mg)
+        vitaminK_ug = try? c.decodeIfPresent(Double.self, forKey: .vitaminK_ug)
+        vitaminB12_ug = try? c.decodeIfPresent(Double.self, forKey: .vitaminB12_ug)
+        folate_ug = try? c.decodeIfPresent(Double.self, forKey: .folate_ug)
+        iron_mg = try? c.decodeIfPresent(Double.self, forKey: .iron_mg)
+        zinc_mg = try? c.decodeIfPresent(Double.self, forKey: .zinc_mg)
+        calcium_mg = try? c.decodeIfPresent(Double.self, forKey: .calcium_mg)
+        omega3_g = try? c.decodeIfPresent(Double.self, forKey: .omega3_g)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -770,14 +900,24 @@ final class OpenRouterClient: AIClient {
         for _ in 0..<2 {
             let toolChoice: Any = (requiresRecipeSearch && lastSearchQuery == nil)
                 ? ["type": "function", "function": ["name": "web_search"]]
-                : "auto"
-            let body: [String: Any] = [
+                : "none"
+            let needsTools = requiresRecipeSearch
+            var body: [String: Any] = [
                 "model": AIKeyStore.shared.openRouterModel,
                 "messages": messages,
                 "temperature": 0.2,
-                "tools": [Self.webSearchTool],
-                "tool_choice": toolChoice
+                "stream": !needsTools  // tool loop'ta streaming kullanma
             ]
+            if needsTools {
+                body["tools"] = [Self.webSearchTool]
+                body["tool_choice"] = toolChoice
+            }
+
+            // Streaming path (tool olmayan normal sohbet)
+            if body["stream"] as? Bool == true {
+                let content = try await streamJSON(body: body, key: key, onUpdate: onMessageUpdate)
+                return (parseFood(content), lastSearchQuery)
+            }
 
             let (data, http) = try await postJSON(body: body, key: key)
             guard (200..<300).contains(http.statusCode) else {
@@ -862,13 +1002,44 @@ final class OpenRouterClient: AIClient {
         return content
     }
 
+    private func streamJSON(
+        body: [String: Any],
+        key: String,
+        onUpdate: @MainActor @escaping (String) -> Void
+    ) async throws -> String {
+        var req = URLRequest(url: AIConfig.endpoint)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (stream, resp) = try await session.bytes(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw OpenRouterError.badResponse(-1, "Stream response error")
+        }
+
+        var accumulated = ""
+        for try await line in stream.lines {
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = String(line.dropFirst(6))
+            guard payload != "[DONE]" else { break }
+            guard let data = payload.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let delta = choices.first?["delta"] as? [String: Any],
+                  let token = delta["content"] as? String
+            else { continue }
+            accumulated += token
+            await onUpdate(accumulated)
+        }
+        return accumulated
+    }
+
     private func postJSON(body: [String: Any], key: String) async throws -> (Data, HTTPURLResponse) {
         var req = URLRequest(url: AIConfig.endpoint)
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(AIConfig.appReferer, forHTTPHeaderField: "HTTP-Referer")
-        req.setValue(AIConfig.appTitle, forHTTPHeaderField: "X-Title")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
@@ -984,7 +1155,7 @@ final class AIKeyStore {
     /// Yeni sağlayıcı seçilince doğru istemciyi kur.
     func makeClient() -> AIClient {
         switch provider {
-        case .openRouter: return OpenRouterClient()
+        case .openRouter: return OllamaClient()
         case .codex: return CodexFirstFallbackClient()
         }
     }

@@ -127,6 +127,7 @@ final class UserProfile {
     var activity: ActivityLevel
     var goal: Goal
     var targetWeight: Double?
+    var targetBodyFat: Double?
     var manualBodyFat: Double?
     var manualCalorieOffset: Double = 0
     var manualCalorieOffsetMacroRaw: String? = CalorieOffsetMacro.carbs.rawValue
@@ -148,6 +149,7 @@ final class UserProfile {
         activity: ActivityLevel = .moderate,
         goal: Goal = .maintain,
         targetWeight: Double? = nil,
+        targetBodyFat: Double? = nil,
         manualBodyFat: Double? = nil,
         manualCalorieOffset: Double = 0,
         manualCalorieOffsetMacro: CalorieOffsetMacro = .carbs,
@@ -164,6 +166,7 @@ final class UserProfile {
         self.activity = activity
         self.goal = goal
         self.targetWeight = targetWeight
+        self.targetBodyFat = targetBodyFat
         self.manualBodyFat = manualBodyFat
         self.manualCalorieOffset = manualCalorieOffset
         self.manualCalorieOffsetMacroRaw = manualCalorieOffsetMacro.rawValue

@@ -3,6 +3,7 @@ import SwiftData
 
 struct ChartsView: View {
     @Query(sort: \Measurement.date) private var measurements: [Measurement]
+    @Query(sort: \FoodEntry.date) private var foodEntries: [FoodEntry]
     @Query private var profiles: [UserProfile]
 
     @State private var selectedCategory: MetricCategory = .composition
@@ -42,11 +43,12 @@ struct ChartsView: View {
                     header(compact: compact, series: series)
                     categoryPicker(compact: compact)
 
-                    if measurements.isEmpty {
+                    if measurements.isEmpty && selectedCategory != .macros {
+                        ChartsEmptyState()
+                    } else if selectedCategory == .macros && foodEntries.isEmpty {
                         ChartsEmptyState()
                     } else {
                         focusStage(compact: compact, expansive: expansive, series: series)
-                        chartWall(compact: compact, expansive: expansive, series: series)
                     }
 
                     Spacer(minLength: 24)
@@ -78,8 +80,15 @@ struct ChartsView: View {
     }
 
     private var measurementCacheKey: String {
-        var parts = [cacheKeyValue(profile?.targetWeight ?? -1)]
+        var parts = [
+            cacheKeyValue(profile?.targetWeight ?? -1),
+            cacheKeyValue(profile?.targetBodyFat ?? -1),
+            cacheKeyValue(profile?.manualProteinGrams ?? -1),
+            cacheKeyValue(profile?.manualCarbsGrams ?? -1),
+            cacheKeyValue(profile?.manualFatGrams ?? -1),
+        ]
         parts.append(contentsOf: measurements.map(measurementCacheRow))
+        parts.append(contentsOf: foodEntries.map { "\($0.date.timeIntervalSinceReferenceDate):\(cacheKeyValue($0.protein ?? -1)):\(cacheKeyValue($0.carbs ?? -1)):\(cacheKeyValue($0.fat ?? -1))" })
         return parts.joined(separator: "|")
     }
 
@@ -103,8 +112,15 @@ struct ChartsView: View {
     }
 
     private func makeSeriesSnapshots() -> [MetricKind: MetricSeriesSnapshot] {
-        Dictionary(uniqueKeysWithValues: MetricKind.allCases.map { kind in
-            let points = TrendAnalysis.points(measurements, for: kind)
+        let macroDailyPoints = Self.aggregateMacroPoints(from: foodEntries)
+        return Dictionary(uniqueKeysWithValues: MetricKind.allCases.map { kind in
+            let points: [TrendPoint]
+            switch kind {
+            case .protein, .carbs, .fat:
+                points = macroDailyPoints[kind] ?? []
+            default:
+                points = TrendAnalysis.points(measurements, for: kind)
+            }
             return (
                 kind,
                 MetricSeriesSnapshot(
@@ -115,6 +131,31 @@ struct ChartsView: View {
                 )
             )
         })
+    }
+
+    /// Aggregate daily macro totals from FoodEntry into TrendPoints per macro kind.
+    private static func aggregateMacroPoints(from entries: [FoodEntry]) -> [MetricKind: [TrendPoint]] {
+        let calendar = Calendar.current
+        var proteinByDay: [Date: Double] = [:]
+        var carbsByDay: [Date: Double] = [:]
+        var fatByDay: [Date: Double] = [:]
+
+        for entry in entries {
+            let day = calendar.startOfDay(for: entry.date)
+            proteinByDay[day, default: 0] += entry.protein ?? 0
+            carbsByDay[day, default: 0] += entry.carbs ?? 0
+            fatByDay[day, default: 0] += entry.fat ?? 0
+        }
+
+        func sorted(_ dict: [Date: Double]) -> [TrendPoint] {
+            dict.map { TrendPoint(date: $0.key, value: $0.value) }.sorted { $0.date < $1.date }
+        }
+
+        return [
+            .protein: sorted(proteinByDay),
+            .carbs: sorted(carbsByDay),
+            .fat: sorted(fatByDay),
+        ]
     }
 
     private func seriesSnapshot(
@@ -220,7 +261,12 @@ struct ChartsView: View {
 
     @ViewBuilder
     private func categoryPicker(compact: Bool) -> some View {
-        let countText = "\(measurements.count) ölçüm"
+        let countText: String = {
+            if selectedCategory == .macros {
+                return "\(foodEntries.count) besin kaydı"
+            }
+            return "\(measurements.count) ölçüm"
+        }()
 
         if compact {
             VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -295,9 +341,22 @@ struct ChartsView: View {
         let kind = activeFocusedKind
         let snapshot = seriesSnapshot(for: kind, in: series)
 
+        let targetVal: Double? = goalBand(for: kind, points: snapshot.points).map { _ in
+            switch kind {
+            case .weight:   return profile?.targetWeight
+            case .bodyFat:  return profile?.targetBodyFat
+            case .leanMass: return profile.flatMap { targetLeanMass(profile: $0) }
+            case .fatMass:  return profile.flatMap { targetFatMass(profile: $0) }
+            case .protein:  return profile?.manualProteinGrams
+            case .carbs:    return profile?.manualCarbsGrams
+            case .fat:      return profile?.manualFatGrams
+            default:        return nil
+            }
+        } ?? nil
+
         if compact {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                FocusChartPanel(kind: kind, points: snapshot.points, stats: snapshot.stats, goalBand: snapshot.goalBand, compact: true)
+                FocusChartPanel(kind: kind, points: snapshot.points, stats: snapshot.stats, goalBand: snapshot.goalBand, compact: true, targetValue: targetVal)
                 metricRail(compact: true, series: series)
                 TrendBriefPanel(kind: kind, points: snapshot.points, stats: snapshot.stats, goalBand: snapshot.goalBand)
             }
@@ -309,7 +368,8 @@ struct ChartsView: View {
                     stats: snapshot.stats,
                     goalBand: snapshot.goalBand,
                     compact: false,
-                    chartHeight: expansive ? 390 : 350
+                    chartHeight: expansive ? 390 : 350,
+                    targetValue: targetVal
                 )
                     .frame(maxWidth: .infinity)
 
@@ -380,88 +440,52 @@ struct ChartsView: View {
         }
     }
 
-    private func chartWall(
-        compact: Bool,
-        expansive: Bool,
-        series: [MetricKind: MetricSeriesSnapshot]
-    ) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Seri Duvarı").eyebrow()
-                    Text(selectedCategory.label)
-                        .font(Typography.title)
-                        .foregroundStyle(Palette.textPrimary)
-                }
-                Spacer()
-                Text(measurementWindowText)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-            }
-
-            if compact {
-                LazyVStack(spacing: Spacing.md) {
-                    ForEach(Array(visibleKinds.enumerated()), id: \.element) { index, kind in
-                        chartTile(for: kind, index: index, compact: true, series: series)
-                    }
-                }
-            } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: expansive ? 430 : 360), spacing: Spacing.md)],
-                    spacing: Spacing.md
-                ) {
-                    ForEach(Array(visibleKinds.enumerated()), id: \.element) { index, kind in
-                        chartTile(for: kind, index: index, compact: false, series: series)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func chartTile(
-        for kind: MetricKind,
-        index: Int,
-        compact: Bool,
-        series: [MetricKind: MetricSeriesSnapshot]
-    ) -> some View {
-        let snapshot = seriesSnapshot(for: kind, in: series)
-        let baseHeight: CGFloat = compact ? 210 : (index % 3 == 0 ? 250 : 214)
-
-        return ChartTile(
-            kind: kind,
-            points: snapshot.points,
-            stats: snapshot.stats,
-            goalBand: snapshot.goalBand,
-            isFocused: activeFocusedKind == kind,
-            chartHeight: baseHeight
-        ) {
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                focusedKind = kind
-            }
-        }
-    }
-
-    private var measurementWindowText: String {
-        guard let first = measurements.first?.date, let last = measurements.last?.date else {
-            return "Veri bekleniyor"
-        }
-        if Calendar.current.isDate(first, inSameDayAs: last) {
-            return Fmt.dateLong.string(from: last)
-        }
-        return "\(Fmt.date.string(from: first)) - \(Fmt.dateLong.string(from: last))"
-    }
-
     private func goalBand(for kind: MetricKind, points: [TrendPoint]) -> (start: TrendPoint, end: TrendPoint)? {
-        guard kind == .weight, let target = profile?.targetWeight else { return nil }
-        return TrendAnalysis.goalBand(from: points, target: target)
+        guard let profile else { return nil }
+        switch kind {
+        case .protein, .carbs, .fat:
+            // Makro hedefleri: sabit yatay çizgi
+            let target: Double?
+            switch kind {
+            case .protein: target = profile.manualProteinGrams
+            case .carbs:   target = profile.manualCarbsGrams
+            case .fat:     target = profile.manualFatGrams
+            default:       target = nil
+            }
+            guard let t = target, let first = points.first, let last = points.last else { return nil }
+            let endDate = Calendar.current.date(byAdding: .day, value: 84, to: last.date) ?? last.date
+            return (TrendPoint(date: first.date, value: t), TrendPoint(date: endDate, value: t))
+        default:
+            let target: Double?
+            switch kind {
+            case .weight:   target = profile.targetWeight
+            case .bodyFat:  target = profile.targetBodyFat
+            case .leanMass: target = targetLeanMass(profile: profile)
+            case .fatMass:  target = targetFatMass(profile: profile)
+            default:        target = nil
+            }
+            guard let t = target else { return nil }
+            return TrendAnalysis.goalBand(from: points, target: t)
+        }
+    }
+
+    /// Hedef kilo + hedef yağ oranından hesaplanan hedef yağsız kütle
+    private func targetLeanMass(profile: UserProfile) -> Double? {
+        guard let w = profile.targetWeight, let bf = profile.targetBodyFat else { return nil }
+        return w * (1 - bf / 100)
+    }
+
+    /// Hedef kilo + hedef yağ oranından hesaplanan hedef yağ kütlesi
+    private func targetFatMass(profile: UserProfile) -> Double? {
+        guard let w = profile.targetWeight, let bf = profile.targetBodyFat else { return nil }
+        return w * (bf / 100)
     }
 
     private func categoryIcon(_ category: MetricCategory) -> String {
         switch category {
         case .composition: return "scalemass"
         case .torso: return "ruler"
+        case .macros: return "fork.knife"
         }
     }
 
@@ -472,6 +496,9 @@ struct ChartsView: View {
         case .leanMass: return "bolt"
         case .fatMass: return "circle.hexagongrid"
         case .waist, .chest, .neck: return "ruler"
+        case .protein: return "bolt.fill"
+        case .carbs: return "leaf"
+        case .fat: return "drop.fill"
         }
     }
 }
@@ -490,6 +517,7 @@ private struct FocusChartPanel: View {
     let goalBand: (start: TrendPoint, end: TrendPoint)?
     let compact: Bool
     var chartHeight: CGFloat? = nil
+    var targetValue: Double? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -542,6 +570,13 @@ private struct FocusChartPanel: View {
                         .frame(width: 1, height: 32)
                         .padding(.horizontal, Spacing.md)
                     FocusMetric(label: "Ortalama", value: Fmt.numOpt(stats.average), unit: kind.unit, tint: Palette.textSecondary)
+                    if let t = targetValue {
+                        Capsule()
+                            .fill(Color.white.opacity(0.06))
+                            .frame(width: 1, height: 32)
+                            .padding(.horizontal, Spacing.md)
+                        FocusMetric(label: "Hedef", value: Fmt.num(t, digits: 1), unit: kind.unit, tint: Palette.textSecondary)
+                    }
                 }
                 .padding(Spacing.md)
                 .background(
@@ -557,6 +592,9 @@ private struct FocusChartPanel: View {
                     FocusMetric(label: "Haftalık", value: stats.weeklyChange.map { Fmt.signed($0, digits: 2) } ?? "—", unit: "\(kind.unit)/hafta", tint: weeklyTint)
                     FocusMetric(label: "Aralık", value: rangeText, unit: kind.unit, tint: Palette.textSecondary)
                     FocusMetric(label: "Ortalama", value: Fmt.numOpt(stats.average), unit: kind.unit, tint: Palette.textSecondary)
+                    if let t = targetValue {
+                        FocusMetric(label: "Hedef", value: Fmt.num(t, digits: 1), unit: kind.unit, tint: Palette.textSecondary)
+                    }
                 }
             }
         }

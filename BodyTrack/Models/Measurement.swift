@@ -80,6 +80,7 @@ enum MeasurementCadence {
 enum MetricKind: String, CaseIterable, Identifiable {
     case weight, bodyFat, leanMass, fatMass
     case waist, chest, neck
+    case protein, carbs, fat
 
     var id: String { rawValue }
 
@@ -92,6 +93,9 @@ enum MetricKind: String, CaseIterable, Identifiable {
         case .waist: return "Bel"
         case .chest: return "Göğüs"
         case .neck: return "Boyun"
+        case .protein: return "Protein"
+        case .carbs: return "Karbonhidrat"
+        case .fat: return "Yağ"
         }
     }
 
@@ -99,7 +103,8 @@ enum MetricKind: String, CaseIterable, Identifiable {
         switch self {
         case .weight, .leanMass, .fatMass: return "kg"
         case .bodyFat: return "%"
-        default: return "cm"
+        case .waist, .chest, .neck: return "cm"
+        case .protein, .carbs, .fat: return "g"
         }
     }
 
@@ -107,6 +112,7 @@ enum MetricKind: String, CaseIterable, Identifiable {
         switch self {
         case .weight, .bodyFat, .leanMass, .fatMass: return .composition
         case .waist, .chest, .neck: return .torso
+        case .protein, .carbs, .fat: return .macros
         }
     }
 
@@ -119,6 +125,7 @@ enum MetricKind: String, CaseIterable, Identifiable {
         case .waist: return m.waist
         case .chest: return m.chest
         case .neck: return m.neck
+        case .protein, .carbs, .fat: return nil
         }
     }
 
@@ -131,12 +138,13 @@ enum MetricKind: String, CaseIterable, Identifiable {
 }
 
 enum MetricCategory: String, CaseIterable, Identifiable {
-    case composition, torso
+    case composition, torso, macros
     var id: String { rawValue }
     var label: String {
         switch self {
         case .composition: return "Vücut Kompozisyonu"
         case .torso: return "Gövde Çevreleri"
+        case .macros: return "Makrolar"
         }
     }
 }

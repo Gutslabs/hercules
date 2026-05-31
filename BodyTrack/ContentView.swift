@@ -4,7 +4,7 @@ import SwiftData
 // MARK: - Navigation tabs
 
 enum NavTab: String, CaseIterable, Identifiable, Hashable {
-    case dashboard, measurements, charts, workout, calendar, recipes, memory, profile
+    case dashboard, measurements, charts, workout, calendar, recipes, nutrition, guide, memory, profile
     var id: String { rawValue }
 
     var label: String {
@@ -15,6 +15,8 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .workout:      return "Antrenman"
         case .calendar:     return "Takvim"
         case .recipes:      return "Tarifler"
+        case .nutrition:    return "Besinler"
+        case .guide:        return "Rehber"
         case .memory:       return "Hafıza"
         case .profile:      return "Profil"
         }
@@ -28,6 +30,8 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .workout:      return "dumbbell"
         case .calendar:     return "calendar"
         case .recipes:      return "fork.knife"
+        case .nutrition:    return "pill.circle"
+        case .guide:        return "book.closed"
         case .memory:       return "brain"
         case .profile:      return "person.crop.circle"
         }
@@ -59,7 +63,7 @@ enum NavCategory: String, CaseIterable, Identifiable, Hashable {
     var tabs: [NavTab] {
         switch self {
         case .takip:    return [.dashboard, .measurements, .charts, .workout]
-        case .beslenme: return [.calendar, .recipes]
+        case .beslenme: return [.calendar, .recipes, .nutrition, .guide]
         case .ai:       return [.memory]
         }
     }
@@ -80,6 +84,7 @@ struct ContentView: View {
     @AppStorage("hercules.chat.presentationMode") private var chatPresentationMode: ChatPresentationMode = .sidebar
     @State private var chatWidth: CGFloat = 380
     @State private var showingPromptTips: Bool = false
+
     private let chatMinWidth: CGFloat = 320
     private let chatMaxWidth: CGFloat = 560
     private let detailReserveWidth: CGFloat = 760
@@ -264,6 +269,8 @@ struct ContentView: View {
         case .workout:      WorkoutView()
         case .calendar:     CalendarView()
         case .recipes:      RecipesView()
+        case .nutrition:    NutritionView()
+        case .guide:        GuideView()
         case .memory:       MemoryView()
         case .profile:      ProfileView()
         }

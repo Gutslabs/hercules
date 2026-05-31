@@ -198,6 +198,9 @@ final class AgentRouter {
         self.memoryProvider = memoryProvider
     }
 
+    /// Skill başına üst sınır; yavaş/asılı ağ skill'i tüm yanıtı kilitlemesin.
+    private static let skillTimeout: TimeInterval = 8
+
     func buildSkillContext(
         query: String,
         appContext: String?,
@@ -205,18 +208,30 @@ final class AgentRouter {
         dataSnapshot: AgentDataSnapshot? = nil
     ) async -> String? {
         let context = AgentContext(appContext: appContext, history: history, dataSnapshot: dataSnapshot, now: .now)
-        var results: [SkillResult] = []
 
-        for skill in skills where skill.canHandle(query) {
-            do {
-                if let result = try await skill.run(query: query, context: context) {
-                    results.append(result)
+        // İlgili skill'leri orijinal sıralarıyla seç.
+        let active = skills.enumerated().filter { $0.element.canHandle(query) }
+        guard !active.isEmpty else { return nil }
+
+        // Skill'leri paralel çalıştır; her birini zaman aşımına karşı yarıştır.
+        // Sonuçları orijinal sıraya göre yeniden diz (prompt sırası deterministik kalsın).
+        let timeout = Self.skillTimeout
+        let collected: [(Int, SkillResult)] = await withTaskGroup(of: (Int, SkillResult?).self) { group in
+            for (index, skill) in active {
+                group.addTask {
+                    (index, await Self.runWithTimeout(seconds: timeout) {
+                        try await skill.run(query: query, context: context)
+                    })
                 }
-            } catch {
-                continue
             }
+            var acc: [(Int, SkillResult)] = []
+            for await (index, result) in group {
+                if let result { acc.append((index, result)) }
+            }
+            return acc
         }
 
+        let results = collected.sorted { $0.0 < $1.0 }.map(\.1)
         guard !results.isEmpty else { return nil }
         return """
         === HERCULES AGENT SKILL CONTEXT ===
@@ -230,6 +245,23 @@ final class AgentRouter {
 
     func absorbConversation(userText: String, assistantText: String) {
         memoryProvider.absorbConversation(userText: userText, assistantText: assistantText)
+    }
+
+    /// Operasyonu zaman aşımına karşı yarıştırır; süre dolarsa veya hata olursa nil döner.
+    private static func runWithTimeout(
+        seconds: TimeInterval,
+        _ operation: @escaping () async throws -> SkillResult?
+    ) async -> SkillResult? {
+        await withTaskGroup(of: SkillResult?.self) { group in
+            group.addTask { try? await operation() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 }
 
@@ -454,6 +486,10 @@ private final class NutritionDataProvider {
 
     private let cacheURL: URL
     private var cache: [String: NutritionCacheEntry] = [:]
+    /// `cache` ve `inFlight` eşzamanlı skill'lerden korunur (artık paralel çalışıyorlar).
+    private let cacheLock = NSLock()
+    /// Aynı yiyecek için eşzamanlı çağrılarda tek ağ isteği paylaştırılır (mükerrer ağ engeli).
+    private var inFlight: [String: Task<NutritionLookupProfile?, Never>] = [:]
     private let session: URLSession
     private let usdaAPIKey: String
     private let cacheMaxAge: TimeInterval = 45 * 24 * 60 * 60
@@ -660,35 +696,68 @@ private final class NutritionDataProvider {
         key: String,
         allowNetwork: Bool
     ) async -> (profile: NutritionLookupProfile?, usedNetwork: Bool) {
-        let now = Date()
-        if let cached = cache[key],
-           now.timeIntervalSince(cached.updatedAt) < cacheMaxAge {
+        let cached = cachedProfile(forKey: key)
+        if cached.fresh {
             return (cached.profile, false)
         }
-        guard allowNetwork else { return (cache[key]?.profile, false) }
+        guard allowNetwork else { return (cached.profile, false) }
 
-        let query = Self.searchQuery(for: foodName)
-        let productFirst = Self.looksLikePackagedProduct(foodName)
-        let profile: NutritionLookupProfile?
-        if productFirst {
-            if let offProfile = await fetchOpenFoodFactsProfile(query: query) {
-                profile = offProfile
-            } else {
-                profile = await fetchUSDAProfile(query: query)
-            }
+        // Aynı yiyecek için zaten devam eden bir ağ isteği varsa onu paylaş;
+        // yoksa yeni bir tane başlat. Yalnızca isteği başlatan "ağ kullandı" sayılır.
+        let task: Task<NutritionLookupProfile?, Never>
+        let ownsRequest: Bool
+        cacheLock.lock()
+        if let existing = inFlight[key] {
+            task = existing
+            ownsRequest = false
         } else {
-            if let usdaProfile = await fetchUSDAProfile(query: query) {
-                profile = usdaProfile
-            } else {
-                profile = await fetchOpenFoodFactsProfile(query: query)
+            let created = Task { await self.fetchProfile(for: foodName) }
+            inFlight[key] = created
+            task = created
+            ownsRequest = true
+        }
+        cacheLock.unlock()
+
+        let profile = await task.value
+        if ownsRequest {
+            cacheLock.lock()
+            inFlight[key] = nil
+            cacheLock.unlock()
+            if let profile {
+                storeProfile(profile, forKey: key)
             }
         }
+        return (profile, ownsRequest)
+    }
 
-        if let profile {
-            cache[key] = NutritionCacheEntry(profile: profile, updatedAt: now)
-            persist()
+    /// Cache'ten taze (süresi geçmemiş) profili thread-safe okur.
+    private func cachedProfile(forKey key: String) -> (profile: NutritionLookupProfile?, fresh: Bool) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let entry = cache[key] else { return (nil, false) }
+        let fresh = Date().timeIntervalSince(entry.updatedAt) < cacheMaxAge
+        return (entry.profile, fresh)
+    }
+
+    /// Profili thread-safe yazar ve diske tutarlı bir kopyayla kalıcılaştırır.
+    private func storeProfile(_ profile: NutritionLookupProfile, forKey key: String) {
+        cacheLock.lock()
+        cache[key] = NutritionCacheEntry(profile: profile, updatedAt: Date())
+        let snapshot = cache
+        cacheLock.unlock()
+        persist(snapshot: snapshot)
+    }
+
+    /// Belirli bir yiyecek için dış kaynaklardan profil çeker (cache/coalescing'den bağımsız).
+    private func fetchProfile(for foodName: String) async -> NutritionLookupProfile? {
+        let query = Self.searchQuery(for: foodName)
+        if Self.looksLikePackagedProduct(foodName) {
+            if let off = await fetchOpenFoodFactsProfile(query: query) { return off }
+            return await fetchUSDAProfile(query: query)
+        } else {
+            if let usda = await fetchUSDAProfile(query: query) { return usda }
+            return await fetchOpenFoodFactsProfile(query: query)
         }
-        return (profile, true)
     }
 
     private func fetchUSDAProfile(query: String) async -> NutritionLookupProfile? {
@@ -1014,6 +1083,7 @@ private final class NutritionDataProvider {
     }
 
     private func load() {
+        // init içinde, eşzamanlı erişimden önce çağrılır.
         guard let data = try? Data(contentsOf: cacheURL),
               let payload = try? Self.decoder.decode(CachePayload.self, from: data)
         else {
@@ -1023,8 +1093,8 @@ private final class NutritionDataProvider {
         cache = payload.entries
     }
 
-    private func persist() {
-        let payload = CachePayload(version: 1, savedAt: .now, entries: cache)
+    private func persist(snapshot: [String: NutritionCacheEntry]) {
+        let payload = CachePayload(version: 1, savedAt: .now, entries: snapshot)
         guard let data = try? Self.encoder.encode(payload) else { return }
         try? data.write(to: cacheURL, options: [.atomic])
     }

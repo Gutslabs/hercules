@@ -7,11 +7,14 @@ final class MonthlyGoal {
     var anchorDate: Date
     /// O tarihte ulaşılmak istenen kilo (kg).
     var targetWeight: Double
+    /// O tarihte ulaşılmak istenen yağ oranı (%). Opsiyonel.
+    var targetBodyFat: Double?
     var note: String?
 
-    init(anchorDate: Date, targetWeight: Double, note: String? = nil) {
+    init(anchorDate: Date, targetWeight: Double, targetBodyFat: Double? = nil, note: String? = nil) {
         self.anchorDate = anchorDate
         self.targetWeight = targetWeight
+        self.targetBodyFat = targetBodyFat
         self.note = note
     }
 }

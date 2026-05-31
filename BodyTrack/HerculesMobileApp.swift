@@ -19,7 +19,8 @@ struct HerculesMobileApp: App {
                 try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             }
 
-            let config = ModelConfiguration(url: dir.appendingPathComponent("Hercules.store"))
+            let storeURL = dir.appendingPathComponent("Hercules.store")
+            let config = ModelConfiguration(url: storeURL)
             container = try ModelContainer(
                 for: Measurement.self,
                 UserProfile.self,
@@ -35,6 +36,13 @@ struct HerculesMobileApp: App {
                 WorkoutLog.self,
                 WorkoutExerciseEntry.self,
                 ExerciseSet.self,
+                UserGuideSection.self,
+                UserGuideCard.self,
+                Exercise.self,
+                TrainingProgram.self,
+                TrainingWeek.self,
+                TrainingDay.self,
+                TrainingBlock.self,
                 configurations: config
             )
 

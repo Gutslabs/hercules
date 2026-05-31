@@ -465,6 +465,7 @@ struct DashboardView: View {
         case .bodyFat, .fatMass, .waist: return Palette.warning
         case .leanMass: return Palette.positive
         case .chest, .neck: return Palette.textSecondary
+        case .protein, .carbs, .fat: return Palette.textSecondary
         }
     }
 

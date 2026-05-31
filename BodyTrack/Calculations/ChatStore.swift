@@ -110,6 +110,9 @@ final class ChatStore {
     init() {
         loadHistory()
         backfillMemoriesFromHistoryIfNeeded()
+        if AIKeyStore.shared.provider == .openRouter {
+            OllamaClient.warmUp()
+        }
         notificationToken = NotificationCenter.default.addObserver(
             forName: .aiClientChanged,
             object: nil,
@@ -139,6 +142,9 @@ final class ChatStore {
     /// Sağlayıcı/model değişti, istemciyi yeniden kur.
     func reloadClient() {
         client = AIKeyStore.shared.makeClient()
+        if AIKeyStore.shared.provider == .openRouter {
+            OllamaClient.warmUp()
+        }
     }
 
     func reloadHistoryFromDisk() {
@@ -204,8 +210,19 @@ final class ChatStore {
             persistHistory()
         }
 
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
+        let rawText = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawText.isEmpty, !isSending else { return }
+
+        // @Ekle komutu: prefix'i sil, "ekle" sözcüğü zaten kayıt modunu tetikler
+        let text: String = {
+            let lower = rawText.lowercased()
+            if lower.hasPrefix("@ekle ") {
+                let payload = rawText.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                return "\(payload) ekle"
+            }
+            return rawText
+        }()
+
         let requiresRecipeSource = AIConfig.requiresRecipeWebSearch(text)
         ensureCurrentConversation()
         if let ctx, handleInlineApprovalReply(text, ctx: ctx) {
@@ -238,7 +255,8 @@ final class ChatStore {
             history: historyBeforeSend,
             dataSnapshot: skillData
         )
-        let effectiveContext = Self.joinContext(userContext, skillContext)
+        let guideContext = Self.buildGuideContext(ctx: ctx, query: text)
+        let effectiveContext = Self.joinContext(userContext, skillContext, guideContext)
         lastUsedUserData = (effectiveContext != nil)
 
         // Cached index'in hala doğru olduğunu doğrulayan helper.
@@ -302,9 +320,12 @@ final class ChatStore {
                 }
             )
             flushStreamText(force: true)
-            let rawAssistantText = result.message.isEmpty
-                ? (result.name ?? "—")
-                : result.message
+            let rawAssistantText: String = {
+                if !result.message.isEmpty { return result.message }
+                if let summary = result.actionList.first?.summary, !summary.isEmpty { return summary }
+                if let name = result.name, !name.isEmpty { return "\(name) kaydedildi ✓" }
+                return "Kaydedildi ✓"
+            }()
             let recipeSearchSatisfied = !requiresRecipeSource || searchQuery != nil
             let assistantText = recipeSearchSatisfied
                 ? rawAssistantText
@@ -329,6 +350,159 @@ final class ChatStore {
         isSending = false
         searchingFor = nil
         persistHistory()
+    }
+
+    /// Rehber kartlarını sorguyla token-örtüşmesine göre puanlayıp en ilgili olanları
+    /// context'e ekler. Eski substring eşleştirme doğal sorularda ilgili kartı kaçırıyordu;
+    /// burada sorgu kelimeleri kart başlığı (+2) ve gövdesinde (+1) aranır, en iyi N kart döner.
+    private static func buildGuideContext(ctx: ModelContext?, query: String) -> String? {
+        guard let ctx else { return nil }
+        let descriptor = FetchDescriptor<UserGuideSection>(sortBy: [SortDescriptor(\.sortIndex)])
+        guard let sections = try? ctx.fetch(descriptor), !sections.isEmpty else { return nil }
+
+        let queryTerms = Array(Set(guideTokens(query)))
+        guard !queryTerms.isEmpty else { return nil }
+
+        struct CardDoc {
+            let section: UserGuideSection
+            let card: UserGuideCard
+            let titleTokens: [String]
+            let bodyTokens: [String]
+            let allTokens: [String]
+        }
+
+        var docs: [CardDoc] = []
+        for section in sections {
+            let sectionTitleText = "\(section.title) \(section.subtitle)"
+            for card in section.cards {
+                let titleSet = Set(guideTokens("\(sectionTitleText) \(card.cardTitle)"))
+                let bodyText = "\(card.body) \(card.headers.joined(separator: " ")) \(card.rows.flatMap { $0 }.joined(separator: " "))"
+                let bodySet = Set(guideTokens(bodyText))
+                docs.append(CardDoc(
+                    section: section,
+                    card: card,
+                    titleTokens: Array(titleSet),
+                    bodyTokens: Array(bodySet),
+                    allTokens: Array(titleSet.union(bodySet))
+                ))
+            }
+        }
+        guard !docs.isEmpty else { return nil }
+
+        // IDF ağırlığı: nadir terim daha değerli. Bu, "doğal/yollarla" gibi genel
+        // kelimelerin skoru sulandırmasını engeller; ayırt edici terim (ör. "magnezyum")
+        // baskın olur. Hâlâ embedding değil — klasik keyword/TF-IDF.
+        let total = Double(docs.count)
+        var idf: [String: Double] = [:]
+        for term in queryTerms {
+            let df = docs.reduce(0) { $0 + (guideTermMatches(term, $1.allTokens) ? 1 : 0) }
+            idf[term] = log((total + 1) / (Double(df) + 1)) + 1
+        }
+
+        var scored: [(doc: CardDoc, score: Double)] = []
+        for doc in docs {
+            var score = 0.0
+            for term in queryTerms {
+                let weight = idf[term] ?? 1
+                if guideTermMatches(term, doc.titleTokens) {
+                    score += 2 * weight
+                } else if guideTermMatches(term, doc.bodyTokens) {
+                    score += weight
+                }
+            }
+            if score > 0 { scored.append((doc, score)) }
+        }
+        guard let topScore = scored.map(\.score).max() else { return nil }
+
+        // En iyi N kartı, en yüksek skorun en az %30'una ulaşanlardan seç (zayıf gürültüyü ele).
+        let selected = scored
+            .filter { $0.score >= topScore * 0.3 }
+            .sorted { $0.score > $1.score }
+            .prefix(4)
+
+        var lines: [String] = ["## Rehberden ilgili bilgi"]
+        for item in selected {
+            lines.append("### \(item.doc.section.title) → \(item.doc.card.cardTitle)")
+            if item.doc.card.isTable {
+                let headers = item.doc.card.headers
+                let rows = item.doc.card.rows
+                if !headers.isEmpty {
+                    lines.append(headers.joined(separator: " | "))
+                    for row in rows { lines.append(row.joined(separator: " | ")) }
+                }
+            } else if !item.doc.card.body.isEmpty {
+                lines.append(item.doc.card.body)
+            }
+        }
+        return lines.count > 1 ? lines.joined(separator: "\n") : nil
+    }
+
+    /// Metni normalize edip anlamlı token'lara böler (diakritik/küçük harf düşürülür,
+    /// stopword'ler ve çok kısa parçalar atılır).
+    private static func guideTokens(_ text: String) -> [String] {
+        let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US"))
+        return folded
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 && !guideStopwords.contains($0) }
+    }
+
+    /// Türkçe dolgu kelimeleri (folded/diakritiksiz biçimde).
+    private static let guideStopwords: Set<String> = [
+        "icin", "ile", "ama", "veya", "gibi", "daha", "cok", "yok", "var", "olan",
+        "olur", "nasil", "neden", "kac", "the", "and", "for", "kadar", "hangi",
+        "yani", "her", "bir", "iki", "ise", "sey", "sonra", "once", "icinde",
+        "uzerine", "ozellikle", "ayrica", "fakat", "ancak", "veyahut"
+    ]
+
+    /// Bir sorgu terimi, kart token'larından biriyle eşleşiyor mu?
+    /// Türkçe eklerini ucuzca tolere etmek için tam eşitlik ya da ortak ön-ek (>=4) aranır
+    /// (ör. "kreatini" ↔ "kreatin", "magnezyumu" ↔ "magnezyum").
+    private static func guideTermMatches(_ term: String, _ cardTokens: [String]) -> Bool {
+        for token in cardTokens {
+            if token == term { return true }
+            if guideCommonPrefixLength(term, token) >= 4 { return true }
+        }
+        return false
+    }
+
+    private static func guideCommonPrefixLength(_ a: String, _ b: String) -> Int {
+        var count = 0
+        var i = a.startIndex
+        var j = b.startIndex
+        while i < a.endIndex, j < b.endIndex, a[i] == b[j] {
+            count += 1
+            i = a.index(after: i)
+            j = b.index(after: j)
+        }
+        return count
+    }
+
+    // Eski tam rehber — artık kullanılmıyor, referans için bırakıldı
+    private static func buildFullGuideContext(ctx: ModelContext?) -> String? {
+        guard let ctx else { return nil }
+        let descriptor = FetchDescriptor<UserGuideSection>(sortBy: [SortDescriptor(\.sortIndex)])
+        guard let sections = try? ctx.fetch(descriptor), !sections.isEmpty else { return nil }
+        var lines: [String] = ["## Kullanıcı Rehberi"]
+        for section in sections {
+            lines.append("### \(section.title)")
+            if !section.subtitle.isEmpty { lines.append(section.subtitle) }
+            let cards = section.cards.sorted { $0.sortIndex < $1.sortIndex }
+            for card in cards {
+                lines.append("#### \(card.cardTitle)")
+                if card.isTable {
+                    let headers = card.headers
+                    let rows = card.rows
+                    if !headers.isEmpty {
+                        lines.append(headers.joined(separator: " | "))
+                        for row in rows { lines.append(row.joined(separator: " | ")) }
+                    }
+                } else if !card.body.isEmpty {
+                    lines.append(card.body)
+                }
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     private static func joinContext(_ parts: String?...) -> String? {
@@ -518,7 +692,22 @@ final class ChatStore {
                 calories: calories,
                 protein: action.proteinG,
                 carbs: action.carbsG,
-                fat: action.fatG
+                fat: action.fatG,
+                vitaminC_mg: action.vitaminC_mg,
+                vitaminB1_mg: action.vitaminB1_mg,
+                vitaminB6_mg: action.vitaminB6_mg,
+                potassium_mg: action.potassium_mg,
+                magnesium_mg: action.magnesium_mg,
+                vitaminA_ug: action.vitaminA_ug,
+                vitaminD_ug: action.vitaminD_ug,
+                vitaminE_mg: action.vitaminE_mg,
+                vitaminK_ug: action.vitaminK_ug,
+                vitaminB12_ug: action.vitaminB12_ug,
+                folate_ug: action.folate_ug,
+                iron_mg: action.iron_mg,
+                zinc_mg: action.zinc_mg,
+                calcium_mg: action.calcium_mg,
+                omega3_g: action.omega3_g
             ))
             try ctx.save()
             return "\(name) bugüne eklendi"

@@ -16,6 +16,7 @@ struct ProfileView: View {
     @State private var activity: ActivityLevel = .moderate
     @State private var goal: Goal = .maintain
     @State private var targetWeight: Double? = nil
+    @State private var targetBodyFat: Double? = nil
     @State private var manualBodyFat: Double? = nil
     @State private var about: String = ""
     @State private var supplements: String = UserProfile.defaultSupplements
@@ -248,57 +249,76 @@ struct ProfileView: View {
 
     private var identityCard: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Kimlik").eyebrow()
-                    Text("Temel veriler")
-                        .font(Typography.titleSmall)
-                        .foregroundStyle(Palette.textPrimary)
+            // Temel veriler
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Kimlik").eyebrow()
+                        Text("Temel veriler")
+                            .font(Typography.titleSmall)
+                            .foregroundStyle(Palette.textPrimary)
+                    }
+                    Spacer()
+                    Text("\(ageYears) yaş")
+                        .font(Typography.mono)
+                        .foregroundStyle(Palette.textSecondary)
                 }
-                Spacer()
-                Text("\(ageYears) yaş")
-                    .font(Typography.mono)
-                    .foregroundStyle(Palette.textSecondary)
-            }
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 142), spacing: Spacing.md, alignment: .top)],
-                alignment: .leading,
-                spacing: Spacing.md
-            ) {
-                inputTile(label: "Doğum", icon: "calendar") {
-                    DatePicker("", selection: $birthDate, in: ...Date(), displayedComponents: .date)
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
-                        .controlSize(.small)
-                        .colorScheme(.dark)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 142), spacing: Spacing.md, alignment: .top)],
+                    alignment: .leading,
+                    spacing: Spacing.md
+                ) {
+                    inputTile(label: "Doğum", icon: "calendar") {
+                        DatePicker("", selection: $birthDate, in: ...Date(), displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .colorScheme(.dark)
+                    }
+                    inputTile(label: "Boy", icon: "ruler") {
+                        NumberField(value: .init(get: { height }, set: { height = $0 ?? 178 }), unit: "cm", digits: 0)
+                    }
                 }
-                inputTile(label: "Boy", icon: "ruler") {
-                    NumberField(value: .init(get: { height }, set: { height = $0 ?? 178 }), unit: "cm", digits: 0)
+            }
+            .padding(Spacing.lg)
+            .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
+
+            // Hedef veriler
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Hedefler").eyebrow()
+                        Text("Hedef veriler")
+                            .font(Typography.titleSmall)
+                            .foregroundStyle(Palette.textPrimary)
+                    }
                 }
-                inputTile(label: "Hedef", icon: "target") {
-                    NumberField(value: $targetWeight, unit: "kg", digits: 0, placeholder: "opsiyonel")
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 142), spacing: Spacing.md, alignment: .top)],
+                    alignment: .leading,
+                    spacing: Spacing.md
+                ) {
+                    inputTile(label: "Hedef Kilo", icon: "target") {
+                        NumberField(value: $targetWeight, unit: "kg", digits: 0, placeholder: "opsiyonel")
+                    }
+                    inputTile(label: "Hedef Yağ", icon: "drop.fill") {
+                        NumberField(value: $targetBodyFat, unit: "%", digits: 1, placeholder: "opsiyonel")
+                    }
                 }
-                inputTile(label: "Yağ", icon: "drop") {
-                    NumberField(
-                        value: $manualBodyFat,
-                        unit: "%",
-                        digits: 1,
-                        placeholder: latest?.bodyFat.map { "ölçüm \(Fmt.num($0, digits: 1))" } ?? "opsiyonel"
+
+                if latest == nil && targetWeight == nil {
+                    ProfileNudgeRow(
+                        icon: "scalemass",
+                        title: "Kalori hesabı için ağırlık gerekli",
+                        detail: "Ölçüm ekle veya hedef ağırlık alanını doldur."
                     )
                 }
             }
-
-            if latest == nil && targetWeight == nil {
-                ProfileNudgeRow(
-                    icon: "scalemass",
-                    title: "Kalori hesabı için ağırlık gerekli",
-                    detail: "Ölçüm ekle veya hedef ağırlık alanını doldur."
-                )
-            }
+            .padding(Spacing.lg)
+            .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
         }
-        .padding(Spacing.lg)
-        .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
     }
 
     private var activityGoalCards: some View {
@@ -1130,6 +1150,7 @@ struct ProfileView: View {
         activity = p.activity
         goal = p.goal
         targetWeight = p.targetWeight
+        targetBodyFat = p.targetBodyFat
         manualBodyFat = p.manualBodyFat
         about = p.about
         supplements = p.supplements.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1155,6 +1176,7 @@ struct ProfileView: View {
         profile.activity = activity
         profile.goal = goal
         profile.targetWeight = targetWeight
+        profile.targetBodyFat = targetBodyFat
         profile.manualBodyFat = manualBodyFat
         profile.about = about
         profile.supplements = supplements.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

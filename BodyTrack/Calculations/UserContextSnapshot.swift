@@ -6,7 +6,7 @@ import SwiftData
 /// Sidebar menü öğeleri + aliasları. Kullanıcı `@yemek planı` yazdığında
 /// AI'ya sadece o bölümün verisi enjekte edilir.
 enum MentionTag: String, CaseIterable, Identifiable, Hashable {
-    case genelBakis, olcumler, grafikler, antrenman, takvim, kalori, yemekPlani, tarifler, profil, hepsi
+    case genelBakis, olcumler, grafikler, antrenman, takvim, kalori, yemekPlani, tarifler, profil, hepsi, ekle
 
     var id: String { rawValue }
 
@@ -23,6 +23,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .tarifler:   return "Tarifler"
         case .profil:     return "Profil"
         case .hepsi:      return "Hepsi"
+        case .ekle:       return "Ekle"
         }
     }
 
@@ -39,6 +40,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .tarifler:   return ["tarifler", "tarif", "recipe", "recipes", "yemek tarif"]
         case .profil:     return ["profil", "profile", "ayar", "settings"]
         case .hepsi:      return ["hepsi", "tümü", "tumu", "all", "everything", "her şey", "her sey"]
+        case .ekle:       return ["ekle", "kaydet", "add", "log"]
         }
     }
 
@@ -55,6 +57,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .tarifler:   return "kayıtlı tarifler"
         case .profil:     return "kimlik, aktivite, hedef"
         case .hepsi:      return "all — tüm veri"
+        case .ekle:       return "besin kaydet"
         }
     }
 
@@ -79,6 +82,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .tarifler:   return [.recipes]
         case .profil:     return [.profile, .workout]
         case .hepsi:      return SnapshotSection.allCases
+        case .ekle:       return []
         }
     }
 }
@@ -913,10 +917,15 @@ enum UserContextSnapshot {
 
         var lines: [String] = ["[AYLIK HEDEFLER]"]
         if let last = past.last {
-            lines.append("- Geçmiş son hedef: \(Fmt.num(last.targetWeight, digits: 1)) kg (\(Fmt.dateLong.string(from: last.anchorDate)))")
+            var lastLine = "- Geçmiş son hedef: \(Fmt.num(last.targetWeight, digits: 1)) kg"
+            if let bf = last.targetBodyFat { lastLine += ", %\(Fmt.num(bf, digits: 1)) yağ" }
+            lastLine += " (\(Fmt.dateLong.string(from: last.anchorDate)))"
+            lines.append(lastLine)
         }
         if let next = upcoming.first {
-            var line = "- Yaklaşan hedef: \(Fmt.num(next.targetWeight, digits: 1)) kg (\(Fmt.dateLong.string(from: next.anchorDate)))"
+            var line = "- Yaklaşan hedef: \(Fmt.num(next.targetWeight, digits: 1)) kg"
+            if let bf = next.targetBodyFat { line += ", %\(Fmt.num(bf, digits: 1)) yağ" }
+            line += " (\(Fmt.dateLong.string(from: next.anchorDate)))"
             if let w = latestWeight {
                 let diff = w - next.targetWeight
                 line += " — hedefe \(Fmt.num(abs(diff), digits: 1)) kg \(diff > 0 ? "düşmek" : "çıkmak") gerekiyor"

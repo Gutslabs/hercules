@@ -771,6 +771,7 @@ struct ChatSidebar: View {
         case .tarifler:   return "fork.knife"
         case .profil:     return "person.crop.circle"
         case .hepsi:      return "sparkles"
+        case .ekle:       return "plus.circle.fill"
         }
     }
 
@@ -1841,6 +1842,7 @@ struct BottomCenterChatDock: View {
         case .tarifler:   return "fork.knife"
         case .profil:     return "person.crop.circle"
         case .hepsi:      return "sparkles"
+        case .ekle:       return "plus.circle.fill"
         }
     }
 }

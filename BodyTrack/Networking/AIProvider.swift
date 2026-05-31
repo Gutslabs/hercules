@@ -7,19 +7,19 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
-    /// UI'da seçilebilir sağlayıcılar (OpenRouter şu an gizli).
-    static var selectable: [AIProvider] { [.codex] }
+    /// UI'da seçilebilir sağlayıcılar.
+    static var selectable: [AIProvider] { [.openRouter, .codex] }
 
     var label: String {
         switch self {
-        case .openRouter: return "OpenRouter"
+        case .openRouter: return "Ollama (Yerel)"
         case .codex: return "Codex (ChatGPT)"
         }
     }
 
     var detail: String {
         switch self {
-        case .openRouter: return "API key ile · web araması destekli"
+        case .openRouter: return "Yerel Ollama · internet gerekmez"
         case .codex: return "ChatGPT hesabıyla · ~/.codex/auth.json"
         }
     }
@@ -34,7 +34,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
     /// Bu sağlayıcı için varsayılan model.
     var defaultModel: String {
         switch self {
-        case .openRouter: return "x-ai/grok-4.1-fast"
+        case .openRouter: return "qwen2.5:14b"
         case .codex: return "gpt-5.4"
         }
     }
@@ -43,7 +43,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
     var availableModels: [String] {
         switch self {
         case .openRouter:
-            return ["x-ai/grok-4.1-fast"]
+            return ["qwen2.5:14b"]
         case .codex:
             return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"]
         }
