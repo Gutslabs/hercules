@@ -521,13 +521,20 @@ final class BackupService {
     }
 
     @discardableResult
-    func exportToVault(from ctx: ModelContext) throws -> VaultOperationSummary {
-        guard storeHasMeaningfulData(ctx) else {
-            throw BackupServiceError.emptyStoreExportSkipped
+    func exportToVault(from ctx: ModelContext, force: Bool = false) throws -> VaultOperationSummary {
+        // force=true (merge-sync push): guard'lar atlanır. Pull-merge sonrası local
+        // OTORİTEDİR; silme local'i "daha az zengin" yapsa bile vault'a YAZILMALI —
+        // yoksa silmeler (tombstone) karşı cihaza hiç ulaşmaz ve kayıt geri dirilir.
+        if !force {
+            guard storeHasMeaningfulData(ctx) else {
+                throw BackupServiceError.emptyStoreExportSkipped
+            }
         }
         let backup = try buildBackup(ctx: ctx)
-        guard richerVaultCandidate(than: backup) == nil else {
-            throw BackupServiceError.richerVaultSnapshotExists
+        if !force {
+            guard richerVaultCandidate(than: backup) == nil else {
+                throw BackupServiceError.richerVaultSnapshotExists
+            }
         }
         let data = try encoder.encode(backup)
         try data.write(to: backupURL, options: [.atomic])
@@ -1806,10 +1813,10 @@ extension BackupService {
             }
         }
         do {                                            // 3) PUSH: birleşmiş local → vault
-            _ = try exportToVault(from: ctx)
-        } catch BackupServiceError.emptyStoreExportSkipped {
-        } catch BackupServiceError.richerVaultSnapshotExists {
-            // merge sonrası olmamalı; zaten güncel say.
+            // force: silme propagation için guard'sız yaz (local merge sonrası otorite).
+            _ = try exportToVault(from: ctx, force: true)
+        } catch {
+            AppLog.backup.error("[Sync] push failed: \(String(describing: error))")
         }
     }
 
