@@ -29,6 +29,7 @@ struct MobileRootView: View {
     @State private var showProfileEditor = false
     @State private var showRecipeEditor = false
     @State private var recipeToEdit: Recipe?
+    @State private var foodToDelete: FoodEntry?
     @State private var calendarMonth: Date = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
     @State private var calendarSelectedDay: Date = Calendar.current.startOfDay(for: Date())
     @State private var isWorking = false
@@ -110,6 +111,19 @@ struct MobileRootView: View {
                 onSave: { fields in applyRecipeFields(fields, to: recipeToEdit) },
                 onDelete: recipeToEdit.map { recipe in { deleteRecipe(recipe) } }
             )
+        }
+        .confirmationDialog(
+            "Yemeği sil?",
+            isPresented: Binding(get: { foodToDelete != nil }, set: { if !$0 { foodToDelete = nil } }),
+            presenting: foodToDelete
+        ) { food in
+            Button("Sil", role: .destructive) {
+                deleteFood(food)
+                foodToDelete = nil
+            }
+            Button("Vazgeç", role: .cancel) { foodToDelete = nil }
+        } message: { food in
+            Text("\"\(food.name)\" silinecek. Senkronla diğer cihazdan da silinir.")
         }
         .onAppear {
             restoreIfNewer()
@@ -1626,6 +1640,17 @@ struct MobileRootView: View {
             Text("\(Fmt.int(food.calories)) kcal")
                 .font(Typography.captionBold)
                 .foregroundStyle(Palette.textSecondary)
+            Button {
+                foodToDelete = food
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.leading, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(food.name) sil")
         }
         .padding(.vertical, 3)
     }
@@ -1923,6 +1948,15 @@ struct MobileRootView: View {
 
     private func deleteRecipe(_ recipe: Recipe) {
         ctx.delete(recipe)
+        ctx.saveOrReport()
+        BackupService.shared.exportAsync(from: ctx)
+        refreshTick = UUID()
+    }
+
+    /// Yemek kaydını sil. Silme bir sonraki sync'te tombstone üretir → diğer cihazdan
+    /// da silinir, geri dirilmez (bkz. merge sync).
+    private func deleteFood(_ food: FoodEntry) {
+        ctx.delete(food)
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
         refreshTick = UUID()
