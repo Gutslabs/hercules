@@ -297,19 +297,25 @@ struct CalendarView: View {
                             .font(Typography.hero(38))
                             .foregroundStyle(targetColor(consumed: consumed, target: dailyTarget))
                             .contentTransition(.numericText())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                         Text("kcal")
                             .font(Typography.body)
                             .foregroundStyle(Palette.textTertiary)
+                            .lineLimit(1)
                     }
                 }
-                Spacer()
+                Spacer(minLength: Spacing.sm)
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(balanceText(balance))
                         .font(Typography.captionBold)
                         .foregroundStyle(balanceTint(balance))
+                        .lineLimit(1)
                     Text(remaining >= 0 ? "\(Fmt.int(remaining)) kcal kaldı" : "\(Fmt.int(abs(remaining))) kcal geçti")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
 
@@ -396,6 +402,8 @@ struct CalendarView: View {
             Text(value)
                 .font(Typography.mono)
                 .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -454,6 +462,8 @@ struct CalendarView: View {
                 Text("\(Fmt.int(dailyTarget)) kcal")
                     .font(Typography.bodyBold)
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
         }
     }
@@ -630,9 +640,13 @@ struct CalendarView: View {
                     .foregroundStyle(targetColor(consumed: consumed, target: dailyTarget))
                     .contentTransition(.numericText())
                     .animation(.snappy, value: consumed)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text("/ \(Fmt.int(dailyTarget)) kcal")
                     .font(Typography.body)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Spacer()
             }
 
@@ -650,6 +664,8 @@ struct CalendarView: View {
             Text(remaining >= 0 ? "\(Fmt.int(remaining)) kcal alan kaldı" : "\(Fmt.int(abs(remaining))) kcal hedef üstü")
                 .font(Typography.captionBold)
                 .foregroundStyle(remaining >= 0 ? Palette.textSecondary : Palette.warning)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
             if !foods.isEmpty {
                 HStack(spacing: Spacing.sm) {
@@ -676,12 +692,16 @@ struct CalendarView: View {
                             }
                             .layoutPriority(1)
                             Spacer(minLength: Spacing.sm)
-                            Text("\(Fmt.int(entry.calories))")
-                                .font(Typography.mono)
-                                .foregroundStyle(Palette.textSecondary)
-                            Text("kcal")
-                                .font(Typography.caption)
-                                .foregroundStyle(Palette.textQuaternary)
+                            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                                Text("\(Fmt.int(entry.calories))")
+                                    .font(Typography.mono)
+                                    .foregroundStyle(Palette.textSecondary)
+                                Text("kcal")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(Palette.textQuaternary)
+                            }
+                            .lineLimit(1)
+                            .fixedSize()
                             Button {
                                 editingFoodDate = entry
                             } label: {
@@ -810,6 +830,8 @@ struct CalendarView: View {
             Text("\(label) \(Fmt.int(value))g")
                 .font(Typography.captionBold)
                 .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 

@@ -446,6 +446,7 @@ struct MemoryView: View {
             }
             .font(Typography.caption)
             .foregroundStyle(Palette.textQuaternary)
+            .lineLimit(1)
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)

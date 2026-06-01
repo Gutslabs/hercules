@@ -8,21 +8,23 @@ struct MeasurementsView: View {
     @State private var showingNew = false
     @State private var editingMeasurement: Measurement? = nil
     @State private var newMeasurementKind: MeasurementEditor.CreateKind = .smart
+    @State private var showAllMeasurements = false
 
     var body: some View {
         GeometryReader { proxy in
             let compact = proxy.size.width < 1040
 
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                headerGrid(compact: compact)
-                signalDeck(compact: compact)
-                measurementList
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    headerGrid(compact: compact)
+                    signalDeck(compact: compact)
+                    measurementList
+                }
+                .padding(.horizontal, Spacing.xxl)
+                .padding(.top, Spacing.xxl)
+                .padding(.bottom, Spacing.xl)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal, Spacing.xxl)
-            .padding(.top, Spacing.xxl)
-            .padding(.bottom, Spacing.xl)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(measurementsBackground)
         .sheet(isPresented: $showingNew) {
@@ -38,6 +40,9 @@ struct MeasurementsView: View {
                 ctx.delete(m)
                 ctx.saveOrReport()
             }
+        }
+        .sheet(isPresented: $showAllMeasurements) {
+            MeasurementHistorySheet()
         }
     }
 
@@ -74,53 +79,25 @@ struct MeasurementsView: View {
     }
 
     private var heroPanel: some View {
-        VStack(alignment: .leading, spacing: Spacing.xl) {
-            HStack(alignment: .top, spacing: Spacing.md) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Ölçüm Defteri").eyebrow()
-                    Text("Vücut ölçümleri")
-                        .font(Typography.display(44))
-                        .foregroundStyle(Palette.textPrimary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                    Text("Günlük tartıyı sade tut, haftalık tam ölçümle yağ oranı ve çevreleri netleştir.")
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 520, alignment: .leading)
-                }
-
-                Spacer(minLength: Spacing.lg)
-
-                latestWeightReadout
+        HStack(alignment: .top, spacing: Spacing.md) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Ölçüm Defteri").eyebrow()
+                Text("Vücut ölçümleri")
+                    .font(Typography.display(44))
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Text("Günlük tartıyı sade tut, haftalık tam ölçümle yağ oranı ve çevreleri netleştir.")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 520, alignment: .leading)
             }
 
-            HStack(alignment: .center, spacing: Spacing.sm) {
-                MeasurementActionButton(
-                    title: "Tartı Ekle",
-                    subtitle: "Günlük kayıt",
-                    systemImage: "scalemass",
-                    prominent: false
-                ) {
-                    newMeasurementKind = .quick
-                    showingNew = true
-                }
-                .keyboardShortcut("n", modifiers: .command)
-                .help("Hızlı tartı ekle (⌘N)")
+            Spacer(minLength: Spacing.lg)
 
-                MeasurementActionButton(
-                    title: "Tam Ölçüm",
-                    subtitle: "Kilo, yağ, çevre",
-                    systemImage: "ruler",
-                    prominent: true
-                ) {
-                    newMeasurementKind = .full
-                    showingNew = true
-                }
-                .help("Kilo, yağ oranı ve çevreleri birlikte ekle")
-
-                Spacer(minLength: 0)
-
+            VStack(alignment: .trailing, spacing: Spacing.md) {
+                latestWeightReadout
                 if let last = measurements.first {
                     lastUpdateBadge(last.date)
                 }
@@ -206,27 +183,55 @@ struct MeasurementsView: View {
 
             WeekCadenceRail()
 
+            // Bu hafta / Bu ay'ın yanında Tartı Ekle / Tam Ölçüm — tek satır.
+            // Kart darsa (360pt) butonlar kısa etiketle ("Tartı"/"Tam"), genişse tam etiketle sığar.
             HStack(spacing: Spacing.sm) {
                 MetricChip(label: "Bu hafta", value: hasThisWeekFull ? "Tamam" : "Açık")
                 MetricChip(label: "Bu ay", value: "\(measurementsThisMonth)")
-                Spacer(minLength: 0)
-                Button {
-                    newMeasurementKind = isFullDay ? .full : .quick
-                    showingNew = true
-                } label: {
-                    Image(systemName: isFullDay ? "ruler" : "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 30, height: 30)
+                Spacer(minLength: Spacing.sm)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 7) {
+                        quickButton(title: "Tartı Ekle")
+                        fullButton(title: "Tam Ölçüm")
+                    }
+                    HStack(spacing: 7) {
+                        quickButton(title: "Tartı")
+                        fullButton(title: "Tam")
+                    }
                 }
-                .buttonStyle(MeasurementPressButtonStyle())
-                .foregroundStyle(Palette.textPrimary)
-                .background(Circle().fill(Palette.surfaceElevated))
-                .overlay(Circle().strokeBorder(Palette.borderStrong, lineWidth: 0.5))
-                .help(isFullDay ? "Tam ölçüm gir" : "Bugün tartı ekle")
             }
         }
         .padding(Spacing.xl)
         .measurementPanel(cornerRadius: Radius.xl, accent: isFullDay ? Palette.accent.opacity(0.45) : Palette.borderStrong)
+    }
+
+    private func quickButton(title: String) -> some View {
+        MeasurementActionButton(
+            title: title,
+            subtitle: "Günlük kayıt",
+            systemImage: "scalemass",
+            prominent: false,
+            compact: true
+        ) {
+            newMeasurementKind = .quick
+            showingNew = true
+        }
+        .keyboardShortcut("n", modifiers: .command)
+        .help("Hızlı tartı ekle (⌘N)")
+    }
+
+    private func fullButton(title: String) -> some View {
+        MeasurementActionButton(
+            title: title,
+            subtitle: "Kilo, yağ, çevre",
+            systemImage: "ruler",
+            prominent: true,
+            compact: true
+        ) {
+            newMeasurementKind = .full
+            showingNew = true
+        }
+        .help("Kilo, yağ oranı ve çevreleri birlikte ekle")
     }
 
     private func checkInSubtitle(isFullDay: Bool, hasThisWeekFull: Bool, nextFull: Date) -> String {
@@ -404,7 +409,7 @@ struct MeasurementsView: View {
                     showingNew = true
                 }
             )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity)
         } else {
             VStack(spacing: 0) {
                 HStack(alignment: .center, spacing: Spacing.md) {
@@ -428,7 +433,6 @@ struct MeasurementsView: View {
                 Hairline()
 
                 measurementTimeline
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .measurementPanel(cornerRadius: Radius.xl)
             .clipShape(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous))
@@ -436,20 +440,62 @@ struct MeasurementsView: View {
     }
 
     private var measurementTimeline: some View {
-        ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(Array(measurements.enumerated()), id: \.element.id) { index, measurement in
-                    MeasurementHistoryCard(
-                        measurement: measurement,
-                        isLatest: index == 0,
-                        onEdit: { editingMeasurement = measurement }
-                    )
-                }
+        LazyVStack(spacing: 10) {
+            ForEach(Array(measurements.prefix(7).enumerated()), id: \.element.id) { index, measurement in
+                MeasurementHistoryCard(
+                    measurement: measurement,
+                    isLatest: index == 0,
+                    onEdit: { editingMeasurement = measurement }
+                )
             }
-            .padding(Spacing.lg)
+            if measurements.count > 7 {
+                seeMoreButton
+            }
         }
-        .scrollIndicators(.visible)
+        .padding(Spacing.lg)
         .background(Palette.background.opacity(0.10))
+    }
+
+    /// Son 7'den fazlası varsa: hepsini ayrı pencerede açan "Devamını gör" satırı.
+    /// (Liste bir anda 31 kart yüklemesin diye.)
+    private var seeMoreButton: some View {
+        Button {
+            showAllMeasurements = true
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Devamını gör")
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("Kalan \(measurements.count - 7) kaydı ayrı pencerede aç")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: Spacing.sm)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.textTertiary)
+            }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                    .fill(Palette.surface.opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: 0.6)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Tüm ölçüm geçmişini ayrı pencerede aç")
     }
 
     private func deltaTint(_ value: Double?, lowerIsBetter: Bool) -> Color {
@@ -457,5 +503,71 @@ struct MeasurementsView: View {
         let increased = value > 0
         let isGood = lowerIsBetter ? !increased : increased
         return isGood ? Palette.positive : Palette.negative
+    }
+}
+
+/// "Devamını gör" ile açılan tüm ölçüm geçmişi penceresi (ayrı sheet).
+/// Kendi @Query'siyle canlıdır (silme/düzenleme anında yansır) ve kendi editör sheet'ini barındırır.
+struct MeasurementHistorySheet: View {
+    @Query(sort: \Measurement.date, order: .reverse) private var measurements: [Measurement]
+    @Environment(\.modelContext) private var ctx
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing: Measurement? = nil
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: Spacing.md) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Kayıt Akışı").eyebrow()
+                    Text("Tüm ölçüm geçmişi")
+                        .font(Typography.title)
+                        .foregroundStyle(Palette.textPrimary)
+                }
+                Spacer()
+                Text("\(measurements.count) kayıt")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule(style: .continuous).fill(Color.white.opacity(0.045)))
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Palette.surfaceElevated))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("Kapat")
+            }
+            .padding(Spacing.xl)
+
+            Hairline()
+
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(Array(measurements.enumerated()), id: \.element.id) { index, m in
+                        MeasurementHistoryCard(
+                            measurement: m,
+                            isLatest: index == 0,
+                            onEdit: { editing = m }
+                        )
+                    }
+                }
+                .padding(Spacing.lg)
+            }
+            .background(Palette.background.opacity(0.10))
+        }
+        .frame(width: 780, height: 720)
+        .background(Palette.background)
+        .sheet(item: $editing) { m in
+            MeasurementEditor(mode: .edit(m)) { _ in
+                ctx.saveOrReport()
+            } onDelete: {
+                ctx.delete(m)
+                ctx.saveOrReport()
+            }
+        }
     }
 }

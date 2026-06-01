@@ -166,11 +166,15 @@ struct HealthKitCard: View {
                             .font(Typography.hero(28))
                             .foregroundStyle(Palette.textPrimary)
                             .frame(maxWidth: 140)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                             .focused($inputFocused)
                             .onSubmit { saveSteps() }
                         Text("adım")
                             .font(Typography.body)
                             .foregroundStyle(Palette.textTertiary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 Divider().frame(height: 40).background(Palette.border)
@@ -184,6 +188,8 @@ struct HealthKitCard: View {
                             .font(Typography.caption)
                             .foregroundStyle(Palette.textTertiary)
                     }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 }
                 Spacer()
                 Button(action: saveSteps) {
@@ -235,6 +241,8 @@ struct HealthKitCard: View {
                         .foregroundStyle(Palette.textTertiary)
                 }
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
             Text(detail)
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textTertiary)

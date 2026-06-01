@@ -12,6 +12,21 @@ struct BodyTrackApp: App {
     #endif
 
     init() {
+        #if os(macOS)
+        // TEK-INSTANCE KORUMASI: Aynı SQLite store'u iki süreç açamaz. LaunchAgent
+        // (sabah 08/10) uygulama zaten açıkken ikinci bir kopya başlatırsa, store
+        // çakışır → "Hercules.store couldn't be opened" + yazımlar geri alınır (veri
+        // kaybı). Bu yüzden zaten çalışan bir instance varsa, bu duplicate süreç
+        // store'a HİÇ DOKUNMADAN hemen çıkar; açık olan instance işi yürütür.
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .filter { $0.processIdentifier != myPID }
+        if !others.isEmpty {
+            // Var olan instance'ı öne getir (kullanıcı elle çift açtıysa), sonra çık.
+            _ = others.first?.activate(options: [])
+            exit(0)
+        }
+        #endif
         do {
             let fm = FileManager.default
             let appSupport = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -22,7 +37,7 @@ struct BodyTrackApp: App {
             let storeURL = dir.appendingPathComponent("Hercules.store")
             let config = ModelConfiguration(url: storeURL)
             container = try ModelContainer(
-                for: Measurement.self, UserProfile.self, Recipe.self, FoodEntry.self, FoodPreset.self, WorkoutSession.self, WorkoutTemplateExercise.self, WorkoutProgramArchive.self, WorkoutPlanOverride.self, StepEntry.self, MonthlyGoal.self, WorkoutLog.self, WorkoutExerciseEntry.self, ExerciseSet.self,
+                for: Measurement.self, UserProfile.self, Recipe.self, FoodEntry.self, FoodPreset.self, WorkoutSession.self, WorkoutTemplateExercise.self, WorkoutProgramArchive.self, WorkoutPlanOverride.self, StepEntry.self, MonthlyGoal.self, WorkoutLog.self, WorkoutExerciseEntry.self, ExerciseSet.self, CoachReport.self, CoachFocusItem.self, CoachRecipe.self,
                 configurations: config
             )
             // 1) Önce default profil/workout seed (boşsa)
@@ -36,6 +51,8 @@ struct BodyTrackApp: App {
                 await BackupService.shared.autoSyncWithVault(into: ctx) // vault: pull-merge + push
                 FoodPresetSeed.upsertDefaults(ctx)
                 ShortcutHealthSyncService.shared.startAutoImport(into: ctx)
+                // Sabah açılışında (gizli LaunchAgent ya da normal) bugünün raporu yoksa üret.
+                CoachEngine.maybeRunDaily(ctx: ctx)
             }
             // 3) AppDelegate'e container'ı paylaş — quit'te yedek alacak
             #if os(macOS)
@@ -109,6 +126,25 @@ struct BodyTrackApp: App {
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static var sharedContainer: ModelContainer?
+    private var coachTimer: Timer?
+
+    /// Sabah 08:00 LaunchAgent'ı kur (app kapalıyken bile tetiklensin) + app açık
+    /// kalırsa 30 dk'da bir koç kontrolü (açık-ama-boşta kalma durumunu da kapsar).
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // LaunchAgent (sabah uygulamayı kendisi açan) GEÇİCİ DEVRE DIŞI — çoklu-instance
+        // store çakışması riskini tamamen sıfırlamak için. Eski kurulmuş agent varsa kaldır.
+        // Tetikleme şimdilik foreground: açılış + öne gelme + 30 dk timer + Koç sayfası.
+        // Tek-instance koruması (init'te) ayrıca aktif. Güvenli olduğuna emin olunca
+        // `CoachLaunchAgent.installIfNeeded()` ile geri açılabilir.
+        Task.detached { CoachLaunchAgent.uninstall() }
+        coachTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { _ in
+            Task { @MainActor in
+                if let ctx = AppDelegate.sharedContainer?.mainContext {
+                    CoachEngine.maybeRunDaily(ctx: ctx)
+                }
+            }
+        }
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         Task { @MainActor in
@@ -135,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let ctx = Self.sharedContainer?.mainContext {
                 ShortcutHealthSyncService.shared.importIfAvailable(into: ctx)
                 await BackupService.shared.autoSyncWithVault(into: ctx)
+                // Veri tazelendi → bugünün koç raporu yoksa ve 08:00 geçtiyse otomatik üret.
+                CoachEngine.maybeRunDaily(ctx: ctx)
             }
         }
     }

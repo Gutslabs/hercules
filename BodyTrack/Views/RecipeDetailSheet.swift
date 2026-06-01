@@ -149,6 +149,7 @@ struct RecipeDetailSheet: View {
                     railStat(label: "Hazırlık", value: recipe.prepMinutes.map { "\($0) dk" } ?? "-")
                     railStat(label: "Malzeme", value: ingredientLines.isEmpty ? "-" : "\(ingredientLines.count)")
                     railStat(label: "Adım", value: instructionLines.isEmpty ? "-" : "\(instructionLines.count)")
+                    railStat(label: "Eklendi", value: Fmt.dateLong.string(from: recipe.createdAt))
                 }
             }
             .padding(Spacing.lg)
@@ -279,22 +280,44 @@ struct RecipeDetailSheet: View {
     }
 
     private var ingredientPanel: some View {
-        detailPanel("Malzemeler", icon: "list.bullet") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), alignment: .top)], alignment: .leading, spacing: 10) {
-                ForEach(Array(ingredientLines.enumerated()), id: \.offset) { _, line in
-                    HStack(alignment: .top, spacing: 9) {
-                        Circle()
-                            .fill(categoryTint)
-                            .frame(width: 5, height: 5)
-                            .padding(.top, 7)
-                        Text(line)
-                            .font(Typography.body)
-                            .foregroundStyle(Palette.textPrimary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+        let columns = ingredientColumns
+        return detailPanel("Malzemeler", icon: "list.bullet") {
+            HStack(alignment: .top, spacing: Spacing.xl) {
+                ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
+                    VStack(alignment: .leading, spacing: 11) {
+                        ForEach(Array(column.enumerated()), id: \.offset) { _, line in
+                            ingredientRow(line)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        }
+    }
+
+    private func ingredientRow(_ line: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Circle()
+                .fill(categoryTint)
+                .frame(width: 5, height: 5)
+                .padding(.top, 7)
+            Text(line)
+                .font(Typography.body)
+                .foregroundStyle(Palette.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Malzemeleri 2 dengeli kolona böl (≤3 madde tek kolon). Her kolon bağımsız aktığı için
+    /// LazyVGrid'in değişken satır yüksekliğinden gelen kayık hizayı (staggered) önler.
+    private var ingredientColumns: [[String]] {
+        let items = ingredientLines
+        guard items.count > 3 else { return [items] }
+        let perColumn = Int((Double(items.count) / 2).rounded(.up))
+        return stride(from: 0, to: items.count, by: perColumn).map {
+            Array(items[$0..<min($0 + perColumn, items.count)])
         }
     }
 

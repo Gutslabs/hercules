@@ -77,6 +77,20 @@ enum CoachIntelligence {
             strength: .conditional,
             useWhen: ["uyku", "sleep", "recovery", "toparlanma", "performans", "yorgunluk"],
             coachNote: "Önce semptomu sınıflandır: lokal kas yorgunluğu mu, sistemik yorgunluk mu?"
+        ),
+        EvidenceClaim(
+            topic: "Lif",
+            claim: "Yetişkinde lif için kılavuz aralığı genelde ~25-38 g/gün: EFSA yetişkinler için ~25 g/gün'ü yeterli kabul eder; ABD Dietary Guidelines (DGA) ~14 g/1000 kcal; AHA ~25-30 g/gün önerir. Tokluk, glisemik kontrol ve bağırsak/mikrobiyota sağlığı için faydalı; cut'ta hacimli sebze/baklagil/tam tahıl ile tutturmak iştahı yönetir.",
+            strength: .high,
+            useWhen: ["lif", "fiber", "sebze", "salata", "mikrobesin", "tokluk", "sindirim", "beslenme", "kalite", "kabiz", "kabız", "bagirsak", "bağırsak"],
+            coachNote: "Lif önerirken sayıyı bir kaynağa bağla (EFSA ~25 g, AHA 25-30 g, DGA 14 g/1000 kcal). Ani artışta gaz/şişkinlik için kademeli artır + su."
+        ),
+        EvidenceClaim(
+            topic: "Sebze / Mikrobesin",
+            claim: "Genel sağlık kılavuzları günde en az ~400 g sebze-meyve önerir (WHO ≥400 g/gün). Cut döneminde hacimli ve düşük kalorili sebzeler hem mikrobesin çeşitliliği hem tokluk için en düşük maliyetli kaldıraçtır; çeşitlilik (yapraklı + brokoli/kabak/biber/mantar) tek tip salatadan üstündür.",
+            strength: .moderate,
+            useWhen: ["sebze", "salata", "mikrobesin", "vitamin", "lif", "fiber", "beslenme", "kalite", "çeşitlilik", "cesitlilik"],
+            coachNote: "Sebze önerirken WHO ≥400 g/gün dayanağını verebilirsin; sadece marul/salatalık değil çeşitlilik öner."
         )
     ]
 

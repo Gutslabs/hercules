@@ -348,6 +348,8 @@ struct WorkoutView: View {
             Text("\(dayCount) gün · \(exerciseCount) hareket · \(totalMinutes) dk/hafta")
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 
@@ -721,14 +723,19 @@ struct WorkoutView: View {
                     .foregroundStyle(Palette.textPrimary)
                     .contentTransition(.numericText())
                     .animation(.snappy, value: primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text(unit)
                     .font(Typography.captionBold)
                     .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             Text(secondary)
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textTertiary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

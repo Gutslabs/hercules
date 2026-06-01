@@ -357,9 +357,12 @@ struct FoodRow: View {
                     Text(Fmt.int(food.calories))
                         .font(Typography.mono)
                         .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                     Text("kcal")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
                 }
             }
             .frame(width: 70, alignment: .trailing)
@@ -491,6 +494,7 @@ struct MacroLegend: View {
                 Text("%\(Fmt.int(percent))")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textQuaternary)
+                    .lineLimit(1)
             }
             // Alınan / hedef — alınan vurgulu (loglandıkça artar)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -498,9 +502,12 @@ struct MacroLegend: View {
                     .font(Typography.monoLarge)
                     .foregroundStyle(consumedColor)
                     .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text("/ \(Fmt.int(grams)) g")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
             }
             // Tam genişlik, modern progress bar (yumuşak animasyonlu)
             GeometryReader { geo in

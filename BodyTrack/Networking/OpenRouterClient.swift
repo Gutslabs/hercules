@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Observation
 
 enum AIConfig {
     static let defaultAPIKey = ""
@@ -37,10 +38,13 @@ enum AIConfig {
         dateFmt.locale = Locale(identifier: "tr_TR")
         dateFmt.dateFormat = "d MMMM yyyy EEEE"
         let today = dateFmt.string(from: .now)
+        let datePrefix = "Bugünün tarihi: \(today). Zaman bağlamlı tüm yorumları buna göre yap."
+        return datePrefix + "\n\n" + PromptStore.shared.text(.chatSystem)
+    }
 
-        return """
-        Bugünün tarihi: \(today). Zaman bağlamlı tüm yorumları buna göre yap.
-
+    /// `.chatSystem` varsayılan gövdesi (tarih öneki hariç). PromptStore override tutar →
+    /// Admin ▸ System ekranından düzenlenebilir. Düzenlenmemişse bu metin kullanılır.
+    static let chatSystemBody = """
         Sen Hercules — Türkçe konuşan, body-building üzerinde neredeyse tüm bilimsel araştırmaları bilen, sürekli yeni araştırmaları takip eden bir science-based body-builder koçusun.
 
         COACH BRAIN V4 — SCIENCE-BASED FITNESS COACHING:
@@ -118,7 +122,9 @@ enum AIConfig {
         - Vücut analizi (kilo trendi, yağ %, plato) sorularında literatüre uygun mantıklı önerilerde bulun. Örneğin kullanıcı kilo vermek istiyorsa X süresi boyunca aynı kilodaysa: ya kaloriyi düzgün takip edemiyor, ya çok hareketsiz, ya su tutuyor, ya da maintenance'a girmiş. Bilimsel mantığa göre cevapla her zaman.
         - Çiğ vs pişmiş tartım farkını biliyorsun (çiğ pirinç 360 kcal/100g, pişmiş 130; çiğ bulgur 340, pişmiş 120 vs).
         """
-    }
+
+    /// `.webSearchSub` varsayılanı — :online alt-modeline giden araştırmacı system prompt'u.
+    static let webSearchSubDefault = "Sen kısa ve doğru bilgi veren bir araştırmacısın. Tarif/yemek tarifi sorgusu ise ASLA tarif uydurma: web'de bulunan 2-4 gerçek tarif kaynağı ver; başlık, kaynak adı, tam URL, kısa malzeme/yapılış özeti, porsiyon/süre ve varsa kcal/P/K/Y bilgisini dön. Kaynak yoksa 'güvenilir tarif kaynağı bulunamadı' de. Yemek makro sorgusu ise porsiyon, kcal, protein, karb, yağ özetini dön. Fitness/sağlık/genel sorgu ise en güncel ve doğru bilgiyi 3-5 cümlede özetle. Maksimum 8 satır."
 }
 
 final class OpenRouterClient: AIClient {
@@ -299,7 +305,7 @@ final class OpenRouterClient: AIClient {
         let body: [String: Any] = [
             "model": AIConfig.searchModel,
             "messages": [
-                ["role": "system", "content": "Sen kısa ve doğru bilgi veren bir araştırmacısın. Tarif/yemek tarifi sorgusu ise ASLA tarif uydurma: web'de bulunan 2-4 gerçek tarif kaynağı ver; başlık, kaynak adı, tam URL, kısa malzeme/yapılış özeti, porsiyon/süre ve varsa kcal/P/K/Y bilgisini dön. Kaynak yoksa 'güvenilir tarif kaynağı bulunamadı' de. Yemek makro sorgusu ise porsiyon, kcal, protein, karb, yağ özetini dön. Fitness/sağlık/genel sorgu ise en güncel ve doğru bilgiyi 3-5 cümlede özetle. Maksimum 8 satır."],
+                ["role": "system", "content": PromptStore.shared.text(.webSearchSub)],
                 ["role": "user", "content": query]
             ],
             "temperature": 0.1
@@ -500,5 +506,167 @@ final class AIKeyStore {
             kSecAttrAccount as String: account
         ]
         SecItemDelete(query as CFDictionary)
+    }
+}
+
+// MARK: - Editable system prompts (Admin ▸ System)
+
+/// Uygulamadaki düzenlenebilir LLM prompt'larının kataloğu. Her case bir prompt'a karşılık
+/// gelir; varsayılan metni `defaultText`'tir, kullanıcı override'ı `PromptStore`'da tutulur.
+/// Mac-only prompt'ların (hafıza/koç) varsayılanları kendi dosyalarında tanımlı.
+enum PromptKey: String, CaseIterable, Identifiable {
+    case chatSystem
+    case webSearchSub
+    case memoryExtraction
+    case memoryConsolidation
+    case coachReport
+    case coachRecipe
+
+    var id: String { rawValue }
+
+    /// UI başlığı.
+    var title: String {
+        switch self {
+        case .chatSystem:         return "Ana Koç (Sohbet)"
+        case .webSearchSub:       return "Web Araması Alt-Modeli"
+        case .memoryExtraction:   return "Hafıza Çıkarımı"
+        case .memoryConsolidation:return "Hafıza Konsolidasyonu"
+        case .coachReport:        return "Koç Günlük Analiz"
+        case .coachRecipe:        return "Koç Günlük Tarif"
+        }
+    }
+
+    /// Sidebar/kart gruplaması.
+    var group: String {
+        switch self {
+        case .chatSystem, .webSearchSub:                return "Sohbet & Arama"
+        case .memoryExtraction, .memoryConsolidation:   return "Hafıza"
+        case .coachReport, .coachRecipe:                return "Koç"
+        }
+    }
+
+    /// Nerede ve ne zaman kullanıldığı.
+    var locationNote: String {
+        switch self {
+        case .chatSystem:         return "OpenRouterClient · her sohbet mesajında system prompt"
+        case .webSearchSub:       return "OpenRouterClient · :online web araması alt-modeli"
+        case .memoryExtraction:   return "MemoryManager · konuşmadan kalıcı hafıza çıkarımı"
+        case .memoryConsolidation:return "MemoryManager · hafıza tekrar/çelişki temizliği"
+        case .coachReport:        return "CoachEngine · her sabahki günlük analiz"
+        case .coachRecipe:        return "CoachEngine · her sabahki günlük tarif"
+        }
+    }
+
+    /// Otomatik enjekte edilen dinamik parçalar (kullanıcının bilmesi için).
+    var dynamicNote: String? {
+        switch self {
+        case .chatSystem:
+            return "Başına bugünün tarihi otomatik eklenir. Kullanıcı verisi + skill context mesajla gelir."
+        case .webSearchSub:
+            return nil
+        case .memoryExtraction:
+            return "Son konuşma + mevcut hafıza kayıtları ayrı bir kullanıcı mesajı olarak eklenir."
+        case .memoryConsolidation:
+            return "Mevcut hafıza kayıt listesi ayrı bir kullanıcı mesajı olarak eklenir."
+        case .coachReport:
+            return "Başına bugünün tarihi; sonuna bilimsel-dayanak direktifi + açık takip maddeleri + önceki rapor + makine-okunur takip formatı otomatik eklenir."
+        case .coachRecipe:
+            return "Başına bugünün tarihi otomatik eklenir. Yemek günlüğü + kayıtlı tarifler bağlam olarak gelir."
+        }
+    }
+
+    /// Varsayılan (düzenlenmemiş) metin. Mac-only prompt'lar kendi dosyalarındaki sabitlerden gelir.
+    var defaultText: String {
+        switch self {
+        case .chatSystem:   return AIConfig.chatSystemBody
+        case .webSearchSub: return AIConfig.webSearchSubDefault
+        case .memoryExtraction:
+            #if os(macOS)
+            return MemoryManager.memoryExtractionDefault
+            #else
+            return ""
+            #endif
+        case .memoryConsolidation:
+            #if os(macOS)
+            return MemoryManager.memoryConsolidationDefault
+            #else
+            return ""
+            #endif
+        case .coachReport:
+            #if os(macOS)
+            return CoachEngine.reportInstructionsDefault
+            #else
+            return ""
+            #endif
+        case .coachRecipe:
+            #if os(macOS)
+            return CoachEngine.recipeInstructionsDefault
+            #else
+            return ""
+            #endif
+        }
+    }
+}
+
+/// Düzenlenebilir prompt override'larını saklar (UserDefaults JSON). `text(_:)` override
+/// varsa onu, yoksa `defaultText`'i döner. Tüm prompt çağrı yerleri buradan okur.
+@Observable
+final class PromptStore {
+    static let shared = PromptStore()
+
+    private static let storageKey = "hercules.prompts.overrides.v1"
+    private var overrides: [String: String]
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+           let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+            overrides = dict
+        } else {
+            overrides = [:]
+        }
+    }
+
+    /// Etkin metin: geçerli override varsa o, yoksa varsayılan.
+    func text(_ key: PromptKey) -> String {
+        if let override = overrides[key.rawValue],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return override
+        }
+        return key.defaultText
+    }
+
+    func isOverridden(_ key: PromptKey) -> Bool {
+        overrides[key.rawValue] != nil
+    }
+
+    func override(for key: PromptKey) -> String? {
+        overrides[key.rawValue]
+    }
+
+    /// Override yaz. Boşsa veya varsayılana eşitse override kaldırılır (temiz tutar).
+    func setOverride(_ key: PromptKey, _ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == key.defaultText.trimmingCharacters(in: .whitespacesAndNewlines) {
+            overrides[key.rawValue] = nil
+        } else {
+            overrides[key.rawValue] = value
+        }
+        persist()
+    }
+
+    func resetToDefault(_ key: PromptKey) {
+        overrides[key.rawValue] = nil
+        persist()
+    }
+
+    func resetAll() {
+        overrides = [:]
+        persist()
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(overrides) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
     }
 }

@@ -30,10 +30,13 @@ struct BackupCard: View {
                     Text("Son: \(Fmt.dateLong.string(from: date))")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 } else {
                     Text("Henüz yedek yok")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.warning)
+                        .lineLimit(1)
                 }
             }
 
@@ -51,6 +54,8 @@ struct BackupCard: View {
                         Text("· \(formatSize(size))")
                             .font(Typography.caption)
                             .foregroundStyle(Palette.textTertiary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     Spacer(minLength: 0)
                 }
@@ -191,6 +196,8 @@ struct BackupCard: View {
                     Text("· \(Fmt.dateLong.string(from: vaultLastSync))")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
             }
             .foregroundStyle(vaultConfigured ? Palette.positive : Palette.warning)

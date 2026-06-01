@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69080015CD65428F38FBE30D /* CoachEngine.swift */; };
+		267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35726FCF0FBDC3D66BE44300 /* CoachView.swift */; };
+		47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */; };
+		8C40856532782361B5BF4D39 /* CoachReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECE97950CA296909313971EE /* CoachReport.swift */; };
 		A24E00000000000000000040 /* BodyTrackApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000021 /* BodyTrackApp.swift */; };
 		A24E00000000000000000041 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000022 /* ContentView.swift */; };
 		A24E00000000000000000042 /* Measurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000023 /* Measurement.swift */; };
@@ -118,6 +122,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		35726FCF0FBDC3D66BE44300 /* CoachView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
+		69080015CD65428F38FBE30D /* CoachEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachEngine.swift; sourceTree = "<group>"; };
 		A24E00000000000000000020 /* Hercules.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hercules.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A24E00000000000000000021 /* BodyTrackApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyTrackApp.swift; sourceTree = "<group>"; };
 		A24E00000000000000000022 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -204,6 +210,8 @@
 		A24E0000000000000000EE5D /* UserContextMention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextMention.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE5F /* MobileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileComponents.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE62 /* PersistenceSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceSupport.swift; sourceTree = "<group>"; };
+		B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatPageView.swift; sourceTree = "<group>"; };
+		ECE97950CA296909313971EE /* CoachReport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachReport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -279,6 +287,7 @@
 				A24E00000000000000000072 /* StepEntry.swift */,
 				A24E00000000000000000074 /* MonthlyGoal.swift */,
 				A24E0000000000000000007A /* WorkoutLog.swift */,
+				ECE97950CA296909313971EE /* CoachReport.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -306,6 +315,7 @@
 				A24E00000000000000000083 /* FoodLookupSkill.swift */,
 				A24E00000000000000000085 /* ResearchLibrary.swift */,
 				A24E00000000000000000089 /* CoachIntelligence.swift */,
+				69080015CD65428F38FBE30D /* CoachEngine.swift */,
 			);
 			path = Calculations;
 			sourceTree = "<group>";
@@ -350,6 +360,8 @@
 				A24E0000000000000000EE27 /* AIProviderCard.swift */,
 				A24E0000000000000000EE29 /* BackupCard.swift */,
 				A24E00000000000000000009 /* Components */,
+				35726FCF0FBDC3D66BE44300 /* CoachView.swift */,
+				B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -584,6 +596,10 @@
 				A24E00000000000000000088 /* CoachIntelligence.swift in Sources */,
 				A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */,
 				A24E00000000000000000094 /* SeedData.swift in Sources */,
+				8C40856532782361B5BF4D39 /* CoachReport.swift in Sources */,
+				14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */,
+				267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */,
+				47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

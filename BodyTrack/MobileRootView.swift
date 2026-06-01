@@ -1375,19 +1375,18 @@ struct MobileRootView: View {
                     .accessibilityLabel(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
                 }
 
-                if recipe.calories != nil || recipe.protein != nil || recipe.prepMinutes != nil {
-                    HStack(spacing: 6) {
-                        if let kcal = recipe.calories {
-                            recipeTag("\(Fmt.int(kcal)) kcal", icon: "flame.fill")
-                        }
-                        if let protein = recipe.protein {
-                            recipeTag("P \(Fmt.int(protein))g", icon: "bolt.fill")
-                        }
-                        if let prep = recipe.prepMinutes {
-                            recipeTag("\(prep) dk", icon: "clock")
-                        }
-                        Spacer(minLength: 0)
+                HStack(spacing: 6) {
+                    if let kcal = recipe.calories {
+                        recipeTag("\(Fmt.int(kcal)) kcal", icon: "flame.fill")
                     }
+                    if let protein = recipe.protein {
+                        recipeTag("P \(Fmt.int(protein))g", icon: "bolt.fill")
+                    }
+                    if let prep = recipe.prepMinutes {
+                        recipeTag("\(prep) dk", icon: "clock")
+                    }
+                    recipeTag(Fmt.date.string(from: recipe.createdAt), icon: "calendar")
+                    Spacer(minLength: 0)
                 }
             }
         }
@@ -2850,7 +2849,7 @@ struct MobileRecipeDetailSheet: View {
                 }
                 .buttonStyle(.plain)
             }
-            if recipe.servings != nil || recipe.prepMinutes != nil {
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     if let servings = recipe.servings {
                         metaTag("\(servings) porsiyon", icon: "person.2.fill")
@@ -2858,7 +2857,7 @@ struct MobileRecipeDetailSheet: View {
                     if let prep = recipe.prepMinutes {
                         metaTag("\(prep) dk hazırlık", icon: "clock.fill")
                     }
-                    Spacer(minLength: 0)
+                    metaTag("Eklendi \(Fmt.dateLong.string(from: recipe.createdAt))", icon: "calendar")
                 }
             }
         }

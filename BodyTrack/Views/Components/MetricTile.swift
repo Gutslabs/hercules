@@ -36,6 +36,7 @@ struct MetricTile: View {
                         Text(Fmt.num(abs(d), digits: 1))
                             .font(Typography.captionBold)
                             .monospacedDigit()
+                            .lineLimit(1)
                     }
                     .foregroundStyle(deltaColor)
                 }
@@ -45,9 +46,12 @@ struct MetricTile: View {
                 Text(value)
                     .font(Typography.hero(34))
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text(unit)
                     .font(Typography.body)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
                     .padding(.bottom, 4)
             }
 
@@ -99,6 +103,8 @@ struct StatRow: View {
                 .font(Typography.bodyBold)
                 .monospacedDigit()
                 .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
     }
 }

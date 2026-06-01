@@ -27,6 +27,7 @@ struct LabeledNumberField: View {
                 Text(unit)
                     .font(Typography.body)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -66,6 +67,7 @@ struct LabeledNumberFieldRequired: View {
                 Text(unit)
                     .font(Typography.body)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

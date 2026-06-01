@@ -45,31 +45,36 @@ struct MeasurementActionButton: View {
     let subtitle: String
     let systemImage: String
     var prominent: Bool
+    var compact: Bool = false
     var action: () -> Void
 
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: compact ? 7 : 9) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 24, height: 24)
+                    .font(.system(size: compact ? 11 : 12, weight: .semibold))
+                    .frame(width: compact ? 20 : 24, height: compact ? 20 : 24)
                     .background(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .fill(prominent ? Palette.background.opacity(0.16) : Color.white.opacity(0.055))
                     )
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(Typography.bodyBold)
-                    Text(subtitle)
-                        .font(Typography.caption)
-                        .opacity(0.62)
+                        .font(compact ? Typography.captionBold : Typography.bodyBold)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    if !compact {
+                        Text(subtitle)
+                            .font(Typography.caption)
+                            .opacity(0.62)
+                    }
                 }
             }
             .foregroundStyle(prominent ? Palette.background.opacity(0.92) : Palette.textPrimary)
-            .padding(.horizontal, 12)
-            .frame(height: 46)
+            .padding(.horizontal, compact ? 10 : 12)
+            .frame(height: compact ? 34 : 46)
             .background(
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                     .fill(prominent ? Palette.accent : Palette.surfaceElevated)

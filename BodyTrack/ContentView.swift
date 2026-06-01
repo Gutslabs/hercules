@@ -1,10 +1,13 @@
 import SwiftUI
 import SwiftData
+#if canImport(AppKit)
+import AppKit
+#endif
 
 // MARK: - Navigation tabs
 
 enum NavTab: String, CaseIterable, Identifiable, Hashable {
-    case dashboard, measurements, charts, workout, calendar, recipes, memory, profile
+    case dashboard, measurements, charts, workout, calendar, recipes, coach, chat, memory, system, profile
     var id: String { rawValue }
 
     var label: String {
@@ -15,7 +18,10 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .workout:      return "Antrenman"
         case .calendar:     return "Takvim"
         case .recipes:      return "Tarifler"
+        case .coach:        return "Koç"
+        case .chat:         return "Sohbet"
         case .memory:       return "Hafıza"
+        case .system:       return "System"
         case .profile:      return "Profil"
         }
     }
@@ -28,7 +34,10 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .workout:      return "dumbbell"
         case .calendar:     return "calendar"
         case .recipes:      return "fork.knife"
+        case .coach:        return "sparkles"
+        case .chat:         return "bubble.left.and.text.bubble.right"
         case .memory:       return "brain"
+        case .system:       return "chevron.left.forwardslash.chevron.right"
         case .profile:      return "person.crop.circle"
         }
     }
@@ -36,7 +45,7 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
 
 /// Sidebar kategorileri.
 enum NavCategory: String, CaseIterable, Identifiable, Hashable {
-    case takip, beslenme, ai
+    case takip, beslenme, ai, admin
 
     var id: String { rawValue }
 
@@ -45,6 +54,7 @@ enum NavCategory: String, CaseIterable, Identifiable, Hashable {
         case .takip:    return "Takip"
         case .beslenme: return "Beslenme"
         case .ai:       return "AI"
+        case .admin:    return "Admin"
         }
     }
 
@@ -52,7 +62,8 @@ enum NavCategory: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .takip:    return "Ölçüm ve performans"
         case .beslenme: return "Plan, kayıt ve tarif"
-        case .ai:       return "Koç hafızası"
+        case .ai:       return "Koç ve sohbet"
+        case .admin:    return "Hafıza ve sistem promptları"
         }
     }
 
@@ -60,7 +71,8 @@ enum NavCategory: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .takip:    return [.dashboard, .measurements, .charts, .workout]
         case .beslenme: return [.calendar, .recipes]
-        case .ai:       return [.memory]
+        case .ai:       return [.coach, .chat]
+        case .admin:    return [.memory, .system]
         }
     }
 }
@@ -273,9 +285,258 @@ struct ContentView: View {
         case .workout:      WorkoutView()
         case .calendar:     CalendarView()
         case .recipes:      RecipesView()
+        case .coach:        CoachView()
+        case .chat:         ChatPageView(store: chatStore)
         case .memory:       MemoryView()
+        case .system:       SystemPromptsView()
         case .profile:      ProfileView()
         }
+    }
+}
+
+// MARK: - Admin ▸ System (düzenlenebilir promptlar)
+
+/// Uygulamadaki tüm AI sistem promptlarını listeleyip düzenlemeyi sağlayan admin ekranı.
+/// Sol rail'de gruplu prompt listesi, sağda seçili prompt'un editörü. Override'lar
+/// `PromptStore`'da (UserDefaults) tutulur; "Varsayılana dön" ile fabrika metni geri gelir.
+struct SystemPromptsView: View {
+    private let store = PromptStore.shared
+    @State private var selected: PromptKey = .chatSystem
+    @State private var draft: String = ""
+    @State private var showResetConfirm = false
+    @State private var savedFlash = false
+
+    private var groups: [(String, [PromptKey])] {
+        var order: [String] = []
+        var map: [String: [PromptKey]] = [:]
+        for key in PromptKey.allCases {
+            if map[key.group] == nil { order.append(key.group); map[key.group] = [] }
+            map[key.group]?.append(key)
+        }
+        return order.map { ($0, map[$0] ?? []) }
+    }
+
+    private var isDirty: Bool { draft != store.text(selected) }
+    private var differsFromDefault: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            != selected.defaultText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            rail.frame(width: 286)
+            Rectangle().fill(Palette.border).frame(width: 0.5)
+            detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .onAppear { draft = store.text(selected) }
+        .onChange(of: selected) { _, newKey in draft = store.text(newKey) }
+    }
+
+    // MARK: Rail
+
+    private var rail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("SİSTEM").eyebrow()
+                Text("Promptlar")
+                    .font(Typography.titleSmall)
+                    .foregroundStyle(Palette.textPrimary)
+                Text("Uygulamadaki tüm AI promptları. Düzenle, kaydet; istediğinde varsayılana dön.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, Spacing.lg).padding(.top, Spacing.lg).padding(.bottom, Spacing.md)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(groups, id: \.0) { group, keys in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(group.uppercased(with: Locale(identifier: "tr_TR")))
+                                .font(Typography.label).tracking(0.6)
+                                .foregroundStyle(Palette.textTertiary)
+                                .padding(.horizontal, 10)
+                            ForEach(keys) { key in railRow(key) }
+                        }
+                    }
+                }
+                .padding(.horizontal, Spacing.md).padding(.bottom, Spacing.lg)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Palette.surface)
+    }
+
+    private func railRow(_ key: PromptKey) -> some View {
+        let active = key == selected
+        let overridden = store.isOverridden(key)
+        return Button { selected = key } label: {
+            HStack(spacing: 9) {
+                Image(systemName: active ? "doc.text.fill" : "doc.text")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(active ? Palette.accent : Palette.textTertiary)
+                    .frame(width: 16)
+                Text(key.title)
+                    .font(Typography.captionBold)
+                    .foregroundStyle(active ? Palette.textPrimary : Palette.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if overridden {
+                    Circle().fill(Palette.accent).frame(width: 6, height: 6)
+                        .help("Düzenlendi")
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(active ? Palette.surfaceElevated : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Detail
+
+    private var detail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                detailHeader
+                infoCard
+                editorCard
+            }
+            .padding(Spacing.xl)
+            .frame(maxWidth: 920, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var detailHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(selected.title)
+                    .font(Typography.titleSmall)
+                    .foregroundStyle(Palette.textPrimary)
+                if store.isOverridden(selected) {
+                    Text("DÜZENLENDİ")
+                        .font(.system(size: 9, weight: .bold)).tracking(0.5)
+                        .foregroundStyle(Palette.accent)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Capsule().fill(Palette.accent.opacity(0.14)))
+                }
+                Spacer(minLength: 0)
+            }
+            Text(selected.locationNote)
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var infoCard: some View {
+        if let note = selected.dynamicNote {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .padding(.top, 1)
+                Text(note)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.accent.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.accent.opacity(0.18), lineWidth: 0.5))
+        }
+    }
+
+    private var editorCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("PROMPT METNİ")
+                    .font(Typography.label).tracking(0.6)
+                    .foregroundStyle(Palette.textTertiary)
+                Spacer()
+                Text("\(draft.count) karakter")
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+
+            TextEditor(text: $draft)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(Palette.textPrimary)
+                .scrollContentBackground(.hidden)
+                .padding(12)
+                .frame(minHeight: 420)
+                .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
+
+            actionRow
+        }
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 10) {
+            Button { save() } label: {
+                Label(savedFlash ? "Kaydedildi" : "Kaydet", systemImage: savedFlash ? "checkmark" : "tray.and.arrow.down")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(isDirty ? Palette.background : Palette.textTertiary)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(isDirty ? Palette.accent : Palette.surfaceElevated))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isDirty)
+
+            Button { copyDraft() } label: {
+                Label("Kopyala", systemImage: "doc.on.doc")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(Palette.textSecondary)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(Palette.surfaceElevated))
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 0)
+
+            Button { showResetConfirm = true } label: {
+                Label("Varsayılana dön", systemImage: "arrow.uturn.backward")
+                    .font(Typography.captionBold)
+                    .foregroundStyle(differsFromDefault ? Palette.negative : Palette.textTertiary)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(Palette.surfaceElevated))
+            }
+            .buttonStyle(.plain)
+            .disabled(!store.isOverridden(selected) && !differsFromDefault)
+            .confirmationDialog("Varsayılana dönülsün mü?", isPresented: $showResetConfirm, titleVisibility: .visible) {
+                Button("Varsayılana dön", role: .destructive) { resetToDefault() }
+                Button("İptal", role: .cancel) {}
+            } message: {
+                Text("Bu prompttaki değişikliklerin silinir, fabrika metni geri gelir.")
+            }
+        }
+    }
+
+    // MARK: Actions
+
+    private func save() {
+        store.setOverride(selected, draft)
+        draft = store.text(selected)
+        savedFlash = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { savedFlash = false }
+    }
+
+    private func resetToDefault() {
+        store.resetToDefault(selected)
+        draft = selected.defaultText
+    }
+
+    private func copyDraft() {
+        #if canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(draft, forType: .string)
+        #endif
     }
 }
 

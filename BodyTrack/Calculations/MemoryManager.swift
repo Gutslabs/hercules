@@ -18,7 +18,7 @@ final class MemoryManager {
         let client = AIKeyStore.shared.makeClient()
 
         do {
-            let raw = try await client.complete(systemPrompt: Self.systemPrompt, userPrompt: prompt)
+            let raw = try await client.complete(systemPrompt: PromptStore.shared.text(.memoryExtraction), userPrompt: prompt)
             if let ops = Self.parseOperations(raw, candidates: candidates) {
                 // ops boş olabilir: LLM "tutulacak kalıcı bilgi yok" dedi → saygı duy.
                 provider.applyLLMOperations(ops)
@@ -61,7 +61,7 @@ final class MemoryManager {
         let prompt = Self.buildConsolidationPrompt(candidates)
         let client = AIKeyStore.shared.makeClient()
         do {
-            let raw = try await client.complete(systemPrompt: Self.consolidationSystemPrompt, userPrompt: prompt)
+            let raw = try await client.complete(systemPrompt: PromptStore.shared.text(.memoryConsolidation), userPrompt: prompt)
             if let ops = Self.parseOperations(raw, candidates: candidates) {
                 provider.applyLLMOperations(ops)
             }
@@ -124,7 +124,7 @@ final class MemoryManager {
 
     // MARK: - Prompt
 
-    private static let systemPrompt = """
+    static let memoryExtractionDefault = """
     Sen Hercules adlı Türkçe, bilim temelli bodybuilding koçu uygulamasının HAFIZA YÖNETİCİSİSİN.
     Görevin: kullanıcı ile koç arasındaki SON konuşmadan, uzun vadeli hafızada tutulmaya değer
     KALICI ve KULLANICIYA ÖZEL bilgileri çıkarmak ve mevcut hafızayla karşılaştırıp operasyon üretmek.
@@ -187,7 +187,7 @@ final class MemoryManager {
         """
     }
 
-    private static let consolidationSystemPrompt = """
+    static let memoryConsolidationDefault = """
     Sen Hercules hafıza yöneticisinin KONSOLİDASYON modusun. Sana kullanıcının uzun
     vadeli hafıza kayıtları (M1..Mn) veriliyor. Görevin: gereksiz tekrarları, çelişkileri
     ve parçalanmış bilgileri temizleyerek hafızayı derli toplu tutmak.

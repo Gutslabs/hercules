@@ -26,6 +26,8 @@ struct WorkoutScheduleCard: View {
                 Text("\(workouts.count) gün · \(Fmt.int(totalCalories)) kcal/hafta")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
             VStack(spacing: 1) {
                 ForEach(1...7, id: \.self) { weekday in
@@ -95,6 +97,8 @@ struct WorkoutRow: View {
             Text(WorkoutSession.weekdayName(weekday))
                 .font(Typography.body)
                 .foregroundStyle(workout != nil ? Palette.textPrimary : Palette.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .frame(width: 90, alignment: .leading)
 
             if let w = workout {
@@ -102,10 +106,13 @@ struct WorkoutRow: View {
                     .font(Typography.body)
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Spacer(minLength: 0)
                 Text("\(Fmt.int(w.estimatedCalories)) kcal")
                     .font(Typography.mono)
                     .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 Button {
                     onDelete(w)
                 } label: {

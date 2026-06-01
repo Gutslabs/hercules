@@ -38,9 +38,13 @@ struct WorkoutHeaderSignal: View {
                     Text(value)
                         .font(Typography.monoLarge)
                         .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                     Text(detail)
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
             }
             .frame(minWidth: 70, alignment: .leading)
@@ -74,9 +78,13 @@ struct ProgramSummaryDatum: View {
                 Text(value)
                     .font(Typography.mono)
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text(unit)
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
         }
         .frame(minWidth: 66, alignment: .leading)
@@ -287,6 +295,7 @@ struct WorkoutProgramDayCard: View {
                         .font(Typography.captionBold)
                         .foregroundStyle(Palette.textPrimary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
 
                     if let sourceURL = exercise.sourceURL,
                        let url = URL(string: sourceURL) {
@@ -316,6 +325,8 @@ struct WorkoutProgramDayCard: View {
         Text(text)
             .font(Typography.caption)
             .foregroundStyle(Palette.textSecondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .background(Capsule().fill(Color.white.opacity(0.055)))

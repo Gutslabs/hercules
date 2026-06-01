@@ -184,9 +184,7 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 hero
                 identityCard
-                activityGoalCards
                 aboutCard
-                supplementsCard
                 calorieGoalCard
                 HealthKitCard()
             }
@@ -200,18 +198,14 @@ struct ProfileView: View {
                     hero
                         .frame(maxWidth: .infinity, minHeight: 330)
                         .layoutPriority(1)
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        identityCard
-                        activityGoalCards
-                    }
-                    .frame(width: sideWidth)
+                    identityCard
+                        .frame(width: sideWidth)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(alignment: .top, spacing: Spacing.md) {
                     VStack(alignment: .leading, spacing: Spacing.md) {
                         aboutCard
-                        supplementsCard
                         HealthKitCard()
                     }
                     .frame(maxWidth: .infinity)
@@ -259,6 +253,8 @@ struct ProfileView: View {
                 Text("\(ageYears) yaş")
                     .font(Typography.mono)
                     .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
 
             LazyVGrid(
@@ -299,19 +295,6 @@ struct ProfileView: View {
         }
         .padding(Spacing.lg)
         .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
-    }
-
-    private var activityGoalCards: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: Spacing.md) {
-                ActivityPicker(selection: $activity)
-                GoalPicker(selection: $goal)
-            }
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                ActivityPicker(selection: $activity)
-                GoalPicker(selection: $goal)
-            }
-        }
     }
 
     /// Hakkında — kullanıcının kendi geçmişini özetlediği, AI'ya her sohbette
@@ -379,15 +362,10 @@ struct ProfileView: View {
                 contextChip("@Beslenme")
                 Spacer(minLength: 0)
             }
-        }
-        .padding(Spacing.lg)
-        .profilePanel(cornerRadius: Radius.xl, fill: Palette.surface)
-    }
 
-    /// Supplements — kullanıcının düzenli aldığı destekler, AI'ya kalıcı
-    /// context olarak verilen ayrı profil bilgisi.
-    private var supplementsCard: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
+            Hairline()
+
+            // Kullandıklarım (supplements) — ayrı section yerine Hakkımda içinde.
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Supplements").eyebrow()
@@ -412,6 +390,11 @@ struct ProfileView: View {
                 )
             }
 
+            Text("Düzenli aldığın destekler — AI'ya her sohbette kalıcı context olarak verilir.")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
             if !supplementItems.isEmpty {
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 120), spacing: 7, alignment: .leading)],
@@ -428,7 +411,7 @@ struct ProfileView: View {
                 .scrollContentBackground(.hidden)
                 .font(Typography.body)
                 .foregroundStyle(Palette.textPrimary)
-                .frame(minHeight: 118)
+                .frame(minHeight: 110)
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
@@ -583,6 +566,8 @@ struct ProfileView: View {
                             .font(Typography.body)
                             .foregroundStyle(Palette.textTertiary)
                     }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
 
                     LazyVGrid(
                         columns: [GridItem(.adaptive(minimum: 104), spacing: Spacing.lg, alignment: .leading)],
@@ -627,6 +612,8 @@ struct ProfileView: View {
             Text(value)
                 .font(Typography.mono)
                 .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
     }
 
@@ -652,6 +639,8 @@ struct ProfileView: View {
                 Text("\(Fmt.int(grams))")
                     .font(Typography.hero(22))
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text("g")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
@@ -659,6 +648,7 @@ struct ProfileView: View {
                 Text("%\(Fmt.int(percent))")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
             }
         }
         .padding(Spacing.md)
@@ -750,6 +740,8 @@ struct ProfileView: View {
                 Text("\(Fmt.int(calories)) kcal")
                     .font(Typography.captionBold)
                     .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
 
             GeometryReader { geo in
@@ -777,6 +769,8 @@ struct ProfileView: View {
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
                 }
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity)
 
                 macroAdjustButton(systemName: "plus", disabled: false) {
@@ -826,6 +820,8 @@ struct ProfileView: View {
                 Text(value)
                     .font(Typography.mono)
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             Spacer(minLength: 0)
         }
@@ -1010,7 +1006,9 @@ struct ProfileView: View {
                         .foregroundStyle(Palette.textTertiary)
                         .padding(.bottom, 6)
                 }
-                Text("\(activity.label) · \(goal.detail)")
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                Text("P \(Fmt.int(result.protein.grams)) · K \(Fmt.int(result.carbs.grams)) · Y \(Fmt.int(result.fat.grams)) g")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(2)
@@ -1042,6 +1040,8 @@ struct ProfileView: View {
             Text(value)
                 .font(Typography.captionBold)
                 .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -1085,10 +1085,12 @@ struct ProfileView: View {
                 .font(Typography.hero(24))
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(secondary)
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textTertiary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
     }
 

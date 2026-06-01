@@ -27,6 +27,8 @@ struct AIProviderCard: View {
                 Text(model)
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
             HStack(spacing: Spacing.sm) {

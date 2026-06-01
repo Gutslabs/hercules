@@ -292,10 +292,13 @@ private struct SelectionCallout: View {
                 Text(Fmt.num(point.value))
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 if !unit.isEmpty {
                     Text(unit)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
                 }
             }
         }

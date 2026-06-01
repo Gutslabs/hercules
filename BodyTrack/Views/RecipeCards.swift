@@ -58,6 +58,7 @@ struct RecipeSpotlightCard: View {
                     HStack(spacing: Spacing.sm) {
                         infoChip(icon: "list.bullet", text: "\(ingredientCount) malzeme")
                         infoChip(icon: "flame", text: "\(instructionCount) adım")
+                        infoChip(icon: "calendar", text: Fmt.date.string(from: recipe.createdAt))
                         if let host = sourceHost {
                             infoChip(icon: "link", text: host)
                         }
@@ -347,6 +348,10 @@ struct RecipeLibraryCard: View {
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(Palette.warning)
                         }
+                        Spacer(minLength: 6)
+                        Text(Fmt.date.string(from: recipe.createdAt))
+                            .font(Typography.micro)
+                            .foregroundStyle(Palette.textTertiary)
                     }
                     Text(recipe.title)
                         .font(Typography.titleSmall)

@@ -208,6 +208,8 @@ struct WorkoutLogEditor: View {
                                 .font(Typography.caption)
                                 .foregroundStyle(Palette.textTertiary)
                                 .textCase(nil)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         }
                     }
                 }

@@ -47,6 +47,7 @@ struct FocusChartPanel: View {
                         Text(kind.unit)
                             .font(Typography.caption)
                             .foregroundStyle(Palette.textTertiary)
+                            .lineLimit(1)
                     }
                 }
             }
@@ -278,6 +279,7 @@ struct MetricSignalButton: View {
                     Text(kind.unit)
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
                 }
 
                 Text(deltaLine)
@@ -357,6 +359,7 @@ struct ChartTile: View {
                             Text(kind.unit)
                                 .font(Typography.caption)
                                 .foregroundStyle(Palette.textTertiary)
+                                .lineLimit(1)
                         }
 
                         Image(systemName: isFocused ? "scope" : "plus.viewfinder")

@@ -376,13 +376,17 @@ struct MessageBubble: View {
                     .foregroundStyle(ChatChrome.tertiary)
                     .padding(.bottom, 2)
                 }
-                // Streaming sırasında satır sonunda blinking cursor.
+                // Streaming sırasında satır sonunda blinking cursor (ham metin — token
+                // başına markdown parse etmemek için). Bitince markdown'a render edilir.
                 if isStreaming && !turn.text.isEmpty {
                     Text(turn.text + " ▍")
                         .font(Typography.body)
                         .foregroundStyle(ChatChrome.primary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
+                } else if turn.role == .assistant && !turn.text.isEmpty {
+                    MarkdownText(text: turn.text)
+                        .textSelection(.enabled)
                 } else {
                     Text(turn.text)
                         .font(Typography.body)
@@ -688,5 +692,216 @@ struct FloatingChatButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Kalori Asistanı")
+    }
+}
+
+// MARK: - Markdown rendering (AI cevapları için)
+
+/// Hafif blok-seviyesi markdown render'ı: başlık / madde listesi / numaralı liste /
+/// kod bloğu / alıntı / paragraf. Satır-içi (kalın, italik, `kod`, [link](url))
+/// AttributedString ile çözülür. Streaming bitince çağrılır (token başına değil).
+struct MarkdownText: View {
+    let text: String
+    var baseFont: Font = Typography.body
+
+    private enum Block {
+        case heading(level: Int, text: String)
+        case paragraph(String)
+        case bullet([String])
+        case numbered([String])
+        case code(String)
+        case quote(String)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(parseBlocks(text).enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: Block) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(inline(text))
+                .font(headingFont(level))
+                .foregroundStyle(ChatChrome.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, level <= 2 ? 2 : 0)
+        case .paragraph(let text):
+            Text(inline(text))
+                .font(baseFont)
+                .foregroundStyle(ChatChrome.primary)
+                .tint(ChatChrome.accent)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        case .bullet(let items):
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("•").font(baseFont).foregroundStyle(ChatChrome.tertiary)
+                        Text(inline(item)).font(baseFont).foregroundStyle(ChatChrome.primary)
+                            .tint(ChatChrome.accent)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        case .numbered(let items):
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(idx + 1).")
+                            .font(baseFont).fontWeight(.semibold).monospacedDigit()
+                            .foregroundStyle(ChatChrome.tertiary)
+                        Text(inline(item)).font(baseFont).foregroundStyle(ChatChrome.primary)
+                            .tint(ChatChrome.accent)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        case .code(let code):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(ChatChrome.secondary)
+                    .textSelection(.enabled)
+                    .padding(10)
+            }
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(ChatChrome.background))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.5))
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1).fill(ChatChrome.accent.opacity(0.55)).frame(width: 2.5)
+                Text(inline(text)).font(baseFont).italic()
+                    .foregroundStyle(ChatChrome.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1:  return .system(size: 17, weight: .bold)
+        case 2:  return .system(size: 15, weight: .bold)
+        default: return .system(size: 13.5, weight: .semibold)
+        }
+    }
+
+    private func inline(_ s: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            allowsExtendedAttributes: true,
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+        if let attr = try? AttributedString(markdown: s, options: options) {
+            return attr
+        }
+        return AttributedString(s)
+    }
+
+    // MARK: Parser
+
+    private func parseBlocks(_ text: String) -> [Block] {
+        var blocks: [Block] = []
+        let lines = text.components(separatedBy: "\n")
+        var i = 0
+        var paragraph: [String] = []
+
+        func flushParagraph() {
+            if !paragraph.isEmpty {
+                blocks.append(.paragraph(paragraph.joined(separator: " ")))
+                paragraph = []
+            }
+        }
+
+        while i < lines.count {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+
+            if line.hasPrefix("```") {
+                flushParagraph()
+                var code: [String] = []
+                i += 1
+                while i < lines.count, !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                    code.append(lines[i]); i += 1
+                }
+                i += 1 // kapanış fence
+                blocks.append(.code(code.joined(separator: "\n")))
+                continue
+            }
+            if line.isEmpty {
+                flushParagraph(); i += 1; continue
+            }
+            if let level = headingLevel(line) {
+                flushParagraph()
+                let txt = String(line.drop(while: { $0 == "#" })).trimmingCharacters(in: .whitespaces)
+                blocks.append(.heading(level: level, text: txt))
+                i += 1; continue
+            }
+            if isBullet(line) {
+                flushParagraph()
+                var items: [String] = []
+                while i < lines.count {
+                    let l = lines[i].trimmingCharacters(in: .whitespaces)
+                    if isBullet(l) { items.append(stripBullet(l)); i += 1 } else { break }
+                }
+                blocks.append(.bullet(items)); continue
+            }
+            if isNumbered(line) {
+                flushParagraph()
+                var items: [String] = []
+                while i < lines.count {
+                    let l = lines[i].trimmingCharacters(in: .whitespaces)
+                    if isNumbered(l) { items.append(stripNumber(l)); i += 1 } else { break }
+                }
+                blocks.append(.numbered(items)); continue
+            }
+            if line.hasPrefix(">") {
+                flushParagraph()
+                var quote: [String] = []
+                while i < lines.count {
+                    let l = lines[i].trimmingCharacters(in: .whitespaces)
+                    if l.hasPrefix(">") {
+                        quote.append(String(l.dropFirst()).trimmingCharacters(in: .whitespaces)); i += 1
+                    } else { break }
+                }
+                blocks.append(.quote(quote.joined(separator: " "))); continue
+            }
+            paragraph.append(line); i += 1
+        }
+        flushParagraph()
+        return blocks
+    }
+
+    private func headingLevel(_ line: String) -> Int? {
+        guard line.hasPrefix("#") else { return nil }
+        let hashes = line.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(hashes), line.dropFirst(hashes).first == " " else { return nil }
+        return min(hashes, 3)
+    }
+    private func isBullet(_ line: String) -> Bool {
+        line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("• ") || line.hasPrefix("+ ")
+    }
+    private func stripBullet(_ line: String) -> String {
+        for p in ["- ", "* ", "• ", "+ "] where line.hasPrefix(p) {
+            return String(line.dropFirst(p.count)).trimmingCharacters(in: .whitespaces)
+        }
+        return line
+    }
+    private func isNumbered(_ line: String) -> Bool {
+        var idx = line.startIndex
+        var digits = 0
+        while idx < line.endIndex, line[idx].isNumber { idx = line.index(after: idx); digits += 1 }
+        guard digits > 0, idx < line.endIndex, line[idx] == "." || line[idx] == ")" else { return false }
+        let next = line.index(after: idx)
+        return next < line.endIndex && line[next] == " "
+    }
+    private func stripNumber(_ line: String) -> String {
+        guard let sep = line.firstIndex(where: { $0 == "." || $0 == ")" }) else { return line }
+        return String(line[line.index(after: sep)...]).trimmingCharacters(in: .whitespaces)
     }
 }

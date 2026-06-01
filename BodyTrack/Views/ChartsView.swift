@@ -202,6 +202,8 @@ struct ChartsView: View {
                 Text("\(activeSeries)/\(visibleKinds.count)")
                     .font(Typography.monoLarge)
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
         }
         .padding(.horizontal, 14)

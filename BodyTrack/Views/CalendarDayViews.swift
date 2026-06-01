@@ -85,6 +85,8 @@ struct DayCell: View {
                             Text("\(Fmt.num(g.targetWeight, digits: 1)) kg")
                                 .font(.system(size: 9.5, weight: .medium))
                                 .monospacedDigit()
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                         .foregroundStyle(Palette.textSecondary)
                         .padding(.horizontal, 6)
@@ -102,6 +104,8 @@ struct DayCell: View {
                                 .font(.system(size: 14, weight: .medium, design: .default))
                                 .monospacedDigit()
                                 .foregroundStyle(Palette.textPrimary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
                         } else {
                             Text("—")
                                 .font(.system(size: 14, weight: .regular))
@@ -110,6 +114,7 @@ struct DayCell: View {
                         Text("kcal")
                             .font(.system(size: 9))
                             .foregroundStyle(Palette.textQuaternary)
+                            .lineLimit(1)
                     }
                     // mini progress
                     GeometryReader { geo in
@@ -199,6 +204,8 @@ struct GoalRoadmapRow: View {
                     Text("\(Fmt.num(goal.targetWeight, digits: 1)) kg")
                         .font(Typography.titleSmall)
                         .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
 
                 Spacer(minLength: Spacing.sm)

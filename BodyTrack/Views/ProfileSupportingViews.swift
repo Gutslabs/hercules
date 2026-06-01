@@ -260,9 +260,13 @@ struct NumberField: View {
                 .textFieldStyle(.plain)
                 .font(Typography.monoLarge)
                 .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(unit)
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
@@ -295,9 +299,13 @@ struct ActivityPicker: View {
                     Text(selection.label)
                         .font(Typography.bodyBold)
                         .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Text("×\(Fmt.num(selection.multiplier, digits: 2)) çarpan")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down")
@@ -348,6 +356,8 @@ struct GoalPicker: View {
                     Text(selection.label)
                         .font(Typography.bodyBold)
                         .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Text(selection.detail)
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)

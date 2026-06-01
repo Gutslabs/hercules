@@ -499,6 +499,27 @@ final class ChatStore {
     }
 
 
+    /// Rail'den tek bir konuşmayı sil. Yalnızca chat-history JSON'una dokunur
+    /// (SwiftData store'a HİÇ dokunmaz). Silinen aktif konuşmaysa bir sonrakine geçer.
+    func deleteConversation(_ id: UUID) {
+        guard !isSending else { return }
+        let wasCurrent = (id == currentConversationID)
+        conversations.removeAll { $0.id == id }
+        if wasCurrent {
+            if let next = conversationList.first {
+                currentConversationID = next.id
+                messages = Self.cleanMessages(next.messages)
+            } else {
+                startBlankConversation()
+            }
+            input = ""
+            lastError = nil
+            searchingFor = nil
+            lastUsedUserData = false
+        }
+        persistHistory()
+    }
+
     func clear() {
         guard !isSending else { return }
         if let currentConversationID {
