@@ -7,9 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		039B8A4EAFE2BAC1BF6129C2 /* AnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */; };
 		14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69080015CD65428F38FBE30D /* CoachEngine.swift */; };
 		267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35726FCF0FBDC3D66BE44300 /* CoachView.swift */; };
 		47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */; };
+		4DAB83858007EDAADF3847E0 /* FeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */; };
+		75E12D5F0E82164A8F2BD91F /* ScienceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160926E15F1C6C72BED8B379 /* ScienceEngine.swift */; };
+		85486C8CE6B3C0505C77A9A8 /* FeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */; };
 		8C40856532782361B5BF4D39 /* CoachReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECE97950CA296909313971EE /* CoachReport.swift */; };
 		A24E00000000000000000040 /* BodyTrackApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000021 /* BodyTrackApp.swift */; };
 		A24E00000000000000000041 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000022 /* ContentView.swift */; };
@@ -122,8 +126,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		160926E15F1C6C72BED8B379 /* ScienceEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceEngine.swift; sourceTree = "<group>"; };
 		35726FCF0FBDC3D66BE44300 /* CoachView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
+		4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnalysisView.swift; sourceTree = "<group>"; };
 		69080015CD65428F38FBE30D /* CoachEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachEngine.swift; sourceTree = "<group>"; };
+		9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FeedStore.swift; sourceTree = "<group>"; };
 		A24E00000000000000000020 /* Hercules.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hercules.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A24E00000000000000000021 /* BodyTrackApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyTrackApp.swift; sourceTree = "<group>"; };
 		A24E00000000000000000022 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -316,6 +323,8 @@
 				A24E00000000000000000085 /* ResearchLibrary.swift */,
 				A24E00000000000000000089 /* CoachIntelligence.swift */,
 				69080015CD65428F38FBE30D /* CoachEngine.swift */,
+				160926E15F1C6C72BED8B379 /* ScienceEngine.swift */,
+				9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */,
 			);
 			path = Calculations;
 			sourceTree = "<group>";
@@ -362,6 +371,7 @@
 				A24E00000000000000000009 /* Components */,
 				35726FCF0FBDC3D66BE44300 /* CoachView.swift */,
 				B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */,
+				4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -600,6 +610,9 @@
 				14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */,
 				267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */,
 				47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */,
+				75E12D5F0E82164A8F2BD91F /* ScienceEngine.swift in Sources */,
+				039B8A4EAFE2BAC1BF6129C2 /* AnalysisView.swift in Sources */,
+				85486C8CE6B3C0505C77A9A8 /* FeedStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -632,6 +645,7 @@
 				A24E0000000000000000EE61 /* PersistenceSupport.swift in Sources */,
 				A24E000000000000000000D2 /* CodexAuth.swift in Sources */,
 				A24E000000000000000000D3 /* CodexClient.swift in Sources */,
+				4DAB83858007EDAADF3847E0 /* FeedStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

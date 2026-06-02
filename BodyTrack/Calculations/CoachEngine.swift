@@ -118,7 +118,9 @@ enum CoachEngine {
         let appContext = UserContextSnapshot.coachContext(for: prompt, explicitTags: allTags, ctx: ctx)
         let data = AgentDataSnapshot.make(ctx: ctx, scope: .full())
         let skill = await AgentRouter.shared.buildSkillContext(query: prompt, appContext: appContext, history: [], dataSnapshot: data)
-        let fullContext = [appContext, skill].compactMap { $0 }.joined(separator: "\n\n")
+        // Deterministik bilim verisi (adaptif TDEE + hacim) — AI uydurmasın, hesaplanmışı kullansın.
+        let science = scienceContext(ctx: ctx)
+        let fullContext = [appContext, skill, science].compactMap { $0 }.joined(separator: "\n\n")
 
         let (result, _) = try await AIKeyStore.shared.makeClient().send(
             history: [],
@@ -166,6 +168,35 @@ enum CoachEngine {
         ctx.saveOrReport()
         BackupService.shared.exportAsync(from: ctx)
         return report
+    }
+
+    /// ScienceEngine'den hesaplanan gerçek metabolizma + hacim özetini koç bağlamına ekler.
+    /// AI bunları UYDURMAZ; doğrudan kullanır (adaptif TDEE, trend kilo, hız, hacim açıkları).
+    private static func scienceContext(ctx: ModelContext) -> String? {
+        let measurements = (try? ctx.fetch(FetchDescriptor<Measurement>())) ?? []
+        let foods = (try? ctx.fetch(FetchDescriptor<FoodEntry>())) ?? []
+        let workouts = (try? ctx.fetch(FetchDescriptor<WorkoutLog>())) ?? []
+
+        guard let e = ScienceEngine.bestAdaptiveEnergy(measurements: measurements, foods: foods) else {
+            return nil
+        }
+
+        var lines: [String] = ["[HESAPLANMIŞ BİLİM VERİSİ — bu sayıları uydurma, doğrudan kullan]"]
+        lines.append("Adaptif TDEE (enerji dengesinden çözülmüş gerçek bakım): \(Int(e.adaptiveTDEE.rounded())) kcal/gün — güven: \(e.confidence.label).")
+        lines.append(String(
+            format: "Trend kilo %.1f kg; haftalık değişim %+.2f kg (%+.2f%%/hafta); ort. alım %d kcal/gün (%d kayıtlı gün).",
+            e.trendWeightNow, e.slopeKgPerWeek, e.ratePercentPerWeek, Int(e.avgIntake.rounded()), e.loggedDays
+        ))
+
+        let vols = ScienceEngine.weeklyVolume(workouts: workouts)
+        let under = vols.filter { $0.sets > 0 && $0.status == .under }.map(\.muscle.label)
+        let over = vols.filter { $0.status == .over }.map(\.muscle.label)
+        let untrained = vols.filter { $0.sets == 0 }.map(\.muscle.label)
+        if !under.isEmpty { lines.append("Haftalık hacmi MEV altında (az çalışılan) kaslar: \(under.joined(separator: ", ")).") }
+        if !over.isEmpty { lines.append("MRV üstü (fazla, toparlanma riski) kaslar: \(over.joined(separator: ", ")).") }
+        if !untrained.isEmpty { lines.append("Son 7 günde hiç çalışılmamış kaslar: \(untrained.joined(separator: ", ")).") }
+
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Günlük tarif (internetten araştırılmış, kaynaklı)

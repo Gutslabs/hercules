@@ -16,6 +16,9 @@ struct MobileRootView: View {
     @Query(sort: \Recipe.createdAt, order: .reverse) private var recipes: [Recipe]
     @Query(sort: \FoodPreset.sortOrder) private var presets: [FoodPreset]
 
+    /// Mac'ten gelen "Telefona gönder" feed'i (@Observable → akış/badge reaktif).
+    private let feedStore = FeedStore.shared
+
     @State private var selectedTab: MobileTab = .dashboard
     @State private var showVaultImporter = false
     @State private var showRestoreConfirm = false
@@ -184,6 +187,8 @@ struct MobileRootView: View {
         switch selectedTab {
         case .dashboard:
             mobilePage { dashboardPage }
+        case .feed:
+            mobilePage { feedPage }
         case .nutrition:
             mobilePage { nutritionPage }
         case .workout:
@@ -208,6 +213,16 @@ struct MobileRootView: View {
                     VStack(spacing: 4) {
                         Image(systemName: tab.systemImage)
                             .font(.system(size: 18, weight: .semibold))
+                            .overlay(alignment: .topTrailing) {
+                                if tab == .feed, feedStore.unseenCount > 0 {
+                                    Text("\(min(feedStore.unseenCount, 9))")
+                                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.white)
+                                        .frame(minWidth: 15, minHeight: 15)
+                                        .background(Circle().fill(Palette.accent))
+                                        .offset(x: 9, y: -6)
+                                }
+                            }
                         Text(tab.shortTitle)
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .lineLimit(1)
@@ -249,6 +264,72 @@ struct MobileRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.background.ignoresSafeArea())
+    }
+
+    // MARK: - Akış (Mac'ten gelen feed)
+
+    private var feedPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if feedStore.items.isEmpty {
+                feedEmpty
+            } else {
+                ForEach(feedStore.items) { feedCard($0) }
+            }
+        }
+        .task {
+            await BackupService.shared.autoSyncWithVault(into: ctx)
+            feedStore.markAllSeen()
+        }
+    }
+
+    private func feedCard(_ item: FeedItem) -> some View {
+        MobileCard {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 7) {
+                    Image(systemName: item.kind == "recipe" ? "fork.knife" : "laptopcomputer")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Palette.accent)
+                    Text(item.source == "Mac" ? "Mac Hercules" : item.source)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(Palette.accent)
+                    Spacer(minLength: 0)
+                    Text(Fmt.relative(item.createdAt))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                if !item.title.isEmpty {
+                    Text(item.title)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(item.body)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var feedEmpty: some View {
+        MobileCard {
+            VStack(spacing: 10) {
+                Image(systemName: "tray")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(Palette.textTertiary)
+                Text("Akış boş")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("Mac Hercules'te bir sohbet mesajında \"Telefona gönder\"e bas — burada feed gibi belirir.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+        }
     }
 
     private var dashboardPage: some View {

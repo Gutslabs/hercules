@@ -56,7 +56,8 @@ final class BackupService {
     private static let supportFileNames = [
         "chat-history.json",
         "agent-memory.json",
-        "research-library.json"
+        "research-library.json",
+        FeedStore.fileName            // Mac→telefon feed akışı (union-merge ile)
     ]
 
     private static let preferenceKeys = [
@@ -1269,11 +1270,19 @@ final class BackupService {
         let dir = supportDirectoryURL
         if mode == .replaceAll {
             Self.supportFileNames.forEach { name in
+                // Feed APPEND-ONLY: replaceAll'da bile silme — union-merge ile korunur.
+                guard name != FeedStore.fileName else { return }
                 try? fm.removeItem(at: dir.appendingPathComponent(name))
             }
         }
 
         for file in files where Self.supportFileNames.contains(file.name) {
+            // Feed dosyası whole-file ezilmez; id bazında BİRLEŞTİRİLİR (saat kayması /
+            // çift-yönlü sync'te öğe kaybını önler). Okundu durumu yerel kalır.
+            if file.name == FeedStore.fileName {
+                FeedStore.shared.mergeIncoming(file.data)
+                continue
+            }
             let destination = dir.appendingPathComponent(file.name)
             if mode == .mergeAdditive, fm.fileExists(atPath: destination.path) {
                 continue
@@ -1673,6 +1682,14 @@ extension BackupService {
         // 15) durumu güncelle
         saveTombstones(tombs)
         saveLastSyncedKeys(currentKeysAndTimestamps(ctx: ctx).keys)
+
+        // 16) FEED — convergent merge support file'ları restore ETMEZ (sadece tam-import eder).
+        // Feed append-only olduğundan her sync'te güvenle union-merge edilir; böylece telefon
+        // rutin sync sırasında Mac'ten gelen Akış öğelerini görür (tam restore beklemeden).
+        if let feedFile = backup.supportFiles?.first(where: { $0.name == FeedStore.fileName }) {
+            FeedStore.shared.mergeIncoming(feedFile.data)
+        }
+
         AppLog.backup.notice("[Merge] union merge applied")
     }
 

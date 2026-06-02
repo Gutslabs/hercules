@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 enum MobileTab: Hashable, CaseIterable {
     case dashboard
+    case feed
     case nutrition
     case recipes
     case workout
@@ -14,6 +15,7 @@ enum MobileTab: Hashable, CaseIterable {
     var title: String {
         switch self {
         case .dashboard: return "Hercules"
+        case .feed: return "Akış"
         case .nutrition: return "Yemek"
         case .recipes: return "Tarifler"
         case .workout: return "Antrenman"
@@ -26,6 +28,7 @@ enum MobileTab: Hashable, CaseIterable {
     var shortTitle: String {
         switch self {
         case .dashboard: return "Bugün"
+        case .feed: return "Akış"
         case .nutrition: return "Yemek"
         case .recipes: return "Tarif"
         case .workout: return "Spor"
@@ -38,6 +41,7 @@ enum MobileTab: Hashable, CaseIterable {
     var eyebrow: String {
         switch self {
         case .dashboard: return "Mobil"
+        case .feed: return "Mac'ten"
         case .nutrition: return "Beslenme"
         case .recipes: return "Mutfak"
         case .workout: return "Program"
@@ -50,6 +54,7 @@ enum MobileTab: Hashable, CaseIterable {
     var systemImage: String {
         switch self {
         case .dashboard: return "house.fill"
+        case .feed: return "tray.and.arrow.down.fill"
         case .nutrition: return "fork.knife"
         case .recipes: return "book.closed.fill"
         case .workout: return "dumbbell.fill"

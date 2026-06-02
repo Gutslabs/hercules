@@ -18,9 +18,10 @@ struct ChatPageView: View {
     @State private var selectedMentionIndex: Int = 0
     @State private var dismissedAt: String? = nil
 
-    // Mesaj etkileşimleri: hover'da kopyala + zaman damgası
+    // Mesaj etkileşimleri: hover'da kopyala / telefona gönder + zaman damgası
     @State private var hoveredMessageID: UUID? = nil
     @State private var copiedMessageID: UUID? = nil
+    @State private var sharedMessageID: UUID? = nil
     // Akıllı oto-takip: kullanıcı yukarı kaydırıp okuyorsa typewriter onu geri çekmez
     @State private var autoFollow = true
     @State private var nearBottom = true
@@ -392,10 +393,11 @@ struct ChatPageView: View {
     /// Bubble altında zaman damgası + (hover'da) kopyala butonu — mesaj sahibine göre hizalı.
     private func metaRow(_ turn: ChatTurn) -> some View {
         let isUser = turn.role == .user
-        let showCopy = hoveredMessageID == turn.id || copiedMessageID == turn.id
-        return HStack(spacing: 8) {
+        let showActions = hoveredMessageID == turn.id || copiedMessageID == turn.id || sharedMessageID == turn.id
+        return HStack(spacing: 10) {
             if isUser { Spacer(minLength: 0) }
-            if showCopy { copyButton(turn) }
+            if showActions { shareButton(turn) }
+            if showActions { copyButton(turn) }
             Text(Fmt.timeShort.string(from: turn.createdAt))
                 .font(Typography.label)
                 .foregroundStyle(ChatChrome.quaternary)
@@ -404,7 +406,7 @@ struct ChatPageView: View {
         .padding(.leading, isUser ? 0 : 30)
         .padding(.trailing, isUser ? 2 : 0)
         .frame(maxWidth: .infinity)
-        .animation(.easeInOut(duration: 0.12), value: showCopy)
+        .animation(.easeInOut(duration: 0.12), value: showActions)
     }
 
     private func copyButton(_ turn: ChatTurn) -> some View {
@@ -435,6 +437,48 @@ struct ChatPageView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         #endif
+    }
+
+    // MARK: - Telefona gönder (mobil Akış feed'i)
+
+    private func shareButton(_ turn: ChatTurn) -> some View {
+        let shared = sharedMessageID == turn.id
+        return Button {
+            shareToPhone(turn)
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: shared ? "checkmark.circle.fill" : "iphone.and.arrow.forward")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(shared ? "Telefona gönderildi" : "Telefona gönder")
+                    .font(Typography.label)
+            }
+            .foregroundStyle(shared ? ChatChrome.positive : ChatChrome.tertiary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Telefondaki Hercules Akış sekmesine gönder")
+    }
+
+    private func shareToPhone(_ turn: ChatTurn) {
+        let convo = store.currentConversationTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasConvo = !convo.isEmpty && convo != "Yeni sohbet"
+        let title = hasConvo ? convo : String(turn.text.prefix(48))
+        let item = FeedItem(
+            title: title,
+            body: turn.text,
+            kind: turn.food != nil ? "recipe" : "chat",
+            source: "Mac",
+            conversationTitle: hasConvo ? convo : nil
+        )
+        FeedStore.shared.add(item)
+        // Vault'a it: feed dosyası support snapshot'a girer → mobil pull'da Akış'ta görür.
+        BackupService.shared.exportAsync(from: ctx)
+        Task { await BackupService.shared.autoSyncWithVault(into: ctx) }
+        sharedMessageID = turn.id
+        let id = turn.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            if sharedMessageID == id { sharedMessageID = nil }
+        }
     }
 
     // MARK: - Gün ayracı (Bugün / Dün / tarih)

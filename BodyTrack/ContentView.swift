@@ -7,7 +7,7 @@ import AppKit
 // MARK: - Navigation tabs
 
 enum NavTab: String, CaseIterable, Identifiable, Hashable {
-    case dashboard, measurements, charts, workout, calendar, recipes, coach, chat, memory, system, profile
+    case dashboard, measurements, charts, workout, analysis, calendar, recipes, coach, chat, memory, system, profile
     var id: String { rawValue }
 
     var label: String {
@@ -16,6 +16,7 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .measurements: return "Ölçümler"
         case .charts:       return "Grafikler"
         case .workout:      return "Antrenman"
+        case .analysis:     return "Analiz"
         case .calendar:     return "Takvim"
         case .recipes:      return "Tarifler"
         case .coach:        return "Koç"
@@ -32,6 +33,7 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .measurements: return "list.bullet"
         case .charts:       return "chart.xyaxis.line"
         case .workout:      return "dumbbell"
+        case .analysis:     return "gauge.medium"
         case .calendar:     return "calendar"
         case .recipes:      return "fork.knife"
         case .coach:        return "sparkles"
@@ -69,7 +71,7 @@ enum NavCategory: String, CaseIterable, Identifiable, Hashable {
 
     var tabs: [NavTab] {
         switch self {
-        case .takip:    return [.dashboard, .measurements, .charts, .workout]
+        case .takip:    return [.dashboard, .measurements, .charts, .workout, .analysis]
         case .beslenme: return [.calendar, .recipes]
         case .ai:       return [.coach, .chat]
         case .admin:    return [.memory, .system]
@@ -283,6 +285,7 @@ struct ContentView: View {
         case .measurements: MeasurementsView()
         case .charts:       ChartsView()
         case .workout:      WorkoutView()
+        case .analysis:     AnalysisView()
         case .calendar:     CalendarView()
         case .recipes:      RecipesView()
         case .coach:        CoachView()
