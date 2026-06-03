@@ -314,6 +314,8 @@ struct ChatPageView: View {
                 }
                 .coordinateSpace(name: Self.scrollSpace)
                 .background(ChatChrome.background)
+                .contentShape(Rectangle())
+                .onTapGesture { inputFocused = false }   // mesaj alanına tıkla → input focus bırak
                 .onPreferenceChange(ChatNearBottomKey.self) { value in
                     nearBottom = value
                     if value {

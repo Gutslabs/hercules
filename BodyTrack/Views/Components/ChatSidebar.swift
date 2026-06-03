@@ -560,6 +560,8 @@ struct ChatSidebar: View {
                         .padding(Spacing.lg)
                     }
                     .coordinateSpace(name: Self.chatScrollSpace)
+                    .contentShape(Rectangle())
+                    .onTapGesture { inputFocused = false }   // mesaj alanına tıkla → input focus bırak
                     .onPreferenceChange(ChatNearBottomKey.self) { nearBottom in
                         if nearBottom {
                             DispatchQueue.main.async {

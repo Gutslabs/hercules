@@ -152,6 +152,8 @@ struct BottomCenterChatDock: View {
                     .padding(12)
                 }
                 .coordinateSpace(name: Self.dockScrollSpace)
+                .contentShape(Rectangle())
+                .onTapGesture { inputFocused = false }   // mesaj alanına tıkla → input focus bırak
                 .onPreferenceChange(ChatNearBottomKey.self) { nearBottom in
                     if nearBottom {
                         DispatchQueue.main.async {

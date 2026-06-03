@@ -25,6 +25,12 @@ struct ProfileView: View {
     @State private var manualCarbsGrams: Double? = nil
     @State private var manualFatGrams: Double? = nil
 
+    @FocusState private var focusedField: ProfileField?
+    @State private var nameHovering = false
+    @State private var newSupplement = ""
+
+    private enum ProfileField: Hashable { case name, protein, carbs, fat }
+
     @State private var saved = false
     @State private var hasInitialized = false
     @State private var autosaveTask: Task<Void, Never>? = nil
@@ -59,6 +65,10 @@ struct ProfileView: View {
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, compact ? Spacing.xl : Spacing.xxl)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+                // Input DIŞINDA herhangi bir yere tıklayınca focus'u bırak (cursor kalmasın).
+                // Buton/TextField'lar kendi tıklamasını tüketir; non-interaktif her yer burayı tetikler.
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = nil }
             }
         }
         .background(profileBackground)
@@ -111,6 +121,8 @@ struct ProfileView: View {
                 .offset(x: -92, y: -48)
                 .allowsHitTesting(false)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { focusedField = nil }
     }
 
     private func profileActions(compact: Bool) -> some View {
@@ -395,68 +407,26 @@ struct ProfileView: View {
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if !supplementItems.isEmpty {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 120), spacing: 7, alignment: .leading)],
-                    alignment: .leading,
-                    spacing: 7
-                ) {
-                    ForEach(Array(supplementItems.enumerated()), id: \.offset) { _, item in
-                        supplementChip(item)
-                    }
+            ChatHintFlow(spacing: 7) {
+                ForEach(Array(supplementItems.enumerated()), id: \.offset) { _, item in
+                    removableSupplementChip(item)
                 }
+                addSupplementField
             }
 
-            TextEditor(text: $supplements)
-                .scrollContentBackground(.hidden)
-                .font(Typography.body)
-                .foregroundStyle(Palette.textPrimary)
-                .frame(minHeight: 110)
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .fill(Palette.surfaceElevated.opacity(0.82))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: 0.5)
-                )
-                .overlay(alignment: .topLeading) {
-                    if supplements.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Kreatin\nProtein tozu")
-                            .font(Typography.body)
-                            .foregroundStyle(Palette.textQuaternary)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 18)
-                            .allowsHitTesting(false)
-                    }
-                }
-
-            HStack(spacing: Spacing.sm) {
+            if supplementItems.isEmpty {
                 Button {
                     supplements = UserProfile.defaultSupplements
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 10, weight: .bold))
-                        Text("Kreatin + protein tozu")
-                            .font(Typography.captionBold)
+                    HStack(spacing: 5) {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Varsayılanları ekle (Kreatin + protein tozu)")
+                            .font(Typography.caption)
                     }
-                    .foregroundStyle(Palette.textSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.white.opacity(0.045))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(Palette.border, lineWidth: 0.5)
-                    )
+                    .foregroundStyle(Palette.accent)
                 }
                 .buttonStyle(.plain)
-                .help("Varsayılan supplement listesini doldur")
-                Spacer(minLength: 0)
             }
         }
         .padding(Spacing.lg)
@@ -474,6 +444,94 @@ struct ProfileView: View {
         let count = supplementItems.count
         if count == 0 { return "boş" }
         return "\(count) kayıt"
+    }
+
+    /// İsim alanı — net düzenlenebilir affordance (hover/focus arkaplanı + kalem/onay ikonu).
+    private var nameField: some View {
+        let isFocused = focusedField == .name
+        return HStack(spacing: 8) {
+            TextField("Adın", text: $name)
+                .textFieldStyle(.plain)
+                .font(Typography.display(34))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .focused($focusedField, equals: .name)
+                .onSubmit { focusedField = nil }
+            Image(systemName: isFocused ? "checkmark" : "pencil")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(isFocused ? Palette.positive : Palette.textTertiary)
+                .opacity(isFocused || nameHovering ? 1 : 0.4)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isFocused ? Palette.surfaceElevated : Color.white.opacity(nameHovering ? 0.05 : 0.022))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(isFocused ? Palette.accent.opacity(0.55) : Palette.border, lineWidth: isFocused ? 1.2 : 0.5)
+        )
+        .onHover { nameHovering = $0 }
+        .animation(.easeInOut(duration: 0.15), value: isFocused)
+        .animation(.easeInOut(duration: 0.15), value: nameHovering)
+    }
+
+    private func removableSupplementChip(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(Typography.captionBold)
+                .lineLimit(1)
+            Button {
+                removeSupplement(text)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(3)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Kaldır")
+        }
+        .foregroundStyle(Palette.textSecondary)
+        .padding(.leading, 10).padding(.trailing, 6).padding(.vertical, 6)
+        .background(Capsule(style: .continuous).fill(Palette.accent.opacity(0.10)))
+        .overlay(Capsule(style: .continuous).strokeBorder(Palette.accent.opacity(0.28), lineWidth: 0.5))
+    }
+
+    private var addSupplementField: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "plus")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Palette.textTertiary)
+            TextField("ekle", text: $newSupplement)
+                .textFieldStyle(.plain)
+                .font(Typography.captionBold)
+                .foregroundStyle(Palette.textPrimary)
+                .frame(width: 76)
+                .onSubmit { addSupplement() }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Capsule(style: .continuous).fill(Color.white.opacity(0.045)))
+        .overlay(Capsule(style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
+    }
+
+    private func addSupplement() {
+        let t = newSupplement.trimmingCharacters(in: .whitespacesAndNewlines)
+        newSupplement = ""
+        guard !t.isEmpty else { return }
+        var items = supplementItems
+        guard !items.contains(where: { $0.caseInsensitiveCompare(t) == .orderedSame }) else { return }
+        items.append(t)
+        supplements = items.joined(separator: "\n")
+    }
+
+    private func removeSupplement(_ text: String) {
+        supplements = supplementItems.filter { $0 != text }.joined(separator: "\n")
     }
 
     private func supplementChip(_ text: String) -> some View {
@@ -694,6 +752,7 @@ struct ProfileView: View {
             ) {
                 macroTargetStepper(
                     label: "Protein",
+                    field: .protein,
                     value: $manualProteinGrams,
                     automatic: r.protein.grams,
                     caloriesPerGram: 4,
@@ -702,6 +761,7 @@ struct ProfileView: View {
                 )
                 macroTargetStepper(
                     label: "Karbonhidrat",
+                    field: .carbs,
                     value: $manualCarbsGrams,
                     automatic: r.carbs.grams,
                     caloriesPerGram: 4,
@@ -710,6 +770,7 @@ struct ProfileView: View {
                 )
                 macroTargetStepper(
                     label: "Yağ",
+                    field: .fat,
                     value: $manualFatGrams,
                     automatic: r.fat.grams,
                     caloriesPerGram: 9,
@@ -722,6 +783,7 @@ struct ProfileView: View {
 
     private func macroTargetStepper(
         label: String,
+        field: ProfileField,
         value: Binding<Double?>,
         automatic: Double,
         caloriesPerGram: Double,
@@ -761,10 +823,18 @@ struct ProfileView: View {
                 }
 
                 HStack(alignment: .lastTextBaseline, spacing: 4) {
-                    Text("\(Fmt.int(grams))")
+                    // Tıklayıp elle değer yazılabilir (Enter / başka yere tıkla → uygulanır).
+                    TextField("", value: Binding<Double>(
+                        get: { (value.wrappedValue ?? automatic).rounded() },
+                        set: { value.wrappedValue = max(0, min(2000, $0.rounded())) }
+                    ), format: .number.precision(.fractionLength(0)))
+                        .textFieldStyle(.plain)
                         .font(Typography.hero(24))
                         .foregroundStyle(Palette.textPrimary)
-                        .contentTransition(.numericText(value: grams))
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize()
+                        .focused($focusedField, equals: field)
+                        .onSubmit { focusedField = nil }
                     Text("g")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textTertiary)
@@ -963,12 +1033,7 @@ struct ProfileView: View {
             ProfileAvatar(initial: initial, color: Palette.accent)
 
             VStack(alignment: .leading, spacing: 9) {
-                TextField("Adın", text: $name)
-                    .textFieldStyle(.plain)
-                    .font(Typography.display(38))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
+                nameField
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: Spacing.sm) {
                         profileFact("Yaş", "\(ageYears)")

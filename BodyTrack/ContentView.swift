@@ -164,6 +164,10 @@ struct ContentView: View {
                         .simultaneousGesture(TapGesture().onEnded {
                             resignAIChatInputFocus()
                         })
+                        // Input DIŞINDA bir yere tıklayınca metin alanı focus'unu bırak
+                        // (cursor kalmasın) — TÜM detay sayfaları için. Buton/TextField'lar
+                        // kendi tıklamasını tüketir; bu yalnızca non-interaktif tıklamada çalışır.
+                        .onTapGesture { dismissTextFocus() }
 
                     if chatOpen && chatPresentationMode == .sidebar {
                         ChatSidebar(
@@ -276,6 +280,15 @@ struct ContentView: View {
 
     private func resignAIChatInputFocus() {
         NotificationCenter.default.post(name: .aiChatShouldResignInputFocus, object: nil)
+    }
+
+    /// O an düzenlenen metin alanının (TextField/TextEditor) focus'unu bırakır — böylece
+    /// input dışına tıklayınca yanıp sönen cursor kalmaz. macOS first-responder'ı temizler;
+    /// her sayfa için tek noktadan, alan başına @FocusState gerektirmeden çalışır.
+    private func dismissTextFocus() {
+        #if canImport(AppKit)
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        #endif
     }
 
     @ViewBuilder
