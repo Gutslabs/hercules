@@ -13,6 +13,7 @@ struct MobileRootView: View {
     @Query(sort: \StepEntry.date, order: .reverse) private var steps: [StepEntry]
     @Query(sort: \WorkoutSession.weekday) private var workouts: [WorkoutSession]
     @Query(sort: \WorkoutProgramArchive.archivedAt, order: .reverse) private var archives: [WorkoutProgramArchive]
+    @Query(sort: \WorkoutLog.date, order: .reverse) private var workoutLogs: [WorkoutLog]
     @Query(sort: \Recipe.createdAt, order: .reverse) private var recipes: [Recipe]
     @Query(sort: \FoodPreset.sortOrder) private var presets: [FoodPreset]
 
@@ -357,21 +358,41 @@ struct MobileRootView: View {
         VStack(alignment: .leading, spacing: 14) {
             workoutWeekStrip
             summaryStrip([
-                ("Gün", "\(activeWorkouts.count)"),
-                ("Hareket", "\(activeWorkouts.reduce(0) { $0 + $1.sortedTemplateExercises.count })"),
+                ("Program", "\(activeWorkouts.count) gün"),
+                ("Log", "\(workoutLogs.count)"),
                 ("Arşiv", "\(archives.count)")
             ])
-            if activeWorkouts.isEmpty {
-                MobileCard {
-                    emptyText("Aktif program yok. Mac'tan ya da AI koçtan program ekleyebilirsin.")
-                }
-            } else {
+
+            // Haftalık program şablonu — Mac'teki "Aktif Program" gibi (ısınma + hareketler
+            // + link + set×tekrar·RIR·dinlenme + progression + not).
+            if !activeWorkouts.isEmpty {
+                mobileSectionHeader("Haftalık program")
                 ForEach(activeWorkouts, id: \.persistentModelID) { workout in
                     MobileCard {
                         workoutContent(workout, compact: false)
                     }
                 }
             }
+
+            // Loglanmış seanslar (set/tekrar/kg).
+            if !workoutLogs.isEmpty {
+                mobileSectionHeader("Son antrenmanlar")
+                ForEach(workoutLogs.prefix(12), id: \.persistentModelID) { log in
+                    MobileCard {
+                        workoutLogContent(log)
+                    }
+                }
+            }
+
+            if activeWorkouts.isEmpty && workoutLogs.isEmpty {
+                MobileCard {
+                    emptyText("Antrenman kaydı yok. Mac'tan loglayabilir ya da AI koçtan program ekleyebilirsin.")
+                }
+            }
+        }
+        // Spor sekmesi açılınca vault'tan çek → Mac'ten gelen program/loglar güncel olsun.
+        .task {
+            await BackupService.shared.autoSyncWithVault(into: ctx)
         }
     }
 
@@ -1955,6 +1976,62 @@ struct MobileRootView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: Radius.md).fill(Palette.surfaceElevated))
+    }
+
+    private func mobileSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(Typography.label)
+            .foregroundStyle(Palette.textQuaternary)
+            .textCase(.uppercase)
+            .padding(.top, 4)
+            .padding(.leading, 2)
+    }
+
+    /// Loglanmış bir antrenman seansı: tarih + hareketler + set özetleri (3×10 @ 80 kg).
+    private func workoutLogContent(_ log: WorkoutLog) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(log.name.isEmpty ? "Antrenman" : log.name)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("\(Fmt.date.string(from: log.date)) · \(log.durationMinutes) dk")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                Spacer(minLength: 0)
+                Text("\(log.exercises.count) hareket")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Palette.accent)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(Capsule().fill(Palette.accent.opacity(0.14)))
+            }
+            if !log.exercises.isEmpty {
+                Rectangle().fill(Palette.border).frame(height: 0.5)
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(log.exercises.sorted(by: { $0.order < $1.order }), id: \.persistentModelID) { ex in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(ex.name)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Palette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Text(ex.summary)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Palette.textTertiary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            if let notes = log.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(notes)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private func workoutContent(_ workout: WorkoutSession, compact: Bool) -> some View {

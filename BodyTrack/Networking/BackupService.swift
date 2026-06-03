@@ -1588,6 +1588,13 @@ extension BackupService {
             insert: { snap, u in
                 let r = Recipe(title: snap.title, urlString: snap.urlString, category: RecipeCategory(rawValue: snap.category) ?? .dinner, isFavorite: snap.isFavorite ?? false, summary: snap.summary, ingredientsText: snap.ingredientsText, instructionsText: snap.instructionsText, servings: snap.servings, prepMinutes: snap.prepMinutes, calories: snap.calories, protein: snap.protein, carbs: snap.carbs, fat: snap.fat, createdAt: snap.createdAt)
                 r.updatedAt = u; ctx.insert(r)
+            },
+            preserveLocalIf: { snap, local in
+                // KÖK-NEDEN FIX: malzeme+yapılış DOLU tarif, link-only "thin" sürümle EZİLMESİN
+                // (31 Mayıs'taki tarif detay kaybının sebebi buydu).
+                let snapEmpty = (snap.ingredientsText?.isEmpty ?? true) && (snap.instructionsText?.isEmpty ?? true)
+                let localHas = !(local.ingredientsText ?? "").isEmpty || !(local.instructionsText ?? "").isEmpty
+                return snapEmpty && localHas
             }
         )
 
@@ -1607,6 +1614,11 @@ extension BackupService {
                     ctx.insert(e)
                     session.templateExercises.append(e)
                 }
+            },
+            preserveLocalIf: { snap, local in
+                // KÖK-NEDEN FIX: 0-hareketli gelen program şablonu, hareketleri DOLU yerel
+                // programı EZMESİN (1 Haziran'daki 19-hareket kaybının sebebi buydu).
+                (snap.exercises?.isEmpty ?? true) && !local.templateExercises.isEmpty
             }
         )
 
@@ -1668,6 +1680,10 @@ extension BackupService {
                     }
                     log.exercises.append(entry)
                 }
+            },
+            preserveLocalIf: { snap, local in
+                // KÖK-NEDEN FIX: 0-hareketli "thin" log, hareketleri DOLU logu EZMESİN.
+                snap.exercises.isEmpty && !local.exercises.isEmpty
             }
         )
 
@@ -1705,7 +1721,8 @@ extension BackupService {
         tombs: [String: TombstoneSnapshot],
         localKey: (Model) -> String,
         localUpdatedAt: (Model) -> Date,
-        insert: (Snapshot, Date) -> Void
+        insert: (Snapshot, Date) -> Void,
+        preserveLocalIf: ((Snapshot, Model) -> Bool)? = nil
     ) {
         var localByKey: [String: Model] = [:]
         for m in (try? ctx.fetch(FetchDescriptor<Model>())) ?? [] {
@@ -1722,6 +1739,9 @@ extension BackupService {
             }
             if let local = localByKey[k] {
                 if u > localUpdatedAt(local) {
+                    // Guard: bazı kayıtlarda yeni ama "boş" incoming, dolu local'i ezmemeli
+                    // (ör. boş program şablonu, hareketleri dolu programı silmesin).
+                    if preserveLocalIf?(snap, local) == true { continue }
                     ctx.delete(local)
                     insert(snap, u)
                 }
