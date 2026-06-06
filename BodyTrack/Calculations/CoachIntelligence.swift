@@ -218,8 +218,16 @@ enum CoachIntelligence {
         }
 
         let workout = workoutStats(logs: workoutLogs, plannedSessions: sessions)
-        if workout.plannedDays > 0 || (scope.coversWorkoutLogs(days: 30) && workout.last30Count > 0) {
-            lines.append("- Antrenman: plan \(workout.plannedDays) gün/hafta · son 30 gün \(workout.last30Count) seans · gerçek frekans \(String(format: "%.1f", workout.frequencyPerWeek))/hafta")
+        if workout.plannedDays > 0 {
+            var line = "- Antrenman: programda \(workout.plannedDays) gün/hafta planlı ve kullanıcı bunu DÜZENLİ uyguluyor (takvimdeki antrenmana göre her antrenman gününü yapıyor)."
+            if workout.last30Count > 0 {
+                line += " Ayrıca son 30 günde \(workout.last30Count) seans loglanmış (ağırlık/progresyon takibi için)."
+            } else {
+                line += " Seansları tek tek LOGLAMIYOR — bu normal; log eksikliği antrenman yapılmadığı anlamına GELMEZ. Antrenman değerlendirmesini bu programa göre yap, 'spor yapmıyor' deme; gerçek ilerlemeyi kilo/ölçüm trendinden oku."
+            }
+            lines.append(line)
+        } else if scope.coversWorkoutLogs(days: 30) && workout.last30Count > 0 {
+            lines.append("- Antrenman: son 30 günde \(workout.last30Count) loglanmış seans · ~\(String(format: "%.1f", workout.frequencyPerWeek))/hafta")
         }
 
         if scope.coversFoods(days: 21), let tdee = calibratedTDEE(measurements: measurements, foods: foods) {

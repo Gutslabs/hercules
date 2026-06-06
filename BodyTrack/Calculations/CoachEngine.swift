@@ -175,7 +175,8 @@ enum CoachEngine {
     private static func scienceContext(ctx: ModelContext) -> String? {
         let measurements = (try? ctx.fetch(FetchDescriptor<Measurement>())) ?? []
         let foods = (try? ctx.fetch(FetchDescriptor<FoodEntry>())) ?? []
-        let workouts = (try? ctx.fetch(FetchDescriptor<WorkoutLog>())) ?? []
+        let logs = (try? ctx.fetch(FetchDescriptor<WorkoutLog>())) ?? []
+        let program = (try? ctx.fetch(FetchDescriptor<WorkoutSession>())) ?? []
 
         guard let e = ScienceEngine.bestAdaptiveEnergy(measurements: measurements, foods: foods) else {
             return nil
@@ -188,13 +189,21 @@ enum CoachEngine {
             e.trendWeightNow, e.slopeKgPerWeek, e.ratePercentPerWeek, Int(e.avgIntake.rounded()), e.loggedDays
         ))
 
-        let vols = ScienceEngine.weeklyVolume(workouts: workouts)
-        let under = vols.filter { $0.sets > 0 && $0.status == .under }.map(\.muscle.label)
-        let over = vols.filter { $0.status == .over }.map(\.muscle.label)
-        let untrained = vols.filter { $0.sets == 0 }.map(\.muscle.label)
-        if !under.isEmpty { lines.append("Haftalık hacmi MEV altında (az çalışılan) kaslar: \(under.joined(separator: ", ")).") }
-        if !over.isEmpty { lines.append("MRV üstü (fazla, toparlanma riski) kaslar: \(over.joined(separator: ", ")).") }
-        if !untrained.isEmpty { lines.append("Son 7 günde hiç çalışılmamış kaslar: \(untrained.joined(separator: ", ")).") }
+        // ANTRENMAN: kullanıcı PROGRAMINI düzenli uyguluyor ama seansları tek tek LOGLAMIYOR.
+        // Hacmi PROGRAMDAN al (planlanan = uygulanan). Log yokluğunu "spor yapmıyor" sanma.
+        let trainingDays = program.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        if trainingDays > 0 {
+            lines.append("ANTRENMAN: Kullanıcı haftada \(trainingDays) günlük programını DÜZENLİ uyguluyor (takvimdeki antrenmana göre her gün). Seansları tek tek loglamıyor — bu NORMAL; log eksikliği antrenman yapılmadığı anlamına GELMEZ, 'spor yapmıyor' DEME. Değerlendirmeyi programa göre yap; gerçek ilerlemeyi kilo/ölçüm trendinden oku.")
+            let vols = ScienceEngine.weeklyVolumeFromProgram(sessions: program)
+            let under = vols.filter { $0.sets > 0 && $0.status == .under }.map(\.muscle.label)
+            let over = vols.filter { $0.status == .over }.map(\.muscle.label)
+            if !under.isEmpty { lines.append("Programdaki haftalık hacmi MEV altında kaslar: \(under.joined(separator: ", ")).") }
+            if !over.isEmpty { lines.append("Programdaki haftalık hacmi MRV üstü kaslar: \(over.joined(separator: ", ")).") }
+        } else {
+            let vols = ScienceEngine.weeklyVolume(workouts: logs)
+            let under = vols.filter { $0.sets > 0 && $0.status == .under }.map(\.muscle.label)
+            if !under.isEmpty { lines.append("Haftalık hacmi MEV altında kaslar: \(under.joined(separator: ", ")).") }
+        }
 
         return lines.joined(separator: "\n")
     }

@@ -216,6 +216,11 @@ struct GoalRoadmapRow: View {
                         .foregroundStyle(Palette.textTertiary)
                         .lineLimit(1)
                 }
+                Image(systemName: "pencil")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(hovering ? Palette.accent : Palette.textQuaternary)
+                    .opacity(hovering ? 1 : 0.4)
+                    .help("Düzenle")
             }
             .padding(Spacing.md)
             .background(

@@ -468,6 +468,24 @@ enum ScienceEngine {
         return MuscleGroup.allCases.map { MuscleVolume(muscle: $0, sets: sets[$0] ?? 0) }
     }
 
+    /// Haftalık planlanan hacim — PROGRAM şablonundan (WorkoutSession.templateExercises).
+    /// Kullanıcı seansları tek tek loglamıyorsa "uygulanan = planlanan" kabul edilir
+    /// (programı düzenli uyguluyor); böylece log eksikliği "hacim yok" gibi görünmez.
+    static func weeklyVolumeFromProgram(sessions: [WorkoutSession]) -> [MuscleVolume] {
+        var sets: [MuscleGroup: Double] = [:]
+        for session in sessions {
+            for ex in session.templateExercises {
+                let count = Double(ex.sets ?? 0)
+                guard count > 0, let cls = classify(ex.name) else { continue }
+                sets[cls.primary, default: 0] += count
+                for sec in cls.secondary {
+                    sets[sec, default: 0] += count * 0.5
+                }
+            }
+        }
+        return MuscleGroup.allCases.map { MuscleVolume(muscle: $0, sets: sets[$0] ?? 0) }
+    }
+
     // MARK: - Haftalık Science Scorecard
 
     struct ScoreItem: Identifiable {

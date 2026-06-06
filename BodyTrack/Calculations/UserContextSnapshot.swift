@@ -890,6 +890,7 @@ enum UserContextSnapshot {
         lines.append("- Tüm hafta: " + weekParts.joined(separator: " · "))
         let trainingDays = workouts.count
         lines.append("- \(trainingDays) gün/hafta · toplam ~\(Fmt.int(totalKcal)) kcal/hafta")
+        lines.append("- ÖNEMLİ: Kullanıcı bu programı DÜZENLİ uyguluyor ama seansları tek tek loglamıyor. Antrenman logu yokluğu 'spor yapmıyor' demek DEĞİLDİR — değerlendirmeyi bu programa göre yap; gerçek ilerlemeyi kilo/ölçüm trendinden oku.")
         if !overrides.isEmpty {
             let overrideParts = overrides.map { item in
                 "\(short(item.weekday)) + \(item.exerciseName) (\(item.prescriptionText))"

@@ -856,8 +856,8 @@ struct CalendarView: View {
                             isReached: g.anchorDate <= .now,
                             currentWeight: currentWeight
                         ) {
-                            currentMonth = Self.startOfMonth(g.anchorDate)
-                            selectedDay = Calendar.current.startOfDay(for: g.anchorDate)
+                            // Satıra tıkla → düzenle (kilo/tarih/not/sil).
+                            editing = g
                         }
                     }
                 }
