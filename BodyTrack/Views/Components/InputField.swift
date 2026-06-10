@@ -101,7 +101,7 @@ struct SegmentedChoice<Option: Hashable & Identifiable>: View {
                         .foregroundStyle(selection == option ? Palette.textPrimary : Palette.textSecondary)
                         .background(
                             RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
-                                .fill(selection == option ? Color.white.opacity(0.07) : Color.clear)
+                                .fill(selection == option ? Palette.track : Color.clear)
                         )
                         .contentShape(Rectangle())
                 }
@@ -162,7 +162,7 @@ struct ChoiceRow<Option: Hashable & Identifiable>: View {
                         .padding(.vertical, 10)
                         .background(
                             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                .fill(selection == option ? Color.white.opacity(0.04) : Color.clear)
+                                .fill(selection == option ? Palette.fieldFill : Color.clear)
                         )
                         .contentShape(Rectangle())
                     }

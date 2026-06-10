@@ -124,6 +124,11 @@ final class CodexFirstFallbackClient: AIClient {
                 onMessageUpdate: onMessageUpdate
             )
         } catch {
+            // Kullanıcı 'Dur'a bastıysa bu bir Codex hatası değil — kısmi metni koru,
+            // sahte OpenRouter yönlendirmesi başlatma. İptali olduğu gibi yukarı fırlat.
+            if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
+                throw error
+            }
             let openRouterKey = AIKeyStore.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !openRouterKey.isEmpty else {
                 throw error
@@ -161,6 +166,10 @@ final class CodexFirstFallbackClient: AIClient {
         do {
             return try await codex.complete(systemPrompt: systemPrompt, userPrompt: userPrompt)
         } catch {
+            // İptali olduğu gibi fırlat — fallback başlatma.
+            if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
+                throw error
+            }
             let openRouterKey = AIKeyStore.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !openRouterKey.isEmpty else { throw error }
             return try await openRouter.complete(systemPrompt: systemPrompt, userPrompt: userPrompt)

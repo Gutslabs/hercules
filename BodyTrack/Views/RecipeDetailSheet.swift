@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 
+/// V1 tarif detayı — plan şeridi + makro satırı + malzeme/yapılış iki kolonda,
+/// altta "Bugüne logla" (tarifi bugünün öğünlerine FoodEntry olarak ekler).
 struct RecipeDetailSheet: View {
     let recipe: Recipe
     @Environment(\.modelContext) private var ctx
@@ -8,333 +10,191 @@ struct RecipeDetailSheet: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        ZStack {
-            Palette.background
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.xl) {
-                    detailHero
-
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: Spacing.xl) {
-                            leftRail
-                                .frame(width: 255)
-                            contentColumn
-                        }
-
-                        VStack(alignment: .leading, spacing: Spacing.lg) {
-                            leftRail
-                            contentColumn
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            // Kategori + aksiyonlar
+            HStack(spacing: 8) {
+                Circle().fill(recipe.category.displayTint).frame(width: 5, height: 5)
+                Text(recipe.category.label).eyebrow()
+                Spacer()
+                Button {
+                    recipe.isFavorite.toggle()
+                    ctx.saveOrReport()
+                } label: {
+                    Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textTertiary)
+                        .frame(width: 24, height: 24)
                 }
-                .padding(Spacing.xxl)
+                .buttonStyle(.plain)
+                .help(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("Kapat")
             }
-        }
-        .frame(width: 920, height: 760)
-    }
 
-    private var detailHero: some View {
-        HStack(alignment: .top, spacing: Spacing.xl) {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: recipe.category.icon)
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(recipe.category.label)
-                        .font(Typography.captionBold)
-                    Text(recipe.hasDetail ? "Detaylı" : "Link")
-                        .font(Typography.captionBold)
-                        .foregroundStyle(recipe.hasDetail ? Palette.positive : Palette.textTertiary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule(style: .continuous).fill(Color.white.opacity(0.055)))
+            // Başlık + kcal/makro
+            HStack(alignment: .top, spacing: 32) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(recipe.title)
+                        .font(.system(size: 21, weight: .bold))
+                        .tracking(-0.2)
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let summary = cleanText(recipe.summary) {
+                        Text(summary)
+                            .font(.system(size: 12.5, weight: .regular))
+                            .foregroundStyle(Palette.textTertiary)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                .foregroundStyle(categoryTint)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(recipe.title)
-                    .font(.system(size: 30, weight: .medium))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(clean(recipe.summary) ?? "Tarif detayları kayda geçince malzeme, yapılış ve makrolar burada düzenli okunur.")
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineSpacing(4)
-                    .lineLimit(3)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .trailing, spacing: Spacing.md) {
-                HStack(spacing: Spacing.sm) {
-                    Button {
-                        recipe.isFavorite.toggle()
-                        ctx.saveOrReport()
-                    } label: {
-                        Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
-                            .font(.system(size: 12, weight: .semibold))
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(recipe.isFavorite ? Palette.warning.opacity(0.16) : Palette.surfaceElevated))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textSecondary)
-                    .help(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
-
-                    if let url = recipe.url {
-                        Button {
-                            openURL(url)
-                        } label: {
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(width: 34, height: 34)
-                                .background(Circle().fill(Palette.surfaceElevated))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Palette.textSecondary)
-                        .help("Kaynağı aç")
-                    }
-
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(Palette.surfaceElevated))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Palette.textSecondary)
-                    .help("Kapat")
-                }
-
-                if let calories = recipe.calories {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(Fmt.int(calories))
-                            .font(.system(size: 34, weight: .light, design: .monospaced))
+                VStack(alignment: .trailing, spacing: 0) {
+                    if let kcal = recipe.calories {
+                        Text(Fmt.int(kcal))
+                            .font(.system(size: 36, weight: .bold))
+                            .monospacedDigit()
+                            .tracking(-0.5)
                             .foregroundStyle(Palette.textPrimary)
                         Text("kcal / porsiyon")
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
+                            .font(.system(size: 10.5, weight: .regular))
+                            .foregroundStyle(Palette.textQuaternary)
                     }
+                    RecipeMacroDots(recipe: recipe, fontSize: 12)
+                        .padding(.top, 10)
                 }
+                .fixedSize()
             }
-        }
-        .padding(Spacing.xl)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface.opacity(0.86))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.7)
-        )
-        .overlay(alignment: .top) {
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .stroke(Color.white.opacity(0.035), lineWidth: 1)
-                .blendMode(.plusLighter)
-        }
-        .overlay(alignment: .topLeading) {
-            Capsule(style: .continuous)
-                .fill(categoryTint)
-                .frame(width: 116, height: 2)
-                .padding(.leading, Spacing.xl)
-        }
-    }
+            .padding(.top, 12)
 
-    private var leftRail: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                sectionHeader("Plan", icon: "square.grid.2x2")
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    railStat(label: "Porsiyon", value: recipe.servings.map { "\($0)" } ?? "-")
-                    railStat(label: "Hazırlık", value: recipe.prepMinutes.map { "\($0) dk" } ?? "-")
-                    railStat(label: "Malzeme", value: ingredientLines.isEmpty ? "-" : "\(ingredientLines.count)")
-                    railStat(label: "Adım", value: instructionLines.isEmpty ? "-" : "\(instructionLines.count)")
-                    railStat(label: "Eklendi", value: Fmt.dateLong.string(from: recipe.createdAt))
-                }
-            }
-            .padding(Spacing.lg)
-            .background(railBackground)
-
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                sectionHeader("Makro", icon: "chart.pie")
-                if macroMetrics.isEmpty {
-                    Text("Makro eklenmemiş")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 10)
-                } else {
-                    VStack(spacing: Spacing.sm) {
-                        ForEach(macroMetrics, id: \.label) { metric in
-                            metricTile(metric)
-                        }
-                    }
-                }
-            }
-            .padding(Spacing.lg)
-            .background(railBackground)
-
-            if let host = recipe.sourceHost {
-                VStack(alignment: .leading, spacing: 8) {
-                    sectionHeader("Kaynak", icon: "link")
-                    Text(host)
-                        .font(Typography.caption)
+            // Plan meta satırı
+            Hairline().padding(.top, 14)
+            HStack(spacing: 0) {
+                Text(metaLine)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(Palette.textSecondary)
+                if let host = recipe.sourceHost, let url = recipe.url {
+                    Text(" · ")
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
                         .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(2)
-                    if let url = recipe.url {
-                        Button {
-                            openURL(url)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text("Kaynağı aç")
-                                    .font(Typography.captionBold)
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 9, weight: .semibold))
-                            }
+                    Button {
+                        openURL(url)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(host)
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .foregroundStyle(Palette.textPrimary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Kaynağı aç")
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 12)
+
+            // Malzemeler + Yapılış — popup içeriğe sarılır, sabit boşluk yok
+            if recipe.hasDetail {
+                HStack(alignment: .top, spacing: 36) {
+                    ingredientsColumn
+                        .frame(width: 300, alignment: .topLeading)
+                    stepsColumn
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .padding(.top, 20)
+            } else {
+                Text("Bu tarif eski link formatında kayıtlı. AI ile yeniden ekletirsen malzeme, yapılış ve makrolar da burada görünür.")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 18)
+            }
+
+            // Footer
+            Hairline().padding(.top, 22)
+            HStack(spacing: 12) {
+                Button {
+                    logToToday()
+                } label: {
+                    Text("Bugüne logla")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.btnFg)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(recipe.calories == nil ? Palette.accent.opacity(0.35) : Palette.accent)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(recipe.calories == nil)
+                .help(recipe.calories == nil ? "Kalori bilgisi olmadan loglanamaz" : "Bu tarifi bugünün öğünlerine ekle")
+                Spacer()
+                Text("eklendi \(Fmt.dateLong.string(from: recipe.createdAt))")
+                    .font(.system(size: 10.5, weight: .regular))
+                    .foregroundStyle(Palette.textQuaternary)
+            }
+            .padding(.top, 16)
+        }
+        .padding(.horizontal, 36)
+        .padding(.top, 28)
+        .padding(.bottom, 24)
+        .frame(width: 780)
+        .background(Palette.background)
+    }
+
+    // MARK: - Kolonlar
+
+    private var ingredientsColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Malzemeler").eyebrow()
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(recipe.ingredientLines.enumerated()), id: \.offset) { _, line in
+                    let parts = Self.splitIngredient(line)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(parts.name)
+                            .font(.system(size: 13.5, weight: .regular))
                             .foregroundStyle(Palette.textPrimary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(Spacing.lg)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(railBackground)
-            }
-        }
-    }
-
-    private var contentColumn: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            if let summary = clean(recipe.summary) {
-                summaryPanel(summary)
-            }
-            if !ingredientLines.isEmpty {
-                ingredientPanel
-            }
-            if !instructionLines.isEmpty {
-                instructionPanel
-            }
-            if !recipe.hasDetail {
-                emptyDetailPanel
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var railBackground: some View {
-        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .fill(Palette.surface.opacity(0.78))
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: 0.6)
-            )
-    }
-
-    private func railStat(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-            Spacer()
-            Text(value)
-                .font(Typography.captionBold)
-                .foregroundStyle(Palette.textPrimary)
-        }
-        .padding(.vertical, 6)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Palette.border)
-                .frame(height: 0.6)
-        }
-    }
-
-    private func metricTile(_ metric: RecipeMetric) -> some View {
-        HStack(spacing: Spacing.md) {
-            Text(metric.label.uppercased())
-                .font(.system(size: 8, weight: .semibold))
-                .tracking(0.5)
-                .foregroundStyle(Palette.textQuaternary)
-            Spacer()
-            Text(metric.value)
-                .font(Typography.mono)
-                .foregroundStyle(metric.tint)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Palette.surfaceElevated)
-        )
-    }
-
-    private func summaryPanel(_ summary: String) -> some View {
-        detailPanel("Özet", icon: "text.alignleft") {
-            Text(summary)
-                .font(Typography.body)
-                .foregroundStyle(Palette.textPrimary)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var ingredientPanel: some View {
-        let columns = ingredientColumns
-        return detailPanel("Malzemeler", icon: "list.bullet") {
-            HStack(alignment: .top, spacing: Spacing.xl) {
-                ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-                    VStack(alignment: .leading, spacing: 11) {
-                        ForEach(Array(column.enumerated()), id: \.offset) { _, line in
-                            ingredientRow(line)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let qty = parts.qty {
+                            Text(qty)
+                                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                .foregroundStyle(Palette.textQuaternary)
+                                .fixedSize()
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
     }
 
-    private func ingredientRow(_ line: String) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            Circle()
-                .fill(categoryTint)
-                .frame(width: 5, height: 5)
-                .padding(.top, 7)
-            Text(line)
-                .font(Typography.body)
-                .foregroundStyle(Palette.textPrimary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    /// Malzemeleri 2 dengeli kolona böl (≤3 madde tek kolon). Her kolon bağımsız aktığı için
-    /// LazyVGrid'in değişken satır yüksekliğinden gelen kayık hizayı (staggered) önler.
-    private var ingredientColumns: [[String]] {
-        let items = ingredientLines
-        guard items.count > 3 else { return [items] }
-        let perColumn = Int((Double(items.count) / 2).rounded(.up))
-        return stride(from: 0, to: items.count, by: perColumn).map {
-            Array(items[$0..<min($0 + perColumn, items.count)])
-        }
-    }
-
-    private var instructionPanel: some View {
-        detailPanel("Yapılış", icon: "flame") {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(Array(instructionLines.enumerated()), id: \.offset) { idx, line in
-                    HStack(alignment: .top, spacing: Spacing.md) {
+    private var stepsColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Yapılış").eyebrow()
+            VStack(alignment: .leading, spacing: 11) {
+                ForEach(Array(recipe.instructionLines.enumerated()), id: \.offset) { idx, step in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("\(idx + 1)")
-                            .font(Typography.captionBold)
-                            .foregroundStyle(Palette.background)
-                            .frame(width: 22, height: 22)
-                            .background(Circle().fill(categoryTint))
-                        Text(line)
-                            .font(Typography.body)
-                            .foregroundStyle(Palette.textPrimary)
-                            .lineSpacing(3)
+                            .font(.system(size: 11.5, weight: .regular, design: .monospaced))
+                            .foregroundStyle(Palette.accent)
+                            .frame(width: 15, alignment: .leading)
+                        Text(step)
+                            .font(.system(size: 13.5, weight: .regular))
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineSpacing(4)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -343,84 +203,54 @@ struct RecipeDetailSheet: View {
         }
     }
 
-    private var emptyDetailPanel: some View {
-        detailPanel("Detay", icon: "doc.text") {
-            Text("Bu tarif eski link formatında kayıtlı. AI ile yeniden ekletirsen malzeme, yapılış ve makrolar da burada görünür.")
-                .font(Typography.body)
-                .foregroundStyle(Palette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    // MARK: - Derived
+
+    private var metaLine: String {
+        var parts: [String] = []
+        if let s = recipe.servings { parts.append("\(s) porsiyon") }
+        if let m = recipe.prepMinutes { parts.append("\(m) dk") }
+        let ing = recipe.ingredientLines.count
+        if ing > 0 { parts.append("\(ing) malzeme") }
+        let steps = recipe.instructionLines.count
+        if steps > 0 { parts.append("\(steps) adım") }
+        return parts.joined(separator: " · ")
     }
 
-    private func detailPanel<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            sectionHeader(title, icon: icon)
-            content()
-        }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surface.opacity(0.92))
+    /// "250g süzme yoğurt" → (name: "süzme yoğurt", qty: "250g").
+    /// Baş kısımda miktar+birim deseni yoksa satır olduğu gibi isim olur.
+    static func splitIngredient(_ line: String) -> (name: String, qty: String?) {
+        let pattern = #"^([0-9][0-9.,xX\-–/ ]*(?:g|gr|kg|ml|lt|l|cl|adet|ölçek|tk|yk|sk|dilim|porsiyon|tutam|kaşık|bardak|ölçü)\.?)\s+(.+)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let qtyRange = Range(match.range(at: 1), in: line),
+              let nameRange = Range(match.range(at: 2), in: line)
+        else { return (line, nil) }
+        return (
+            String(line[nameRange]).trimmingCharacters(in: .whitespaces),
+            String(line[qtyRange]).trimmingCharacters(in: .whitespaces)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
     }
 
-    private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(categoryTint)
-            Text(title.uppercased())
-                .font(Typography.captionBold)
-                .tracking(0.8)
-                .foregroundStyle(Palette.textSecondary)
-        }
-    }
-
-    private var macroMetrics: [RecipeMetric] {
-        [
-            recipe.calories.map { RecipeMetric(label: "Kalori", value: "\(Fmt.int($0))", tint: Palette.textPrimary) },
-            recipe.protein.map { RecipeMetric(label: "Protein", value: "\(Fmt.int($0))g", tint: Palette.macroProtein) },
-            recipe.carbs.map { RecipeMetric(label: "Karb", value: "\(Fmt.int($0))g", tint: Palette.macroCarbs) },
-            recipe.fat.map { RecipeMetric(label: "Yağ", value: "\(Fmt.int($0))g", tint: Palette.macroFat) },
-        ].compactMap { $0 }
-    }
-
-    private var ingredientLines: [String] {
-        cleanLines(recipe.ingredientsText)
-    }
-
-    private var instructionLines: [String] {
-        cleanLines(recipe.instructionsText)
-    }
-
-    private var categoryTint: Color {
-        switch recipe.category {
-        case .breakfast: return Palette.warning
-        case .dinner: return Palette.accent
-        case .dessert: return Color(red: 0.90, green: 0.62, blue: 0.78)
-        }
-    }
-
-    private func clean(_ value: String?) -> String? {
+    private func cleanText(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func cleanLines(_ value: String?) -> [String] {
-        (value ?? "")
-            .split(whereSeparator: \.isNewline)
-            .map { line in
-                String(line)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: #"^[-*•]\s*"#, with: "", options: .regularExpression)
-                    .replacingOccurrences(of: #"^\d+[\.)]\s*"#, with: "", options: .regularExpression)
-            }
-            .filter { !$0.isEmpty }
+    /// Tarifi bugünün öğünlerine FoodEntry olarak ekler ve kapanır —
+    /// Genel Bakış'taki ring/makrolar anında güncellenir.
+    private func logToToday() {
+        guard let kcal = recipe.calories else { return }
+        let entry = FoodEntry(
+            date: .now,
+            name: recipe.title,
+            calories: kcal,
+            protein: recipe.protein,
+            carbs: recipe.carbs,
+            fat: recipe.fat
+        )
+        ctx.insert(entry)
+        ctx.saveOrReport()
+        dismiss()
     }
 }
 
@@ -428,31 +258,6 @@ struct RecipeMetric {
     let label: String
     let value: String
     let tint: Color
-}
-
-struct RecipeFavoriteButton: View {
-    @Environment(\.modelContext) private var ctx
-    let recipe: Recipe
-    var size: CGFloat = 28
-    var iconSize: CGFloat = 11
-
-    var body: some View {
-        Button {
-            recipe.isFavorite.toggle()
-            ctx.saveOrReport()
-        } label: {
-            Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
-                .font(.system(size: iconSize, weight: .semibold))
-                .frame(width: size, height: size)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textSecondary)
-        .background(
-            Circle()
-                .fill(recipe.isFavorite ? Palette.warning.opacity(0.16) : Palette.surfaceElevated)
-        )
-        .help(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
-    }
 }
 
 extension Recipe {

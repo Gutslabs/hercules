@@ -7,7 +7,22 @@ final class MemoryManager {
 
     private let provider = LocalMemoryProvider.shared
 
+    // Ingest'ler fire-and-forget (her tur için yeni Task) — aday snapshot'ı uzun LLM
+    // await'inden önce alındığından, üst üste binen turlar AYNI eski hafıza üzerinde
+    // karar verip yinelenen kayıt üretebilir veya konsolidasyonun yazdığını ezebilir.
+    // Çözüm: tüm ingest'leri tek bir zincirde, tur-tur seri çalıştır.
+    private var ingestChain: Task<Void, Never>?
+
     func ingest(userText: String, assistantText: String) async {
+        let chained = Task { [prev = ingestChain] in
+            await prev?.value
+            await self.performIngest(userText: userText, assistantText: assistantText)
+        }
+        ingestChain = chained
+        await chained.value
+    }
+
+    private func performIngest(userText: String, assistantText: String) async {
         let user = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !user.isEmpty else { return }
         // Onay/gürültü turlarında LLM çağrısı israf olur — atla.
@@ -88,9 +103,17 @@ final class MemoryManager {
         }
     }
 
+    private var isWarmingUp = false
+
     /// Embedding modelini indir/yükle (gerekiyorsa) ve tüm eksik kayıtları backfill et.
     /// Memory ekranı açıldığında çağrılır — sürpriz indirmeyi sohbet akışının dışına alır.
     func warmUpEmbeddingsAndBackfill() async {
+        // Üst üste binen warmUp'ları engelle: Memory ekranı her açıldığında .task tetikler;
+        // ikinci bir backfill döngüsü aynı kayıtları yeniden işler ve EmbeddingStatus'u yarışır.
+        guard !isWarmingUp else { return }
+        isWarmingUp = true
+        defer { isWarmingUp = false }
+
         let model = EmbeddingService.modelID
         let alreadyLoaded = await EmbeddingService.shared.isLoaded
         let pendingBefore = provider.pendingEmbeddingCount(model: model)
@@ -110,6 +133,7 @@ final class MemoryManager {
         let total = max(provider.pendingEmbeddingCount(model: model), 1)
         var safety = 0
         while safety < 200 {
+            if Task.isCancelled { break }   // .task iptal edildiyse (ekran kapandı) backfill'i bırak
             let remaining = provider.pendingEmbeddingCount(model: model)
             if remaining == 0 { break }
             EmbeddingStatus.shared.set(.backfilling(done: max(0, total - remaining), total: total))
@@ -124,7 +148,7 @@ final class MemoryManager {
 
     // MARK: - Prompt
 
-    static let memoryExtractionDefault = """
+    nonisolated static let memoryExtractionDefault = """
     Sen Hercules adlı Türkçe, bilim temelli bodybuilding koçu uygulamasının HAFIZA YÖNETİCİSİSİN.
     Görevin: kullanıcı ile koç arasındaki SON konuşmadan, uzun vadeli hafızada tutulmaya değer
     KALICI ve KULLANICIYA ÖZEL bilgileri çıkarmak ve mevcut hafızayla karşılaştırıp operasyon üretmek.
@@ -187,7 +211,7 @@ final class MemoryManager {
         """
     }
 
-    static let memoryConsolidationDefault = """
+    nonisolated static let memoryConsolidationDefault = """
     Sen Hercules hafıza yöneticisinin KONSOLİDASYON modusun. Sana kullanıcının uzun
     vadeli hafıza kayıtları (M1..Mn) veriliyor. Görevin: gereksiz tekrarları, çelişkileri
     ve parçalanmış bilgileri temizleyerek hafızayı derli toplu tutmak.

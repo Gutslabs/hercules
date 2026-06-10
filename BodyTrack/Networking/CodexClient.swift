@@ -77,13 +77,32 @@ final class CodexClient: AIClient {
         body["reasoning"] = ["effort": effort, "summary": "auto"]
         body["include"] = ["reasoning.encrypted_content"]
 
-        let stream = try await streamResponseWithRetry(
-            body: body,
-            token: tokens.access_token,
-            accountId: accountId,
-            onSearchStart: onSearchStart,
-            onMessageUpdate: onMessageUpdate
-        )
+        let stream: StreamResult
+        do {
+            stream = try await streamResponseWithRetry(
+                body: body,
+                token: tokens.access_token,
+                accountId: accountId,
+                onSearchStart: onSearchStart,
+                onMessageUpdate: onMessageUpdate
+            )
+        } catch let error as OpenRouterError {
+            guard case .badResponse(401, _) = error else { throw error }
+            // Access token sunucuda reddedildi (revocation / clock skew) — exp claim'e
+            // bakmadan bir kez koşulsuz yenile ve tekrar dene. (refresh token de
+            // ölmüşse refresh kendisi CodexAuthError.refreshFailed atar; doğru
+            // "codex login" yönlendirmesi yüzeye çıkar, ham HTTP 401 değil.)
+            let current = try await CodexAuth.shared.loadTokens()
+            let refreshed = try await CodexAuth.shared.refresh(current)
+            guard let accountId2 = refreshed.chatGPTAccountId else { throw CodexAuthError.noAccountId }
+            stream = try await streamResponseWithRetry(
+                body: body,
+                token: refreshed.access_token,
+                accountId: accountId2,
+                onSearchStart: onSearchStart,
+                onMessageUpdate: onMessageUpdate
+            )
+        }
 
         // Output'ta web_search_call varsa search query'sini al
         var searchQuery: String? = nil
@@ -138,13 +157,30 @@ final class CodexClient: AIClient {
         body["reasoning"] = ["effort": "minimal", "summary": "auto"]
         body["include"] = ["reasoning.encrypted_content"]
 
-        let stream = try await streamResponseWithRetry(
-            body: body,
-            token: tokens.access_token,
-            accountId: accountId,
-            onSearchStart: { _ in },
-            onMessageUpdate: { _ in }
-        )
+        let stream: StreamResult
+        do {
+            stream = try await streamResponseWithRetry(
+                body: body,
+                token: tokens.access_token,
+                accountId: accountId,
+                onSearchStart: { _ in },
+                onMessageUpdate: { _ in }
+            )
+        } catch let error as OpenRouterError {
+            guard case .badResponse(401, _) = error else { throw error }
+            // Access token sunucuda reddedildi (revocation / clock skew) — exp claim'e
+            // bakmadan bir kez koşulsuz yenile ve tekrar dene.
+            let current = try await CodexAuth.shared.loadTokens()
+            let refreshed = try await CodexAuth.shared.refresh(current)
+            guard let accountId2 = refreshed.chatGPTAccountId else { throw CodexAuthError.noAccountId }
+            stream = try await streamResponseWithRetry(
+                body: body,
+                token: refreshed.access_token,
+                accountId: accountId2,
+                onSearchStart: { _ in },
+                onMessageUpdate: { _ in }
+            )
+        }
 
         var assistantText = ""
         for item in stream.output where (item["type"] as? String) == "message" {
@@ -460,15 +496,46 @@ final class CodexClient: AIClient {
                         return output
                     }
                     switch raw[n] {
-                    case "n":  output.append("\n")
-                    case "t":  output.append("\t")
-                    case "r":  output.append("\r")
-                    case "\"": output.append("\"")
-                    case "\\": output.append("\\")
-                    case "/":  output.append("/")
-                    default:   output.append(raw[n])
+                    case "n":  output.append("\n"); i = raw.index(after: n)
+                    case "t":  output.append("\t"); i = raw.index(after: n)
+                    case "r":  output.append("\r"); i = raw.index(after: n)
+                    case "\"": output.append("\""); i = raw.index(after: n)
+                    case "\\": output.append("\\"); i = raw.index(after: n)
+                    case "/":  output.append("/");  i = raw.index(after: n)
+                    case "u":
+                        // \u sonrası 4 hex hane gerek; chunk yarımsa sonraki chunk'ı bekle.
+                        guard let (scalarValue, afterIdx) = Self.readHex4(raw, after: n) else {
+                            scanOffset = raw.distance(from: raw.startIndex, to: i) // backslash'e geri sar
+                            return output
+                        }
+                        if scalarValue >= 0xD800 && scalarValue <= 0xDBFF {
+                            // High surrogate: ardından gelen \uXXXX low surrogate ile birleşmeli.
+                            guard afterIdx < raw.endIndex, raw[afterIdx] == "\\" else {
+                                scanOffset = raw.distance(from: raw.startIndex, to: i); return output
+                            }
+                            let lowEsc = raw.index(after: afterIdx)
+                            guard lowEsc < raw.endIndex, raw[lowEsc] == "u" else {
+                                scanOffset = raw.distance(from: raw.startIndex, to: i); return output
+                            }
+                            guard let (low, afterLow) = Self.readHex4(raw, after: lowEsc),
+                                  low >= 0xDC00, low <= 0xDFFF else {
+                                // Ya henüz buffer'da yok, ya da bozuk; buffer'da+bozuksa zarifçe at.
+                                if Self.readHex4(raw, after: lowEsc) == nil {
+                                    scanOffset = raw.distance(from: raw.startIndex, to: i); return output
+                                }
+                                output.append("\u{FFFD}"); i = afterIdx; break
+                            }
+                            let combined = 0x10000 + ((scalarValue - 0xD800) << 10) + (low - 0xDC00)
+                            if let s = Unicode.Scalar(combined) { output.unicodeScalars.append(s) }
+                            i = afterLow
+                        } else if let s = Unicode.Scalar(scalarValue) {
+                            output.unicodeScalars.append(s); i = afterIdx
+                        } else {
+                            output.append("\u{FFFD}"); i = afterIdx
+                        }
+                    default:
+                        output.append(raw[n]); i = raw.index(after: n)
                     }
-                    i = raw.index(after: n)
                     continue
                 }
                 if c == "\"" {
@@ -481,6 +548,20 @@ final class CodexClient: AIClient {
             }
             scanOffset = raw.distance(from: raw.startIndex, to: i)
             return output
+        }
+
+        /// `escIdx` ('u') hemen sonrasından tam 4 hex hane okur.
+        /// (value, hanelerden-sonraki-index) döner; yeterli karakter buffer'da
+        /// yoksa / geçersizse nil döner (çağıran erteleyebilsin).
+        private static func readHex4(_ raw: String, after escIdx: String.Index) -> (UInt32, String.Index)? {
+            var j = raw.index(after: escIdx)
+            var hex = ""
+            for _ in 0..<4 {
+                guard j < raw.endIndex else { return nil }   // henüz tam buffer'da değil
+                hex.append(raw[j]); j = raw.index(after: j)
+            }
+            guard let v = UInt32(hex, radix: 16) else { return nil }
+            return (v, j)
         }
     }
 

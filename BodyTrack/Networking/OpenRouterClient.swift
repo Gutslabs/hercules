@@ -237,17 +237,22 @@ final class OpenRouterClient: AIClient {
                 assistantMsg["tool_calls"] = toolCalls
                 messages.append(assistantMsg)
 
-                // Execute each tool call
+                // Execute each tool call. Protokol her tool_call_id'ye eşleşen bir
+                // role:"tool" cevabı şart koşar — yoksa sonraki POST HTTP 400 olur. Bu
+                // yüzden id'yi argüman parse'ından bağımsız çıkar ve HER id'ye cevap ver.
                 for tc in toolCalls {
-                    guard let id = tc["id"] as? String,
-                          let fn = tc["function"] as? [String: Any],
-                          let name = fn["name"] as? String,
-                          let argsStr = fn["arguments"] as? String,
-                          let argsData = argsStr.data(using: .utf8),
-                          let args = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]
-                    else { continue }
+                    guard let id = tc["id"] as? String else { continue } // kimliksiz çağrı cevaplanamaz
+                    let fn = tc["function"] as? [String: Any]
+                    let name = fn?["name"] as? String
 
-                    if name == "web_search", let query = args["query"] as? String {
+                    // Argümanları parse etmeyi dene
+                    var args: [String: Any]? = nil
+                    if let argsStr = fn?["arguments"] as? String,
+                       let argsData = argsStr.data(using: .utf8) {
+                        args = (try? JSONSerialization.jsonObject(with: argsData)) as? [String: Any]
+                    }
+
+                    if name == "web_search", let query = args?["query"] as? String, !query.isEmpty {
                         lastSearchQuery = query
                         await onSearchStart(query)
                         let result = try await performWebSearch(query: query, key: key)
@@ -255,6 +260,14 @@ final class OpenRouterClient: AIClient {
                             "role": "tool",
                             "tool_call_id": id,
                             "content": result
+                        ])
+                    } else {
+                        // Guard hatası, bilinmeyen tool veya eksik/boş query: yine de
+                        // tool_call_id'ye cevap ver ki sonraki POST protokol-geçerli olsun.
+                        messages.append([
+                            "role": "tool",
+                            "tool_call_id": id,
+                            "content": "Tool çalıştırılamadı veya desteklenmiyor."
                         ])
                     }
                 }
@@ -519,8 +532,6 @@ enum PromptKey: String, CaseIterable, Identifiable {
     case webSearchSub
     case memoryExtraction
     case memoryConsolidation
-    case coachReport
-    case coachRecipe
 
     var id: String { rawValue }
 
@@ -531,8 +542,6 @@ enum PromptKey: String, CaseIterable, Identifiable {
         case .webSearchSub:       return "Web Araması Alt-Modeli"
         case .memoryExtraction:   return "Hafıza Çıkarımı"
         case .memoryConsolidation:return "Hafıza Konsolidasyonu"
-        case .coachReport:        return "Koç Günlük Analiz"
-        case .coachRecipe:        return "Koç Günlük Tarif"
         }
     }
 
@@ -541,7 +550,6 @@ enum PromptKey: String, CaseIterable, Identifiable {
         switch self {
         case .chatSystem, .webSearchSub:                return "Sohbet & Arama"
         case .memoryExtraction, .memoryConsolidation:   return "Hafıza"
-        case .coachReport, .coachRecipe:                return "Koç"
         }
     }
 
@@ -552,8 +560,6 @@ enum PromptKey: String, CaseIterable, Identifiable {
         case .webSearchSub:       return "OpenRouterClient · :online web araması alt-modeli"
         case .memoryExtraction:   return "MemoryManager · konuşmadan kalıcı hafıza çıkarımı"
         case .memoryConsolidation:return "MemoryManager · hafıza tekrar/çelişki temizliği"
-        case .coachReport:        return "CoachEngine · her sabahki günlük analiz"
-        case .coachRecipe:        return "CoachEngine · her sabahki günlük tarif"
         }
     }
 
@@ -568,10 +574,6 @@ enum PromptKey: String, CaseIterable, Identifiable {
             return "Son konuşma + mevcut hafıza kayıtları ayrı bir kullanıcı mesajı olarak eklenir."
         case .memoryConsolidation:
             return "Mevcut hafıza kayıt listesi ayrı bir kullanıcı mesajı olarak eklenir."
-        case .coachReport:
-            return "Başına bugünün tarihi; sonuna bilimsel-dayanak direktifi + açık takip maddeleri + önceki rapor + makine-okunur takip formatı otomatik eklenir."
-        case .coachRecipe:
-            return "Başına bugünün tarihi otomatik eklenir. Yemek günlüğü + kayıtlı tarifler bağlam olarak gelir."
         }
     }
 
@@ -592,18 +594,6 @@ enum PromptKey: String, CaseIterable, Identifiable {
             #else
             return ""
             #endif
-        case .coachReport:
-            #if os(macOS)
-            return CoachEngine.reportInstructionsDefault
-            #else
-            return ""
-            #endif
-        case .coachRecipe:
-            #if os(macOS)
-            return CoachEngine.recipeInstructionsDefault
-            #else
-            return ""
-            #endif
         }
     }
 }
@@ -616,6 +606,11 @@ final class PromptStore {
 
     private static let storageKey = "hercules.prompts.overrides.v1"
     private var overrides: [String: String]
+    // overrides arka plan thread'lerden (send → systemPrompt → text) okunurken main'de
+    // (Admin ▸ System) yazılabiliyor. @Observable thread-safety sağlamaz → Dictionary'i
+    // kilitle. NSLock reentrant DEĞİL: persist() override'ı okur, bu yüzden persist'i
+    // KİLİTLEME — çağıran metot zaten kilidi tutuyor (yoksa deadlock olur).
+    private let lock = NSLock()
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.storageKey),
@@ -628,40 +623,48 @@ final class PromptStore {
 
     /// Etkin metin: geçerli override varsa o, yoksa varsayılan.
     func text(_ key: PromptKey) -> String {
-        if let override = overrides[key.rawValue],
-           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return override
+        lock.withLock {
+            if let override = overrides[key.rawValue],
+               !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return override
+            }
+            return key.defaultText
         }
-        return key.defaultText
     }
 
     func isOverridden(_ key: PromptKey) -> Bool {
-        overrides[key.rawValue] != nil
+        lock.withLock { overrides[key.rawValue] != nil }
     }
 
     func override(for key: PromptKey) -> String? {
-        overrides[key.rawValue]
+        lock.withLock { overrides[key.rawValue] }
     }
 
     /// Override yaz. Boşsa veya varsayılana eşitse override kaldırılır (temiz tutar).
     func setOverride(_ key: PromptKey, _ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == key.defaultText.trimmingCharacters(in: .whitespacesAndNewlines) {
-            overrides[key.rawValue] = nil
-        } else {
-            overrides[key.rawValue] = value
+        lock.withLock {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed == key.defaultText.trimmingCharacters(in: .whitespacesAndNewlines) {
+                overrides[key.rawValue] = nil
+            } else {
+                overrides[key.rawValue] = value
+            }
+            persist()
         }
-        persist()
     }
 
     func resetToDefault(_ key: PromptKey) {
-        overrides[key.rawValue] = nil
-        persist()
+        lock.withLock {
+            overrides[key.rawValue] = nil
+            persist()
+        }
     }
 
     func resetAll() {
-        overrides = [:]
-        persist()
+        lock.withLock {
+            overrides = [:]
+            persist()
+        }
     }
 
     private func persist() {

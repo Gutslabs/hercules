@@ -3,6 +3,32 @@ import SwiftData
 import UniformTypeIdentifiers
 import Charts
 
+/// Düzenlenebilir alanları (TextField) doldururken kullanılan gruplama-ayraçsız formatlayıcı.
+/// Fmt.num tr_TR gruplama ayracı '.' üretir → "1.250" gibi değerler parse()'ta 1.25'e bozulur.
+/// usesGroupingSeparator=false ile ayraç yok; digits>=1'de ',' ondalık işareti parse()/number() zaten normalize eder.
+enum MobileFieldFmt {
+    private static let lock = NSLock()
+    private static var cache: [Int: NumberFormatter] = [:]
+
+    private static func formatter(digits: Int) -> NumberFormatter {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cache[digits] { return cached }
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.numberStyle = .decimal
+        f.usesGroupingSeparator = false
+        f.maximumFractionDigits = digits
+        f.minimumFractionDigits = digits
+        cache[digits] = f
+        return f
+    }
+
+    static func num(_ v: Double, digits: Int = 0) -> String {
+        formatter(digits: digits).string(from: NSNumber(value: v)) ?? ""
+    }
+}
+
 struct MobileRootView: View {
     @Environment(\.modelContext) private var ctx
     @Environment(\.scenePhase) private var scenePhase
@@ -61,6 +87,21 @@ struct MobileRootView: View {
     @State private var measurementChest = ""
     @State private var measurementNeck = ""
     @State private var measurementFullCheckIn = false
+
+    /// Cache'lenmiş tarih formatlayıcılar — body main-thread'de çalışır, bu yüzden güvenli.
+    /// Lazy liste satırı/grid hücresi başına yeni DateFormatter ayırmayı önler (CalendarView/Fmt paritesi).
+    private static let fullDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMMM EEEE"
+        return f
+    }()
+    private static let monthTitleFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "LLLL yyyy"
+        return f
+    }()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -506,6 +547,13 @@ struct MobileRootView: View {
 
     private var calendarGridCard: some View {
         let days = calendarDays(for: calendarMonth)
+        // 42 hücrelik grid render başına 42 kez tüm foods/measurements'ı filtrelemek
+        // yerine tek pass'te gün→kcal sözlüğü + ölçüm/antrenman günü kümeleri (CalendarView paritesi).
+        let cal = Calendar.current
+        var kcalByDay: [Date: Double] = [:]
+        for f in foods { kcalByDay[cal.startOfDay(for: f.date), default: 0] += f.calories }
+        let measureDays = Set(measurements.map { cal.startOfDay(for: $0.date) })
+        let workoutWeekdays = Set(activeWorkouts.map(\.weekday))
         return MobileCard {
             VStack(spacing: 12) {
                 HStack {
@@ -541,7 +589,7 @@ struct MobileRootView: View {
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
                     ForEach(Array(days.enumerated()), id: \.offset) { _, day in
-                        calendarDayCell(day)
+                        calendarDayCell(day, kcalByDay: kcalByDay, measureDays: measureDays, workoutWeekdays: workoutWeekdays)
                     }
                 }
             }
@@ -549,14 +597,15 @@ struct MobileRootView: View {
     }
 
     @ViewBuilder
-    private func calendarDayCell(_ date: Date?) -> some View {
+    private func calendarDayCell(_ date: Date?, kcalByDay: [Date: Double], measureDays: Set<Date>, workoutWeekdays: Set<Int>) -> some View {
         if let date {
             let cal = Calendar.current
             let isSelected = cal.isDate(date, inSameDayAs: calendarSelectedDay)
             let isToday = cal.isDateInToday(date)
-            let kcal = dayCalories(date)
-            let hasWorkout = activeWorkouts.contains { $0.weekday == cal.component(.weekday, from: date) }
-            let hasMeasure = measurements.contains { cal.isDate($0.date, inSameDayAs: date) }
+            // date hücreleri zaten gece yarısı; sözlük/küme O(1) lookup (tek pass'ten geldi).
+            let kcal = kcalByDay[date] ?? 0
+            let hasWorkout = workoutWeekdays.contains(cal.component(.weekday, from: date))
+            let hasMeasure = measureDays.contains(date)
             Button {
                 calendarSelectedDay = date
             } label: {
@@ -665,23 +714,12 @@ struct MobileRootView: View {
         }
     }
 
-    private func dayCalories(_ date: Date) -> Double {
-        let cal = Calendar.current
-        return foods.filter { cal.isDate($0.date, inSameDayAs: date) }.reduce(0) { $0 + $1.calories }
-    }
-
     private func monthTitle(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "LLLL yyyy"
-        return f.string(from: date).capitalized
+        Self.monthTitleFormatter.string(from: date).capitalized
     }
 
     private func daySummaryTitle(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "d MMMM EEEE"
-        return f.string(from: date)
+        Self.fullDayFormatter.string(from: date)
     }
 
     private var profilePage: some View {
@@ -856,9 +894,14 @@ struct MobileRootView: View {
         Task { @MainActor in
             isWorking = true
             statusMessage = "Senkronize ediliyor..."
-            await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
+            let syncError = await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
             FoodPresetSeed.upsertDefaults(ctx)
-            statusMessage = BackupService.shared.syncDiagnostics(ctx: ctx)
+            // Push başarısızsa sahte başarı gösterme — gerçek hatayı bildir.
+            if let syncError {
+                statusMessage = "Senkron hatası: \(syncError.localizedDescription)"
+            } else {
+                statusMessage = BackupService.shared.syncDiagnostics(ctx: ctx)
+            }
             isWorking = false
             refreshTick = UUID()
         }
@@ -1634,10 +1677,7 @@ struct MobileRootView: View {
         let cal = Calendar.current
         if cal.isDateInToday(date) { return "Bugün" }
         if cal.isDateInYesterday(date) { return "Dün" }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "d MMMM EEEE"
-        return f.string(from: date)
+        return Self.fullDayFormatter.string(from: date)
     }
 
     /// Ölçüm sekmesi hero'su: büyük kilo + önceki ölçüme göre delta + mini trend + yağ/bel/hedef.
@@ -2628,12 +2668,12 @@ struct MobileRootView: View {
         let shouldOpenFull = forceFull || MeasurementCadence.isFullCheckInDay()
         let latestFull = measurements.first(where: \.isFullCheckIn)
 
-        measurementWeight = measurements.first?.weight.map { Fmt.num($0, digits: 1) } ?? ""
+        measurementWeight = measurements.first?.weight.map { MobileFieldFmt.num($0, digits: 1) } ?? ""
         measurementFullCheckIn = shouldOpenFull
-        measurementBodyFat = shouldOpenFull ? (latestFull?.bodyFat.map { Fmt.num($0, digits: 1) } ?? "") : ""
-        measurementWaist = shouldOpenFull ? (latestFull?.waist.map { Fmt.num($0, digits: 1) } ?? "") : ""
-        measurementChest = shouldOpenFull ? (latestFull?.chest.map { Fmt.num($0, digits: 1) } ?? "") : ""
-        measurementNeck = shouldOpenFull ? (latestFull?.neck.map { Fmt.num($0, digits: 1) } ?? "") : ""
+        measurementBodyFat = shouldOpenFull ? (latestFull?.bodyFat.map { MobileFieldFmt.num($0, digits: 1) } ?? "") : ""
+        measurementWaist = shouldOpenFull ? (latestFull?.waist.map { MobileFieldFmt.num($0, digits: 1) } ?? "") : ""
+        measurementChest = shouldOpenFull ? (latestFull?.chest.map { MobileFieldFmt.num($0, digits: 1) } ?? "") : ""
+        measurementNeck = shouldOpenFull ? (latestFull?.neck.map { MobileFieldFmt.num($0, digits: 1) } ?? "") : ""
     }
 
     private func addMeasurement() {
@@ -2739,12 +2779,12 @@ struct MobileProfileEditor: View {
                 }
             }
             .onAppear {
-                heightStr = profile.height > 0 ? Fmt.num(profile.height, digits: 0) : ""
-                targetStr = profile.targetWeight.map { Fmt.num($0, digits: 1) } ?? ""
-                bodyFatStr = profile.manualBodyFat.map { Fmt.num($0, digits: 1) } ?? ""
-                proteinStr = profile.manualProteinGrams.map { Fmt.num($0, digits: 0) } ?? ""
-                carbsStr = profile.manualCarbsGrams.map { Fmt.num($0, digits: 0) } ?? ""
-                fatStr = profile.manualFatGrams.map { Fmt.num($0, digits: 0) } ?? ""
+                heightStr = profile.height > 0 ? MobileFieldFmt.num(profile.height, digits: 0) : ""
+                targetStr = profile.targetWeight.map { MobileFieldFmt.num($0, digits: 1) } ?? ""
+                bodyFatStr = profile.manualBodyFat.map { MobileFieldFmt.num($0, digits: 1) } ?? ""
+                proteinStr = profile.manualProteinGrams.map { MobileFieldFmt.num($0, digits: 0) } ?? ""
+                carbsStr = profile.manualCarbsGrams.map { MobileFieldFmt.num($0, digits: 0) } ?? ""
+                fatStr = profile.manualFatGrams.map { MobileFieldFmt.num($0, digits: 0) } ?? ""
             }
         }
     }
@@ -2873,10 +2913,10 @@ struct MobileRecipeEditor: View {
         ingredients = r.ingredientsText ?? ""
         instructions = r.instructionsText ?? ""
         url = r.urlString
-        calories = r.calories.map { Fmt.num($0, digits: 0) } ?? ""
-        protein = r.protein.map { Fmt.num($0, digits: 0) } ?? ""
-        carbs = r.carbs.map { Fmt.num($0, digits: 0) } ?? ""
-        fat = r.fat.map { Fmt.num($0, digits: 0) } ?? ""
+        calories = r.calories.map { MobileFieldFmt.num($0, digits: 0) } ?? ""
+        protein = r.protein.map { MobileFieldFmt.num($0, digits: 0) } ?? ""
+        carbs = r.carbs.map { MobileFieldFmt.num($0, digits: 0) } ?? ""
+        fat = r.fat.map { MobileFieldFmt.num($0, digits: 0) } ?? ""
     }
 
     private func parse(_ s: String) -> Double? {

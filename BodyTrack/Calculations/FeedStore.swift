@@ -106,6 +106,11 @@ final class FeedStore {
     }
 
     private func persistSeen() {
+        // Sadece hâlâ canlı (items içinde olan) id'leri tut → seenIDs sınırsız büyümesin.
+        // unseen sayımı/isSeen yalnızca mevcut items'a karşı sorgulandığı için trim'lenen
+        // öğelerin id'lerini düşürmek güvenli. Hem RAM hem UserDefaults bu sayede sınırlı kalır.
+        let live = Set(items.map(\.id))
+        seenIDs.formIntersection(live)
         UserDefaults.standard.set(Array(seenIDs), forKey: Self.seenKey)
     }
 

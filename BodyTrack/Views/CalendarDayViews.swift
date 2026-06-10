@@ -8,6 +8,8 @@ struct DayCell: View {
     let isSelected: Bool
     let consumed: Double
     let target: Double
+    /// O günkü tartı (varsa) — hücrenin sağ üstünde küçük chip olarak gösterilir.
+    let weight: Double?
     let monthlyGoal: MonthlyGoal?
     let onTap: () -> Void
     let onGoalTap: (MonthlyGoal) -> Void
@@ -18,151 +20,138 @@ struct DayCell: View {
         Fmt.dayNumber.string(from: date)
     }
 
-    private var ratio: Double {
-        guard target > 0 else { return 0 }
-        return min(1.0, consumed / target)
-    }
-
     private var hasFood: Bool {
         consumed > 0
     }
 
+    /// V1 dili: hedef üstü → amber, hedef altı → yeşil, kayıt yok → soluk çizgi.
     private var barColor: Color {
-        guard target > 0, consumed > 0 else { return Palette.border }
-        let r = consumed / target
-        if r < 0.85 { return Palette.macroCarbs }
-        if r <= 1.10 { return Palette.positive }
-        if r <= 1.30 { return Palette.warning }
-        return Palette.accent
+        guard target > 0, hasFood else { return Palette.track }
+        return consumed > target ? Palette.warning : Palette.positive
     }
 
-    private var dayColor: Color {
-        if isToday { return Palette.accent }
-        if inMonth { return Palette.textPrimary }
-        return Palette.textQuaternary
-    }
-
-    private var borderColor: Color {
-        if isSelected { return Palette.accent.opacity(0.62) }
-        if isToday { return Palette.accent.opacity(0.55) }
-        if hovering { return Palette.borderStrong }
-        return Palette.border.opacity(inMonth ? 1 : 0.65)
+    /// Yalnız seçili/bugün durumunda görünen mercan halka — diğer durumda çizgi yok.
+    private var stateRing: Color {
+        if isSelected { return Palette.accent.opacity(0.5) }
+        if isToday { return Palette.accent.opacity(0.3) }
+        return .clear
     }
 
     private var fillColor: Color {
-        if isSelected { return Palette.surfaceElevated.opacity(0.92) }
-        if hovering { return Palette.surfaceElevated.opacity(0.72) }
-        return Palette.surface.opacity(inMonth ? 0.70 : 0.34)
+        if isSelected { return Palette.accent.opacity(0.07) }
+        if hovering { return Palette.surfaceElevated }
+        return Palette.surface
     }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center, spacing: 6) {
                     Text(dayNumber)
-                        .font(.system(size: isToday ? 15 : 13, weight: isToday ? .semibold : .medium))
+                        .font(.system(size: 12.5, weight: isSelected || isToday ? .bold : .semibold))
                         .monospacedDigit()
-                        .foregroundStyle(dayColor)
+                        .foregroundStyle(isToday ? Palette.accent : Palette.textPrimary)
 
                     if isToday {
                         Text("BUGÜN")
-                            .font(.system(size: 8.5, weight: .semibold))
-                            .tracking(0.6)
+                            .font(.system(size: 8.5, weight: .bold))
+                            .tracking(0.7)
                             .foregroundStyle(Palette.accent)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Palette.accent.opacity(0.14)))
                     }
-                }
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
-                if let g = monthlyGoal {
-                    Button { onGoalTap(g) } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "scope")
-                                .font(.system(size: 8.5, weight: .semibold))
-                            Text("\(Fmt.num(g.targetWeight, digits: 1)) kg")
-                                .font(.system(size: 9.5, weight: .medium))
-                                .monospacedDigit()
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                        .foregroundStyle(Palette.textSecondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Palette.surfaceElevated.opacity(0.78)))
-                        .overlay(Capsule().strokeBorder(Palette.border, lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .lastTextBaseline, spacing: 2) {
-                        if hasFood {
-                            Text("\(Fmt.int(consumed))")
-                                .font(.system(size: 14, weight: .medium, design: .default))
-                                .monospacedDigit()
-                                .foregroundStyle(Palette.textPrimary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.6)
-                        } else {
-                            Text("—")
-                                .font(.system(size: 14, weight: .regular))
-                                .foregroundStyle(Palette.textQuaternary)
-                        }
-                        Text("kcal")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Palette.textQuaternary)
+                    if let weight {
+                        Text("\(Fmt.num(weight, digits: 1)) kg")
+                            .font(.system(size: 9.5, weight: .regular, design: .monospaced))
+                            .foregroundStyle(Palette.textSecondary)
                             .lineLimit(1)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(Palette.track)
+                            )
                     }
-                    // mini progress
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                                .fill(Palette.border)
-                                .frame(height: 2.5)
-                            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                                .fill(barColor)
-                                .frame(width: max(0, geo.size.width * ratio), height: 2.5)
+
+                    if let g = monthlyGoal {
+                        Button { onGoalTap(g) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "scope")
+                                    .font(.system(size: 8, weight: .semibold))
+                                Text("\(Fmt.num(g.targetWeight, digits: 1))")
+                                    .font(.system(size: 9.5, weight: .regular, design: .monospaced))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(Palette.accent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(Palette.accent.opacity(0.1))
+                            )
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .help("Ay hedefi: \(Fmt.num(g.targetWeight, digits: 1)) kg — düzenlemek için tıkla")
                     }
-                        .frame(height: 2.5)
                 }
+
+                Spacer(minLength: 6)
+
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(hasFood ? Fmt.int(consumed) : "—")
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(hasFood ? Palette.textPrimary : Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text("kcal")
+                        .font(.system(size: 9.5, weight: .regular))
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                }
+
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(barColor)
+                    .opacity(hasFood ? 0.9 : 1)
+                    .frame(height: 3)
+                    .padding(.top, 5)
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
+            .padding(.top, 9)
+            .padding(.horizontal, 11)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
+            // Çizgisiz: hücre opak yüzey + hafif gölgeyle "kalkık fayans" okunur.
+            // Yalnız seçili/bugün durumu mercan halkayla işaretlenir (anlamlı state).
             .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Palette.background)
+            )
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(fillColor)
+                    .shadow(color: Palette.cardShadowTight, radius: 4, x: 0, y: 2)
             )
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    Capsule(style: .continuous)
-                        .fill(Palette.accent)
-                        .frame(width: 2.5)
-                        .padding(.vertical, 10)
-                }
-            }
             .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(borderColor, lineWidth: isSelected || isToday ? 0.85 : 0.5)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(stateRing, lineWidth: 1)
             )
-            .opacity(inMonth ? 1.0 : 0.45)
+            .opacity(inMonth ? 1.0 : 0.32)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .scaleEffect(hovering ? 1.004 : 1)
         .animation(.easeOut(duration: 0.14), value: hovering)
         .onHover { hovering = $0 }
     }
 }
 
-struct GoalRoadmapRow: View {
+/// Hedef rotasının yatay zaman çizgisindeki tek ay düğümü:
+/// işaret (geçti ✓ / bekliyor ○), ay etiketi, hedef kilo ve güncel kilodan farkı.
+struct GoalRouteNode: View {
     let goal: MonthlyGoal
-    let index: Int
     let isReached: Bool
-    let currentWeight: Double?
+    /// Hedef − güncel kilo (negatif = verilecek kilo). Güncel tartı yoksa nil.
+    let delta: Double?
     let onTap: () -> Void
     @State private var hovering = false
 
@@ -171,74 +160,73 @@ struct GoalRoadmapRow: View {
     }
 
     private var deltaText: String? {
-        guard let currentWeight else { return nil }
-        let diff = currentWeight - goal.targetWeight
-        if abs(diff) < 0.05 { return "hedefte" }
-        return diff > 0 ? "−\(Fmt.num(diff, digits: 1)) kg" : "+\(Fmt.num(abs(diff), digits: 1)) kg"
+        guard let delta else { return nil }
+        if abs(delta) < 0.05 { return "hedefte" }
+        return "\(Fmt.signed(delta, digits: 1)) kg"
     }
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .center, spacing: Spacing.md) {
+            VStack(spacing: 7) {
                 ZStack {
-                    Circle()
-                        .fill(isReached ? Palette.positive.opacity(0.16) : Palette.surfaceElevated)
-                    Text("\(index)")
-                        .font(Typography.captionBold)
-                        .foregroundStyle(isReached ? Palette.positive : Palette.textSecondary)
-                }
-                .frame(width: 30, height: 30)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 7) {
-                        Text(monthLabel)
-                            .font(Typography.captionBold)
-                            .foregroundStyle(Palette.textTertiary)
-                        if isReached {
-                            Text("GEÇTİ")
-                                .font(.system(size: 8.5, weight: .semibold))
-                                .tracking(0.6)
-                                .foregroundStyle(Palette.positive)
-                        }
+                    if isReached {
+                        Circle()
+                            .fill(Palette.positive)
+                            .frame(width: 17, height: 17)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Palette.background)
+                    } else {
+                        Circle()
+                            .fill(Palette.background)
+                            .overlay(Circle().strokeBorder(hovering ? Palette.textTertiary : Palette.borderStrong, lineWidth: 1.5))
+                            .frame(width: 9, height: 9)
                     }
-                    Text("\(Fmt.num(goal.targetWeight, digits: 1)) kg")
-                        .font(Typography.titleSmall)
+                }
+                .frame(height: 17)
+
+                HStack(spacing: 5) {
+                    Text(monthLabel)
+                        .font(Typography.label)
+                        .tracking(0.9)
+                        .foregroundStyle(isReached ? Palette.positive : Palette.textQuaternary)
+                    if isReached {
+                        Text("GEÇTİ")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .tracking(0.7)
+                            .foregroundStyle(Palette.positive)
+                    }
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(Fmt.num(goal.targetWeight, digits: 1))
+                        .font(.system(size: 16, weight: .bold))
+                        .monospacedDigit()
                         .foregroundStyle(Palette.textPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
+                    Text("kg")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Palette.textTertiary)
                 }
-
-                Spacer(minLength: Spacing.sm)
+                .padding(.top, -2)
 
                 if let deltaText {
                     Text(deltaText)
-                        .font(Typography.captionBold)
-                        .foregroundStyle(Palette.textTertiary)
+                        .font(.system(size: 10.5, weight: .regular, design: .monospaced))
+                        .foregroundStyle(hovering ? Palette.textPrimary : Palette.textSecondary)
                         .lineLimit(1)
+                        .padding(.top, -3)
                 }
-                Image(systemName: "pencil")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(hovering ? Palette.accent : Palette.textQuaternary)
-                    .opacity(hovering ? 1 : 0.4)
-                    .help("Düzenle")
             }
-            .padding(Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .fill(hovering ? Palette.surfaceElevated.opacity(0.76) : Palette.surface.opacity(0.62))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(hovering ? Palette.borderStrong : Palette.border, lineWidth: 0.55)
-            )
+            .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .scaleEffect(hovering ? 1.004 : 1)
+        .help("Düzenle: \(monthLabel) hedefi")
         .animation(.easeOut(duration: 0.16), value: hovering)
         .onHover { hovering = $0 }
     }
 }
-
 
 // MARK: - Plan setup sheet

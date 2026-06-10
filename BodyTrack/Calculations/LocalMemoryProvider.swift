@@ -32,6 +32,9 @@ final class LocalMemoryProvider {
             return e
         }()
 
+        /// Bu sequence'e kadar olan uçuştaki yazımları geçersiz kıl (restore sonrası stale write'ı diske vurmadan engeller).
+        func invalidate(upTo sequence: Int) { latest = max(latest, sequence) }
+
         @discardableResult
         func write(payload: MemoryPayload?, to url: URL, sequence: Int) -> Bool {
             guard sequence >= latest else { return false }
@@ -153,8 +156,11 @@ final class LocalMemoryProvider {
         }
 
         let alwaysIn = active.filter { $0.type.isCore || $0.pinned }
+        // Skoru karşılaştırma başına değil, kayıt başına BİR kez hesapla (1024-dim cosine pahalı).
         let rest = active.filter { !($0.type.isCore || $0.pinned) }
-            .sorted { relevance($0) > relevance($1) }
+            .map { (memory: $0, score: relevance($0)) }
+            .sorted { $0.score > $1.score }
+            .map(\.memory)
         let remaining = max(0, limit - alwaysIn.count)
         let selected = alwaysIn + Array(rest.prefix(remaining))
 
@@ -343,12 +349,17 @@ final class LocalMemoryProvider {
         guard !trimmed.isEmpty,
               let idx = memories.firstIndex(where: { $0.id == id })
         else { return }
+        let contentChanged = memories[idx].content != trimmed
         memories[idx].content = trimmed
         memories[idx].tags = Self.normalizedTags(tags)
         memories[idx].source = "manual-edit"
         memories[idx].confidence = max(memories[idx].confidence, 0.9)
         memories[idx].updatedAt = .now
         memories[idx].lastSeenAt = .now
+        if contentChanged {
+            memories[idx].embedding = nil          // içerik değişti → embedding bayat, yeniden hesaplanacak
+            memories[idx].embeddingModel = nil
+        }
         rebuildSearchIndex()
         persist()
     }
@@ -576,6 +587,11 @@ final class LocalMemoryProvider {
     private func cancelDeferredWrite() {
         writeSequence += 1          // uçuştaki yazımların fingerprint güncellemesini geçersiz kıl
         deferredWriteInFlight = false
+        // Writer actor'ı da yetkilendir: barrier'a kadar olan (stale) yazımlar diske vurmadan reddedilsin.
+        // Sıradaki gerçek persist > barrier sequence kullanacağı için meşru yazımlar etkilenmez.
+        let barrier = writeSequence
+        let writer = fileWriter
+        Task { await writer.invalidate(upTo: barrier) }
     }
 
     private func rebuildSearchIndex() {
@@ -689,13 +705,14 @@ final class LocalMemoryProvider {
 
     private static func deduplicated(_ loaded: [AgentMemory]) -> [AgentMemory] {
         var output: [AgentMemory] = []
+        var indexByKey: [String: Int] = [:]   // normalize anahtarı → output indeksi (O(n) dedupe)
         for memory in loaded {
             let key = normalizeMemory(memory.content)
             guard !key.isEmpty else {
                 output.append(memory)
                 continue
             }
-            if let idx = output.firstIndex(where: { normalizeMemory($0.content) == key }) {
+            if let idx = indexByKey[key] {
                 output[idx].tags = Array(Set(output[idx].tags + memory.tags)).sorted()
                 output[idx].confidence = max(output[idx].confidence, memory.confidence)
                 output[idx].pinned = output[idx].pinned || memory.pinned
@@ -718,6 +735,7 @@ final class LocalMemoryProvider {
                     output[idx].expiresAt = max(output[idx].expiresAt!, memory.expiresAt!)
                 }
             } else {
+                indexByKey[key] = output.count
                 output.append(memory)
             }
         }

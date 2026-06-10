@@ -87,42 +87,7 @@ struct DashboardBalanceSummary {
 
 struct DashboardBackground: View {
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Palette.background
-            VStack(spacing: 72) {
-                ForEach(0..<18, id: \.self) { _ in
-                    Rectangle()
-                        .fill(Palette.border.opacity(0.55))
-                        .frame(height: 0.5)
-                }
-            }
-            .padding(.top, 42)
-            HStack(spacing: 96) {
-                ForEach(0..<12, id: \.self) { _ in
-                    Rectangle()
-                        .fill(Palette.border.opacity(0.28))
-                        .frame(width: 0.5)
-                }
-            }
-            .padding(.leading, 44)
-        }
-    }
-}
-
-struct DashboardHeroLines: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let rows: [CGFloat] = [0.18, 0.36, 0.58, 0.78]
-        for (index, row) in rows.enumerated() {
-            let y = rect.height * row
-            path.move(to: CGPoint(x: rect.minX + CGFloat(index) * 18, y: y))
-            path.addCurve(
-                to: CGPoint(x: rect.maxX - CGFloat(index) * 10, y: y + CGFloat(index - 1) * 10),
-                control1: CGPoint(x: rect.midX * 0.72, y: y - 36),
-                control2: CGPoint(x: rect.midX * 1.18, y: y + 42)
-            )
-        }
-        return path
+        Palette.background
     }
 }
 
@@ -156,6 +121,9 @@ struct CalorieProgressRing: View {
     let value: String
     let label: String
     let subtitle: String
+    /// Center label color; defaults to `tint` so callers can keep a neutral
+    /// caption while the stroke stays accented.
+    var labelColor: Color? = nil
     @State private var pulse = false
 
     var body: some View {
@@ -175,13 +143,13 @@ struct CalorieProgressRing: View {
 
             VStack(spacing: 3) {
                 Text(value)
-                    .font(Typography.display(32))
+                    .font(Typography.display(34))
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                 Text(label)
                     .font(Typography.captionBold)
-                    .foregroundStyle(tint)
+                    .foregroundStyle(labelColor ?? tint)
                     .lineLimit(1)
                 Text(subtitle)
                     .font(Typography.caption)
@@ -199,76 +167,6 @@ struct CalorieProgressRing: View {
     }
 }
 
-struct DashboardMetricChip: View {
-    let icon: String
-    let label: String
-    let value: String
-    let tint: Color
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(tint.opacity(0.12)))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label)
-                    .font(Typography.label)
-                    .foregroundStyle(Palette.textQuaternary)
-                    .textCase(.uppercase)
-                Text(value)
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            Capsule()
-                .fill(Palette.surfaceElevated.opacity(0.72))
-        )
-        .overlay(
-            Capsule()
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.5)
-        )
-    }
-}
-
-struct DashboardSignalRow: View {
-    let icon: String
-    let eyebrow: String
-    let title: String
-    let detail: String
-    let tint: Color
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(tint.opacity(0.12)))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(eyebrow).eyebrow()
-                Text(title)
-                    .font(Typography.titleSmall)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                Text(detail)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 struct DashboardInlineEmptyState: View {
     let icon: String
     let title: String
@@ -280,7 +178,7 @@ struct DashboardInlineEmptyState: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Palette.textTertiary)
                 .frame(width: 24, height: 24)
-                .background(Circle().fill(Color.white.opacity(0.035)))
+                .background(Circle().fill(Palette.fieldFill))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(Typography.bodyBold)
@@ -295,239 +193,272 @@ struct DashboardInlineEmptyState: View {
     }
 }
 
+// MARK: - V1 "Tek Akış" building blocks
+
+/// Card surface used by every overview section — flat fill, thin hairline border.
+extension View {
+    /// V1 kart kromu + derinlik: opak taban (koyu temada yarı saydam yüzeyin gölgesi
+    /// kaybolmasın diye) üzerine çift gölge — yaygın ortam + sıkı temas — ve üstten
+    /// alta sönen ışık rim'li kenarlık. Kart "zeminden hafif kalkık" okunur.
+    func dashboardCard(radius: CGFloat = Radius.lg) -> some View {
+        self
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(Palette.background)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(Palette.surface)
+                }
+                .compositingGroup()
+                .shadow(color: Palette.cardShadow, radius: 18, x: 0, y: 9)
+                .shadow(color: Palette.cardShadowTight, radius: 3, x: 0, y: 1.5)
+            )
+
+    }
+}
+
+/// Hero left-column stat (Hedef / Ritim / İlerleme): cap label, value, optional sub.
+struct HeroStatColumn: View {
+    let label: String
+    let value: String
+    var sub: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).eyebrow()
+            Text(value)
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if let sub, !sub.isEmpty {
+                Text(sub)
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// Compact macro row for the hero plan column: dot + name, consumed/target + share %, thin progress.
+struct HeroMacroRow: View {
+    let name: String
+    let consumed: Double
+    let target: Double
+    let percent: Double
+    let tint: Color
+
+    private var progress: Double {
+        guard target > 0 else { return 0 }
+        return min(1, max(0, consumed / target))
+    }
+    private var isOver: Bool { consumed > target * 1.05 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Text(name)
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(Fmt.int(consumed))
+                        .font(Typography.mono)
+                        .foregroundStyle(isOver ? Palette.negative : Palette.textPrimary)
+                        .contentTransition(.numericText())
+                    Text("/ \(Fmt.int(target)) g")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .lineLimit(1)
+                Text("%\(Fmt.int(percent))")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+                    .frame(width: 34, alignment: .trailing)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.surfaceElevated)
+                    Capsule()
+                        .fill(isOver ? Palette.negative : tint)
+                        .frame(width: progress > 0 ? max(4, geo.size.width * progress) : 0)
+                }
+            }
+            .frame(height: 5)
+            .animation(.spring(response: 0.5, dampingFraction: 0.85), value: progress)
+        }
+    }
+}
+
+/// Hero öğün satırı — saat + isim + makro özeti; hover'da silme butonu belirginleşir.
+struct HeroMealRow: View {
+    let food: FoodEntry
+    var onDelete: () -> Void
+    @State private var hovering = false
+
+    private var detail: String {
+        var parts = ["\(Fmt.int(food.calories)) kcal"]
+        if let g = food.grams { parts.append("\(Fmt.int(g)) g") }
+        if let p = food.protein { parts.append("P \(Fmt.int(p))g") }
+        if let c = food.carbs { parts.append("K \(Fmt.int(c))g") }
+        if let f = food.fat { parts.append("Y \(Fmt.int(f))g") }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Hairline().opacity(0.7)
+            HStack(spacing: 12) {
+                Text(Fmt.timeShort.string(from: food.date))
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(Palette.textQuaternary)
+                Text(food.name)
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                Text(detail)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(hovering ? Palette.negative : Palette.textQuaternary)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(hovering ? Palette.negative.opacity(0.1) : Color.clear))
+                }
+                .buttonStyle(.plain)
+                .help("Öğünü sil")
+            }
+            .padding(.vertical, 8)
+        }
+        .background(hovering ? Palette.fieldFill : Color.clear)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Goal-aware delta badge (▲/▼ + magnitude); green when the change moves toward the goal.
+struct DeltaBadge: View {
+    let delta: Double?
+    var lowerIsBetter: Bool = false
+    var digits: Int = 1
+
+    private var color: Color {
+        guard let d = delta, d != 0 else { return Palette.textTertiary }
+        let positiveChange = d > 0
+        let good = lowerIsBetter ? !positiveChange : positiveChange
+        return good ? Palette.positive : Palette.negative
+    }
+
+    private var symbol: String {
+        guard let d = delta else { return "—" }
+        if d > 0 { return "▲" }
+        if d < 0 { return "▼" }
+        return "—"
+    }
+
+    var body: some View {
+        if let d = delta {
+            HStack(spacing: 3) {
+                Text(symbol).font(.system(size: 8, weight: .bold))
+                Text(Fmt.num(abs(d), digits: digits))
+                    .font(Typography.captionBold)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .foregroundStyle(color)
+        }
+    }
+}
+
+/// Compact secondary metric row for the Vücut card — tap promotes it into the big slot.
+struct BodyMetricRow: View {
+    let name: String
+    let value: String
+    let unit: String
+    let points: [TrendPoint]
+    let delta: Double?
+    let lowerIsBetter: Bool
+    let accent: Color
+    var onTap: () -> Void = {}
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                HStack(alignment: .lastTextBaseline, spacing: 3) {
+                    Text(value)
+                        .font(.system(size: 21, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    Text(unit)
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textQuaternary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Sparkline(points: points, accent: accent)
+                .frame(width: 88, height: 30)
+                .opacity(points.count >= 2 ? 0.9 : 0)
+
+            DeltaBadge(delta: delta, lowerIsBetter: lowerIsBetter)
+                .frame(width: 56, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 13)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(hovering ? Palette.fieldFill : .clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Balance accounting column with a leading hairline rule (Tüketim / Adım / Spor / Kayıtlı).
+struct BalanceStatColumn: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Rectangle()
+                .fill(Palette.border)
+                .frame(width: 0.5, height: 32)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label).eyebrow()
+                Text(value)
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 extension View {
     func dashboardReveal(_ visible: Bool, delay: Double) -> some View {
         opacity(visible ? 1 : 0)
             .offset(y: visible ? 0 : 12)
             .animation(.spring(response: 0.58, dampingFraction: 0.86).delay(delay), value: visible)
-    }
-}
-
-struct FoodRow: View {
-    let food: FoodEntry
-    var onDelete: () -> Void
-    @State private var hovering = false
-
-    private var timeString: String {
-        Fmt.timeShort.string(from: food.date)
-    }
-
-    private var hasMacroData: Bool {
-        food.protein != nil || food.carbs != nil || food.fat != nil
-    }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Circle().fill(Palette.accent).frame(width: 5, height: 5)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(food.name)
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.textPrimary)
-                        .lineLimit(1)
-                    if let g = food.grams {
-                        Text("· \(Fmt.int(g))g")
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                }
-
-                if hasMacroData {
-                    HStack(spacing: 8) {
-                        macroBit(label: "P", value: food.protein, tint: Palette.macroProtein)
-                        macroBit(label: "K", value: food.carbs, tint: Palette.macroCarbs)
-                        macroBit(label: "Y", value: food.fat, tint: Palette.macroFat)
-                    }
-                } else {
-                    Text("Makro yok")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textQuaternary)
-                }
-            }
-            .layoutPriority(1)
-
-            Spacer(minLength: 0)
-
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(timeString)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textQuaternary)
-                HStack(alignment: .lastTextBaseline, spacing: 2) {
-                    Text(Fmt.int(food.calories))
-                        .font(Typography.mono)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    Text("kcal")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                }
-            }
-            .frame(width: 70, alignment: .trailing)
-
-            Button(action: onDelete) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: 18, height: 18)
-                    .background(Circle().fill(Palette.surfaceElevated))
-            }
-            .buttonStyle(.plain)
-            .opacity(hovering ? 1 : 0)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm - 2)
-                .fill(hovering ? Color.white.opacity(0.025) : Color.clear)
-        )
-        .onHover { hovering = $0 }
-    }
-
-    private func macroBit(label: String, value: Double?, tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(tint)
-                .frame(width: 4, height: 4)
-            Text("\(label) \(value.map { Fmt.int($0) } ?? "-")g")
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
-        }
-    }
-}
-
-struct InsightCard: View {
-    let eyebrow: String
-    let title: String
-    let detail: String
-    let accent: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: 6) {
-                Circle().fill(accent).frame(width: 5, height: 5)
-                Text(eyebrow).eyebrow()
-            }
-            Text(title)
-                .font(Typography.titleSmall)
-                .foregroundStyle(Palette.textPrimary)
-            // detail boş olsa bile aynı yüksekliği koruyacak placeholder
-            Text(detail.isEmpty ? " " : detail)
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
-                .opacity(detail.isEmpty ? 0 : 1)
-        }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
-    }
-}
-
-struct MacroBar: View {
-    let macros: CalorieResult
-    var body: some View {
-        GeometryReader { geo in
-            HStack(spacing: 2) {
-                Rectangle().fill(Palette.macroProtein)
-                    .frame(width: width(for: macros.protein.percent, total: geo.size.width))
-                Rectangle().fill(Palette.macroCarbs)
-                    .frame(width: width(for: macros.carbs.percent, total: geo.size.width))
-                Rectangle().fill(Palette.macroFat)
-                    .frame(width: width(for: macros.fat.percent, total: geo.size.width))
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        }
-        .frame(height: 8)
-    }
-
-    private func width(for percent: Double, total: CGFloat) -> CGFloat {
-        max(2, total * CGFloat(percent / 100.0) - 2)
-    }
-}
-
-struct MacroLegend: View {
-    let name: String
-    let grams: Double          // hedef gram
-    let percent: Double        // hedef kalori payı %
-    let tint: Color
-    var consumed: Double = 0   // bugün alınan gram
-
-    private var progress: Double {
-        guard grams > 0 else { return 0 }
-        return consumed / grams
-    }
-
-    /// Hedefin %105'inin üstü = aşım.
-    private var isOver: Bool { consumed > grams * 1.05 }
-
-    /// İlerleme barının dolum rengi.
-    private var fillColor: Color { isOver ? Palette.negative : tint }
-
-    /// Alınan miktarın rengi (0 → soluk, hedefe yakın → pozitif, aşım → negatif).
-    private var consumedColor: Color {
-        if consumed <= 0 { return Palette.textTertiary }
-        if isOver { return Palette.negative }
-        if consumed >= grams * 0.85 { return Palette.positive }
-        return Palette.textPrimary
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            // Başlık: renk noktası + isim · sağda hedefin kalori payı %
-            HStack(spacing: 6) {
-                Circle().fill(tint).frame(width: 7, height: 7)
-                Text(name)
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.textSecondary)
-                Spacer(minLength: 4)
-                Text("%\(Fmt.int(percent))")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textQuaternary)
-                    .lineLimit(1)
-            }
-            // Alınan / hedef — alınan vurgulu (loglandıkça artar)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(Fmt.int(consumed))
-                    .font(Typography.monoLarge)
-                    .foregroundStyle(consumedColor)
-                    .contentTransition(.numericText())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text("/ \(Fmt.int(grams)) g")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-            }
-            // Tam genişlik, modern progress bar (yumuşak animasyonlu)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Palette.surfaceElevated)
-                    Capsule()
-                        .fill(fillColor)
-                        .frame(width: barWidth(total: geo.size.width))
-                }
-            }
-            .frame(height: 7)
-            .animation(.spring(response: 0.5, dampingFraction: 0.85), value: progress)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Dolum genişliği: 0'da görünmez, biraz alındıysa min görünür uç, %100'de tam.
-    private func barWidth(total: CGFloat) -> CGFloat {
-        guard progress > 0 else { return 0 }
-        return max(5, total * CGFloat(min(1, progress)))
     }
 }

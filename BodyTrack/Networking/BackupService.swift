@@ -70,6 +70,10 @@ final class BackupService {
     private let vaultBookmarkKey = "hercules.vault.bookmark_v1"
     /// Merge öncesi güvenlik yedeği oturumda bir kez yazılsın (her foreground'da değil).
     private var didWriteMergeSafety = false
+    /// Async export sıra numarası — eski (stale) bir detached export, araya giren bir
+    /// sync push'unun yazdığı taze snapshot'ı EZMESİN diye kullanılır. Her export/push
+    /// bunu artırır; detached writer hop-back'te kendi seq'i hâlâ güncel mi kontrol eder.
+    private var exportSequence = 0
     /// Oto-senkron throttle'ı — sık foreground/background olaylarında vault'u dövmesin.
     private var lastAutoSyncAt: Date?
     private let vaultLastSeenExportKey = "hercules.vault.last_seen_exported_at_v1"
@@ -286,37 +290,23 @@ final class BackupService {
         }
         let url = backupURL
         let cloudURL = iCloudBackupURL
-        let vaultRoot = selectedVaultRootURL
-        let vaultDeviceID = deviceID
-        let lastSeen = lastSeenVaultExportedAt
-        let vaultSnapshotRelativePath = self.vaultSnapshotRelativePath
-        let vaultLegacySnapshotName = self.vaultLegacySnapshotName
-        let vaultManifestName = self.vaultManifestName
-        let vaultReadmeName = self.vaultReadmeName
         let encoder = self.encoder
+        // Sıra numarasını AL ve detached task'a taşı. Araya bir sync push girip
+        // exportSequence'i artırırsa bu export "stale" sayılır ve dosya yazmaz.
+        exportSequence += 1
+        let seq = exportSequence
         Task.detached(priority: .utility) {
             do {
+                // Pahalı kısım (encode) main DIŞINDA kalır; tüm dosya yazımları main
+                // actor'a geri döner → exportToVault/writeVaultSnapshot ile TAMAMEN sıralı.
                 let data = try encoder.encode(snapshot)
-                try data.write(to: url, options: [.atomic])
-                if let cloudURL {
-                    try? data.write(to: cloudURL, options: [.atomic])
-                }
-                if let vaultRoot {
-                    _ = try Self.writeVaultSnapshotDetached(
-                        snapshot,
-                        data: data,
-                        root: vaultRoot,
-                        deviceID: vaultDeviceID,
-                        lastSeenExportedAt: lastSeen,
-                        snapshotRelativePath: vaultSnapshotRelativePath,
-                        legacySnapshotName: vaultLegacySnapshotName,
-                        manifestName: vaultManifestName,
-                        readmeName: vaultReadmeName,
-                        encoder: encoder
-                    )
-                    await MainActor.run {
-                        self.lastSeenVaultExportedAt = snapshot.exportedAt
+                await MainActor.run {
+                    guard seq == self.exportSequence else { return }   // araya taze bir push girdi → bu export'u DÜŞÜR
+                    try? data.write(to: url, options: [.atomic])
+                    if let cloudURL {
+                        try? data.write(to: cloudURL, options: [.atomic])
                     }
+                    _ = try? self.writeVaultSnapshot(snapshot, data: data)
                 }
             } catch {
                 AppLog.backup.error("[Backup] async write failed: \(String(describing: error))")
@@ -523,6 +513,9 @@ final class BackupService {
 
     @discardableResult
     func exportToVault(from ctx: ModelContext, force: Bool = false) throws -> VaultOperationSummary {
+        // Bu yazım canonical'dir → bekleyen herhangi bir async export'u geçersiz kıl
+        // (stale snapshot, az önce push'lanan merge'i ezmesin).
+        exportSequence += 1
         // force=true (merge-sync push): guard'lar atlanır. Pull-merge sonrası local
         // OTORİTEDİR; silme local'i "daha az zengin" yapsa bile vault'a YAZILMALI —
         // yoksa silmeler (tombstone) karşı cihaza hiç ulaşmaz ve kayıt geri dirilir.
@@ -956,9 +949,22 @@ final class BackupService {
         let foodCount = (try? ctx.fetchCount(FetchDescriptor<FoodEntry>())) ?? 0
 
         let isEmpty = measurementCount == 0 && recipeCount == 0 && foodCount == 0
-        guard isEmpty, let restoreURL = newestExistingBackupURL() else {
-            // Store boş değilse veya yedek yoksa — flag'i true yap, bir daha gelmesin
+        let restoreURL = newestExistingBackupURL()
+        guard isEmpty else {
+            // Store dolu — kullanıcının verisi var, üstüne restore etme; bir daha gelme.
             UserDefaults.standard.set(true, forKey: importedFlagKey)
+            return
+        }
+        guard let restoreURL else {
+            // Store boş ama henüz yedek görünmüyor (ör. iCloud Drive daha materialize
+            // olmadı). Flag'i KİLİTLEME — sonraki açılışta yedek gelince restore edilsin.
+            return
+        }
+        // Boş bir yedeği import edip flag'i kalıcı kilitleme — sonra gerçek yedek gelince alınsın.
+        if let d = try? Data(contentsOf: restoreURL),
+           let b = try? decoder.decode(HerculesBackup.self, from: d),
+           Self.backupMeaningfulScore(b) == 0 {
+            AppLog.backup.notice("[Backup] en güncel yedek boş; import ertelendi (flag kilitlenmedi).")
             return
         }
         do {
@@ -982,11 +988,25 @@ final class BackupService {
         let localDate = comparableBackupDate(for: backupURL) ?? .distantPast
         guard cloudDate.timeIntervalSince(localDate) > 2 else { return }
 
+        // KÖK-NEDEN GUARD: "daha yeni" iCloud yedeği BOŞ/FAKİR ise, dolu local'i replaceAll
+        // ile SİLME. (Boş ama yeni bir iCloud yedeği bütün veriyi uçuruyordu — veri kaybının
+        // sebebi buydu.) Sadece iCloud en az local kadar zenginse yıkıcı restore yapılır;
+        // gerçek senkron zaten additive union-merge (autoSyncWithVault) ile oluyor.
+        guard let cloudData = try? Data(contentsOf: cloudURL),
+              let cloudBackup = try? decoder.decode(HerculesBackup.self, from: cloudData) else { return }
+        let cloudScore = Self.backupMeaningfulScore(cloudBackup)
+        let localScore = (try? buildBackup(ctx: ctx)).map { Self.backupMeaningfulScore($0) } ?? 0
+        guard cloudScore >= localScore else {
+            AppLog.backup.notice("[Backup] iCloud yedeği local'den fakir (cloud \(cloudScore) < local \(localScore)); replaceAll ATLANDI, veri korundu.")
+            return
+        }
+
         do {
-            try restore(from: cloudURL, into: ctx, mode: .replaceAll)
-            if let data = try? Data(contentsOf: cloudURL) {
-                try? data.write(to: backupURL, options: [.atomic])
-            }
+            // TOCTOU FIX: SKORLANAN cloudBackup'ı doğrudan restore et — dosyayı yeniden
+            // okuma/decode etme. iCloud daemon araya BOŞ bir snapshot koyarsa skor geçen
+            // sürüm değil yeni boş sürüm restore edilirdi (eski veri kaybının tekrarı).
+            try restore(cloudBackup, into: ctx, mode: .replaceAll)
+            try? cloudData.write(to: backupURL, options: [.atomic])   // zaten okunmuş byte'ları kullan; 3. okuma yok
             AppLog.backup.notice("[Backup] restored newer iCloud backup from \(cloudURL.path)")
         } catch {
             AppLog.backup.error("[Backup] iCloud auto-restore failed: \(String(describing: error))")
@@ -1007,6 +1027,27 @@ final class BackupService {
     func restore(from url: URL, into ctx: ModelContext, mode: RestoreMode) throws {
         let data = try Data(contentsOf: url)
         let backup = try decoder.decode(HerculesBackup.self, from: data)
+        try restore(backup, into: ctx, mode: mode)
+    }
+
+    /// Decode edilmiş snapshot üzerinden restore — çağıran zaten elinde bytes'ı
+    /// tutuyorsa (ör. iCloud TOCTOU guard'ı) dosyayı yeniden okuyup decode etmesin diye
+    /// ayrı body. SKORLANAN byte'lar ile RESTORE edilen byte'lar aynı olur.
+    func restore(_ backup: HerculesBackup, into ctx: ModelContext, mode: RestoreMode) throws {
+        // mergeAdditive = "yedekteki YENİ öğeleri ekle, mevcut korunur". Koşulsuz insert
+        // değil union-merge (add-only-new + çakışma + tombstone) kullan; yoksa dolu store'da
+        // tüm dataset ÇİFTLENİR. Store dışı (support/preference) restore adımları korunur.
+        if mode == .mergeAdditive {
+            applyMerge(backup, into: ctx)                                     // add-only-new + ctx.save()
+            restoreSupportFiles(backup.supportFiles ?? [], mode: .mergeAdditive)
+            restorePreferences(backup.preferences ?? [])
+            #if os(macOS)
+            LocalMemoryProvider.shared.reloadFromDisk()
+            ResearchLibrary.shared.reloadFromDisk()
+            #endif
+            NotificationCenter.default.post(name: .herculesSupportFilesRestored, object: nil)
+            return
+        }
 
         if mode == .replaceAll {
             try writePreRestoreSafetyBackup(from: ctx)
@@ -1217,6 +1258,13 @@ final class BackupService {
         restoreSupportFiles(backup.supportFiles ?? [], mode: mode)
         restorePreferences(backup.preferences ?? [])
         try ctx.save()
+        if mode == .replaceAll {
+            // replaceAll tüm store'u değiştirdi → sync baseline'ını geri yüklenen kayıt
+            // kümesine sıfırla. Yoksa sonraki recordPushDeletionsAndTombstones, eski
+            // baseline'da olup restore'da olmayan HER kaydı "silinmiş" sanıp kütlesel
+            // tombstone üretir ve bütün cihazlarda yok eder.
+            saveLastSyncedKeys(currentKeysAndTimestamps(ctx: ctx).keys)
+        }
         #if os(macOS)
         LocalMemoryProvider.shared.reloadFromDisk()
         ResearchLibrary.shared.reloadFromDisk()
@@ -1376,10 +1424,10 @@ extension Notification.Name {
 extension BackupService {
 
     enum SyncKey {
-        // SANİYE hassasiyeti (ms DEĞİL): snapshot JSON'u iso8601 ile yazıldığından Date
-        // round-trip'te milisaniye KAYBOLUR. ms kullansaydık aynı kayıt her turda farklı
-        // anahtar alır → union/dedup bozulur, cihazlar yakınsamaz. Saniye round-trip'te sabit.
-        static func ms(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded()) }
+        // SANİYE hassasiyeti (ms DEĞİL): snapshot JSON'u iso8601 ile YAZILIRKEN saniye-altı KESİLİR
+        // (truncation). Anahtar da FLOOR almalı ki canlı (saniye-altı dolu) Date ile round-trip
+        // edilmiş (kesilmiş) Date AYNI anahtarı üretsin; round() ~%50 kayıtta N+1 verip yakınsamayı bozar.
+        static func ms(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded(.down)) }
         static func day(_ date: Date) -> String {
             let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
             return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
@@ -1416,7 +1464,25 @@ extension BackupService {
         for t in arr {
             if let e = map[t.key] { if t.deletedAt > e.deletedAt { map[t.key] = t } } else { map[t.key] = t }
         }
-        return map
+        return purgingMassBatches(map)
+    }
+
+    /// Gerçek kullanıcı silmeleri damla damla olur. AYNI saniyede onlarca tombstone,
+    /// "boş/yarım yüklenmiş store, dolu baseline'a karşı diff'lendi" kazasının imzasıdır
+    /// (10 Haziran'da recipes + program tek anda yok oldu olayı: 171 tombstone aynı saniye).
+    /// Böyle toplu partileri ELE — canlı veriyi silmesinler. Normal küçük silmeler
+    /// (farklı saniyeler, az sayı) korunur, böylece gerçek silmeler hâlâ propagate olur.
+    private func purgingMassBatches(_ tombs: [String: TombstoneSnapshot], threshold: Int = 40) -> [String: TombstoneSnapshot] {
+        guard tombs.count >= threshold else { return tombs }
+        var bySecond: [Int: [String]] = [:]
+        for (k, t) in tombs {
+            bySecond[Int(t.deletedAt.timeIntervalSince1970), default: []].append(k)
+        }
+        var result = tombs
+        for (_, keys) in bySecond where keys.count >= threshold {
+            for k in keys { result.removeValue(forKey: k) }
+        }
+        return result
     }
 
     func saveTombstones(_ map: [String: TombstoneSnapshot]) {
@@ -1445,7 +1511,7 @@ extension BackupService {
     /// "silinmiş" sanılıp kütlesel tombstone üretilir (mevcut veri yok olur).
     private func migrateSyncKeyFormatIfNeeded() {
         let k = "hercules.sync.keyformat"
-        let current = 2
+        let current = 3
         guard UserDefaults.standard.integer(forKey: k) != current else { return }
         try? FileManager.default.removeItem(at: lastKeysFileURL)
         try? FileManager.default.removeItem(at: tombstonesFileURL)
@@ -1478,8 +1544,19 @@ extension BackupService {
     func recordPushDeletionsAndTombstones(ctx: ModelContext) -> [TombstoneSnapshot] {
         let current = currentKeysAndTimestamps(ctx: ctx).keys
         var tombs = loadTombstones()
-        let deleted = loadLastSyncedKeys().subtracting(current)
+        let lastSynced = loadLastSyncedKeys()
+        let deleted = lastSynced.subtracting(current)
         if !deleted.isEmpty {
+            // GÜVENLİK: Mağaza geçici boş/eksik yüklendiyse (açılışta fetch hatası, ikinci
+            // boş instance, migrasyon anı), bütün baseline "silinmiş" görünür → tek seferde
+            // yüzlerce tombstone üretip tüm cihazlarda veriyi yok ederiz (10 Haz olayı).
+            // Kütlesel-silme imzasını reddet: tombstone üretme, baseline'ı da BOZMA ki
+            // sağlıklı bir sonraki çalıştırma doğru diff yapsın.
+            let looksLikeWipe = current.count < 5 || deleted.count > max(20, lastSynced.count / 2)
+            if looksLikeWipe {
+                AppLog.backup.error("[Sync] kütlesel silme reddedildi (silinen \(deleted.count)/\(lastSynced.count), kalan \(current.count)) — tombstone üretilmedi")
+                return Array(tombs.values)
+            }
             let now = Date()
             for key in deleted {
                 let entity = String(key.prefix(while: { $0 != "-" }))
@@ -1506,6 +1583,9 @@ extension BackupService {
         for t in (backup.tombstones ?? []) {
             if let e = tombs[t.key] { if t.deletedAt > e.deletedAt { tombs[t.key] = t } } else { tombs[t.key] = t }
         }
+        // Gelen vault'taki kütlesel-silme kazasını da temizle (başka cihaz boş store ile
+        // push etmişse 100+ tombstone gelir; uygulanırsa local'i de yok eder).
+        tombs = purgingMassBatches(tombs)
         func resolvedTS(_ key: String, _ fallback: Date) -> Date { incomingTS[key] ?? fallback }
         func tombstoned(_ key: String, _ recordDate: Date) -> Bool {
             if let t = tombs[key], t.deletedAt >= recordDate { return true }
@@ -1549,7 +1629,10 @@ extension BackupService {
             insert: { snap, u in
                 let f = FoodEntry(date: snap.date, name: snap.name, grams: snap.grams, calories: snap.calories, protein: snap.protein, carbs: snap.carbs, fat: snap.fat)
                 f.updatedAt = u; ctx.insert(f)
-            }
+            },
+            // Aynı isim + aynı saniye iki AYRI yemek satırı (çift-dokunulan hızlı-ekle) çift
+            // sanılıp biri silinmesin; sadece içerik de aynıysa çakışsın.
+            localContentKey: { "\($0.grams ?? -1)|\($0.calories)|\($0.protein ?? -1)|\($0.carbs ?? -1)|\($0.fat ?? -1)" }
         )
 
         // 5) STEPS
@@ -1722,13 +1805,25 @@ extension BackupService {
         localKey: (Model) -> String,
         localUpdatedAt: (Model) -> Date,
         insert: (Snapshot, Date) -> Void,
-        preserveLocalIf: ((Snapshot, Model) -> Bool)? = nil
+        preserveLocalIf: ((Snapshot, Model) -> Bool)? = nil,
+        localContentKey: (Model) -> String = { _ in "" }
     ) {
         var localByKey: [String: Model] = [:]
         for m in (try? ctx.fetch(FetchDescriptor<Model>())) ?? [] {
             let k = localKey(m)
-            if localByKey[k] == nil { localByKey[k] = m }
-            else { ctx.delete(m) } // aynı anahtarlı yerel çift (kararsız-anahtar döneminden) → temizle
+            guard let existing = localByKey[k] else { localByKey[k] = m; continue }
+            // Aynı saniye-çözünürlüklü anahtarı paylaşan iki satır, içerikleri AYNIYSA
+            // gerçek çifttir (kararsız-anahtar döneminden) → en yeni updatedAt'i tut.
+            // İçerikleri FARKLIYSA (ör. çift-dokunulan hızlı-ekle) bunlar AYRI kayıttır;
+            // ikisini de bırak (yoksa kullanıcının kalorisi sessizce düşer).
+            if localContentKey(existing) == localContentKey(m) {
+                if localUpdatedAt(m) > localUpdatedAt(existing) {
+                    ctx.delete(existing); localByKey[k] = m
+                } else {
+                    ctx.delete(m)
+                }
+            }
+            // else: m yerinde kalır (map'e konmaz; dokunulmadan hayatta kalır)
         }
         for snap in incoming {
             let k = key(snap)
@@ -1796,10 +1891,11 @@ extension BackupService {
     /// Vault ile iki-yönlü senkron: (1) yerel silmeleri tombstone'a çevir, (2) vault'u
     /// local'e KATARAK çek (merge), (3) birleşmiş local'i vault'a yaz. Sıra kritik:
     /// silme tespiti merge'den ÖNCE olmalı, yoksa merge silineni vault'tan geri ekler.
-    func syncWithVault(into ctx: ModelContext) throws {
+    @discardableResult
+    func syncWithVault(into ctx: ModelContext) throws -> Error? {
         migrateSyncKeyFormatIfNeeded()                  // 0) eski ms-anahtar baseline'ını sıfırla
         _ = recordPushDeletionsAndTombstones(ctx: ctx) // 1) pull öncesi silme tespiti
-        try withVaultRoot { root in                    // 2) PULL: union merge
+        try withVaultRoot { root in                    // 2) PULL: union merge (stale bookmark / erişilemez klasörde THROW eder)
             try Self.ensureVaultLayout(
                 root: root,
                 snapshotRelativePath: vaultSnapshotRelativePath,
@@ -1816,8 +1912,11 @@ extension BackupService {
         do {                                            // 3) PUSH: birleşmiş local → vault
             // force: silme propagation için guard'sız yaz (local merge sonrası otorite).
             _ = try exportToVault(from: ctx, force: true)
+            return nil
         } catch {
+            // Push hatasını YUTMA, çağırana DÖN — manuel sync sahte "✓" göstermesin.
             AppLog.backup.error("[Sync] push failed: \(String(describing: error))")
+            return error
         }
     }
 
@@ -1832,14 +1931,15 @@ extension BackupService {
 
     /// `syncWithVault`'un bloklamayan sürümü: iCloud dosyalarını arka planda ısıtır,
     /// sonra senkronu main'de çalıştırır (ağır okuma ana thread'i dondurmaz).
-    func syncWithVaultNonBlocking(into ctx: ModelContext) async {
-        guard let bookmarkData = UserDefaults.standard.data(forKey: vaultBookmarkKey) else { return }
+    @discardableResult
+    func syncWithVaultNonBlocking(into ctx: ModelContext) async -> Error? {
+        guard let bookmarkData = UserDefaults.standard.data(forKey: vaultBookmarkKey) else { return nil }
         let relativePaths = [vaultSnapshotRelativePath, vaultLegacySnapshotName, vaultManifestName]
         await Task.detached(priority: .utility) {
             BackupService.warmVaultFilesDetached(bookmarkData: bookmarkData, relativePaths: relativePaths)
         }.value
-        do { try syncWithVault(into: ctx) }
-        catch { AppLog.backup.error("[Sync] syncWithVault failed: \(String(describing: error))") }
+        do { return try syncWithVault(into: ctx) }
+        catch { AppLog.backup.error("[Sync] syncWithVault failed: \(String(describing: error))"); return error }
     }
 
     private func writeMergeSafetyBackupOnce(into root: URL, from ctx: ModelContext) {

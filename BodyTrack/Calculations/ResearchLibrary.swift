@@ -165,6 +165,9 @@ final class ResearchLibrary {
         let pubDate: String
     }
 
+    // Pinlenmemiş paper üst sınırı: haftalık auto-refresh papers'ı sınırsız büyütmesin.
+    private static let maxUnpinnedPapers = 300
+
     private let researchURL: URL
     private let session: URLSession
     private var papers: [ResearchPaper] = []
@@ -287,6 +290,13 @@ final class ResearchLibrary {
         }
 
         lastUpdatedAt = .now
+        // Pinned'leri koru, kalan unpinned paperları en yeni updatedAt'e göre N ile sınırla;
+        // böylece papers (ve her backup snapshot'una gömülen research-library.json) sınırsız büyümez.
+        let pinned = papers.filter(\.pinned)
+        let rest = papers.filter { !$0.pinned }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(Self.maxUnpinnedPapers)
+        papers = pinned + Array(rest)
         persist()
         return ResearchUpdateSummary(
             addedCount: addedCount,

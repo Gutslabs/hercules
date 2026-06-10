@@ -118,9 +118,9 @@ struct WorkoutLogEditor: View {
                     }
                 }
 
-                ForEach(Array(exercises.enumerated()), id: \.element.id) { exIdx, _ in
+                ForEach($exercises) { $draft in
                     Section {
-                        TextField("Hareket adı", text: $exercises[exIdx].name, prompt: Text("ör: Bench Press"))
+                        TextField("Hareket adı", text: $draft.name, prompt: Text("ör: Bench Press"))
                             .textFieldStyle(.roundedBorder)
 
                         // Set başlık satırı
@@ -144,8 +144,8 @@ struct WorkoutLogEditor: View {
                         }
 
                         // id-based binding loop — index'i stale capture etmemek için
-                        ForEach($exercises[exIdx].sets) { $setDraft in
-                            let setNum = (exercises[exIdx].sets.firstIndex(where: { $0.id == setDraft.id }) ?? 0) + 1
+                        ForEach($draft.sets) { $setDraft in
+                            let setNum = (draft.sets.firstIndex(where: { $0.id == setDraft.id }) ?? 0) + 1
                             HStack(spacing: 8) {
                                 Text("\(setNum)")
                                     .font(Typography.bodyBold)
@@ -164,25 +164,25 @@ struct WorkoutLogEditor: View {
                                 Button {
                                     let setId = setDraft.id
                                     withAnimation(.easeInOut(duration: 0.15)) {
-                                        if exercises[exIdx].sets.count > 1 {
-                                            exercises[exIdx].sets.removeAll { $0.id == setId }
+                                        if draft.sets.count > 1 {
+                                            draft.sets.removeAll { $0.id == setId }
                                         }
                                     }
                                 } label: {
                                     Image(systemName: "minus.circle.fill")
                                         .font(.system(size: 12))
-                                        .foregroundStyle(exercises[exIdx].sets.count > 1 ? Palette.textTertiary : Palette.textQuaternary)
+                                        .foregroundStyle(draft.sets.count > 1 ? Palette.textTertiary : Palette.textQuaternary)
                                 }
                                 .buttonStyle(.borderless)
                                 .frame(width: 24)
-                                .disabled(exercises[exIdx].sets.count <= 1)
+                                .disabled(draft.sets.count <= 1)
                             }
                         }
 
                         Button {
                             // Önceki setten reps/kg kopyala (pyramid kolaylığı)
-                            let prev = exercises[exIdx].sets.last
-                            exercises[exIdx].sets.append(DraftSet(
+                            let prev = draft.sets.last
+                            draft.sets.append(DraftSet(
                                 reps: prev?.reps ?? 10,
                                 weight: prev?.weight
                             ))
@@ -194,17 +194,18 @@ struct WorkoutLogEditor: View {
 
                         // Hareketi tamamen sil
                         Button(role: .destructive) {
-                            exercises.remove(at: exIdx)
+                            exercises.removeAll { $0.id == draft.id }
                         } label: {
                             Label("Hareketi Sil", systemImage: "trash")
                                 .font(Typography.caption)
                         }
                         .buttonStyle(.borderless)
                     } header: {
+                        let num = (exercises.firstIndex(where: { $0.id == draft.id }) ?? 0) + 1
                         HStack {
-                            Text(exercises[exIdx].name.isEmpty ? "Hareket \(exIdx + 1)" : exercises[exIdx].name)
+                            Text(draft.name.isEmpty ? "Hareket \(num)" : draft.name)
                             Spacer()
-                            Text(exercises[exIdx].previewSummary)
+                            Text(draft.previewSummary)
                                 .font(Typography.caption)
                                 .foregroundStyle(Palette.textTertiary)
                                 .textCase(nil)

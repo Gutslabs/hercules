@@ -36,7 +36,7 @@ struct ChatPageView: View {
     var body: some View {
         HStack(spacing: 0) {
             conversationRail
-                .frame(width: 264)
+                .frame(width: 282)
             Rectangle().fill(ChatChrome.border).frame(width: 0.5)
             mainColumn
                 .frame(maxWidth: .infinity)
@@ -60,42 +60,31 @@ struct ChatPageView: View {
 
     private var conversationRail: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text("Sohbetler").eyebrow()
                 Spacer()
-                Button { store.newChat(); inputFocused = true } label: {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(ChatChrome.primary)
-                        .frame(width: 30, height: 30)
-                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(ChatChrome.panelRaised))
-                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.5))
-                }
-                .buttonStyle(.plain)
-                .disabled(store.isSending)
-                .help("Yeni sohbet")
+                Text("\(store.conversationList.count)")
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(ChatChrome.quaternary)
             }
-            .padding(.horizontal, Spacing.lg).padding(.top, Spacing.lg).padding(.bottom, Spacing.md)
+            .padding(.horizontal, Spacing.lg).padding(.top, Spacing.xl).padding(.bottom, 14)
 
             Button { store.newChat(); inputFocused = true } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus").font(.system(size: 11, weight: .bold))
-                    Text("Yeni sohbet").font(Typography.captionBold)
-                    Spacer()
-                }
-                .foregroundStyle(ChatChrome.secondary)
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(ChatChrome.panel.opacity(0.6)))
-                .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.5))
-                .contentShape(Rectangle())
+                Text("+ Yeni sohbet")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(ChatChrome.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(ChatChrome.borderStrong, lineWidth: 1))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(store.isSending)
             .padding(.horizontal, Spacing.lg)
-            .padding(.bottom, Spacing.md)
+            .padding(.bottom, 14)
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
+                LazyVStack(alignment: .leading, spacing: 2) {
                     if store.conversationList.isEmpty {
                         Text("Geçmiş yok. İlk mesajını yaz.")
                             .font(Typography.caption).foregroundStyle(ChatChrome.quaternary)
@@ -137,26 +126,29 @@ struct ChatPageView: View {
                 store.selectConversation(conversation.id)
                 inputFocused = true
             } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: active ? "bubble.left.fill" : "bubble.left")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(active ? ChatChrome.accent : ChatChrome.tertiary)
-                        .frame(width: 16)
-                    VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(conversation.title.isEmpty ? "Yeni sohbet" : conversation.title)
-                            .font(Typography.captionBold)
+                            .font(.system(size: 12, weight: active ? .semibold : .medium))
                             .foregroundStyle(active ? ChatChrome.primary : ChatChrome.secondary)
                             .lineLimit(1)
                         Text(Fmt.relative(conversation.updatedAt))
-                            .font(Typography.label)
+                            .font(.system(size: 10.5))
                             .foregroundStyle(ChatChrome.quaternary)
                             .lineLimit(1)
                     }
                     Spacer(minLength: hovered ? 26 : 0)
                 }
-                .padding(.horizontal, 10).padding(.vertical, 8)
+                .padding(.horizontal, 11).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(active ? ChatChrome.panelRaised : (hovered ? ChatChrome.panel.opacity(0.5) : Color.clear)))
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(active ? ChatChrome.accent.opacity(0.07) : (hovered ? ChatChrome.panel.opacity(0.5) : Color.clear))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(active ? ChatChrome.accent.opacity(0.35) : Color.clear, lineWidth: 1)
+                )
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -201,23 +193,21 @@ struct ChatPageView: View {
     }
 
     private var chatHeader: some View {
-        HStack(spacing: 12) {
-            AssistantMark(size: 34, cornerRadius: 10)
+        HStack(alignment: .bottom, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 7) {
-                    Text("Koç").font(Typography.bodyBold).foregroundStyle(ChatChrome.primary)
-                    Circle().fill(ChatChrome.positive).frame(width: 5, height: 5)
+                Text("AI Koç").eyebrow()
+                HStack(spacing: 8) {
+                    Text("Koç")
+                        .font(.system(size: 20, weight: .bold))
+                        .tracking(-0.2)
+                        .foregroundStyle(ChatChrome.primary)
+                    Circle().fill(ChatChrome.positive).frame(width: 6, height: 6)
                 }
-                modelMenu
             }
             Spacer()
-            if !store.currentConversationTitle.isEmpty {
-                Text(store.currentConversationTitle)
-                    .font(Typography.caption).foregroundStyle(ChatChrome.quaternary)
-                    .lineLimit(1).frame(maxWidth: 280, alignment: .trailing)
-            }
+            modelMenu
         }
-        .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.md)
+        .padding(.horizontal, Spacing.xl).padding(.top, Spacing.xl).padding(.bottom, 18)
         .background(ChatChrome.background)
     }
 
@@ -262,16 +252,16 @@ struct ChatPageView: View {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                Text("\(provider.label) · \(model)")
-                    .font(Typography.caption).foregroundStyle(ChatChrome.tertiary).lineLimit(1)
-                if provider.supportsIntelligence {
-                    Text("· \(intelligence.label)")
-                        .font(Typography.caption).foregroundStyle(ChatChrome.secondary).lineLimit(1)
-                }
+            HStack(spacing: 6) {
+                Text(providerChipText)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(ChatChrome.tertiary)
+                    .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .semibold)).foregroundStyle(ChatChrome.quaternary)
+                    .font(.system(size: 7.5, weight: .semibold)).foregroundStyle(ChatChrome.quaternary)
             }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .menuStyle(.button)
@@ -280,11 +270,17 @@ struct ChatPageView: View {
         .help("Sağlayıcı / model / düşünme seviyesi")
     }
 
+    private var providerChipText: String {
+        var parts = "\(provider.label) · \(model)"
+        if provider.supportsIntelligence { parts += " · \(intelligence.label)" }
+        return parts
+    }
+
     private var conversation: some View {
         ScrollViewReader { proxy in
             GeometryReader { viewport in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, turn in
                             if showsDaySeparator(at: index) {
                                 daySeparator(turn.createdAt)
@@ -392,7 +388,8 @@ struct ChatPageView: View {
         }
     }
 
-    /// Bubble altında zaman damgası + (hover'da) kopyala butonu — mesaj sahibine göre hizalı.
+    /// Mesaj altında mono zaman damgası + (hover'da) kopyala/paylaş — sahibine göre hizalı.
+    /// Asistan tarafında sol girinti = nokta işareti (6) + boşluk (13).
     private func metaRow(_ turn: ChatTurn) -> some View {
         let isUser = turn.role == .user
         let showActions = hoveredMessageID == turn.id || copiedMessageID == turn.id || sharedMessageID == turn.id
@@ -401,11 +398,11 @@ struct ChatPageView: View {
             if showActions { shareButton(turn) }
             if showActions { copyButton(turn) }
             Text(Fmt.timeShort.string(from: turn.createdAt))
-                .font(Typography.label)
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .foregroundStyle(ChatChrome.quaternary)
             if !isUser { Spacer(minLength: 0) }
         }
-        .padding(.leading, isUser ? 0 : 30)
+        .padding(.leading, isUser ? 0 : 19)
         .padding(.trailing, isUser ? 2 : 0)
         .frame(maxWidth: .infinity)
         .animation(.easeInOut(duration: 0.12), value: showActions)
@@ -516,61 +513,130 @@ struct ChatPageView: View {
 
     // MARK: - Empty state
 
+    /// "Ne sormak istersin?" — eski sidebar "AI ipuçları" overlay'inin içeriği artık
+    /// yeni sohbetin boş ekranı. Tıklanan kalıp inputa yazılır.
     private var emptyState: some View {
-        ScrollView {
-            VStack(spacing: Spacing.xl) {
-                Spacer(minLength: 40)
-                VStack(spacing: 14) {
-                    AssistantMark(size: 56, cornerRadius: 17)
-                    VStack(spacing: 6) {
-                        Text("Koç'a sor")
-                            .font(Typography.display(30)).foregroundStyle(ChatChrome.primary)
-                        Text("Yemeğini, ölçünü, antrenmanını yaz; verini @ ile etiketle. Tek cümle yeter.")
-                            .font(Typography.body).foregroundStyle(ChatChrome.tertiary)
-                            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: 440)
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Spacer(minLength: 32)
+                    Text("Ne sormak istersin?")
+                        .font(.system(size: 24, weight: .bold))
+                        .tracking(-0.3)
+                        .foregroundStyle(ChatChrome.primary)
+                    Text("Bu kalıplar AI'nın sadece gereken veri aralığını açmasına yardım eder — tıklayınca inputa yazılır.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(ChatChrome.quaternary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 460, alignment: .leading)
+                        .padding(.top, 6)
+
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 250), spacing: Spacing.xl, alignment: .topLeading)],
+                        alignment: .leading,
+                        spacing: 30
+                    ) {
+                        ForEach(Array(Self.promptLibrary.enumerated()), id: \.offset) { idx, section in
+                            promptSection(index: idx, title: section.title, tips: section.tips)
+                        }
                     }
+                    .padding(.top, 34)
+                    Spacer(minLength: 32)
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: Spacing.md)], spacing: Spacing.md) {
-                    ForEach(Self.starters, id: \.self) { starter(prompt: $0) }
-                }
-                .frame(maxWidth: 720)
-                Spacer(minLength: 40)
+                .frame(maxWidth: 1020, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, Spacing.xxl)
+                .frame(minHeight: viewport.size.height)
             }
-            .padding(Spacing.xxl)
-            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(ChatChrome.background)
     }
 
-    private static let starters = [
-        "Bugün nasıl gidiyorum? @Ölçümler @Beslenme",
-        "300g pişmiş tavuk göğsü + 150g pirinç",
-        "@Antrenman bu haftaki planımı göster",
-        "@Takvim son 7 gün ortalama kalorim ne?",
-        "Yüksek proteinli bir akşam yemeği öner",
-        "Kilo hedefime göre nasıl gidiyorum?"
+    private static let promptLibrary: [(title: String, tips: [String])] = [
+        ("Bugün", [
+            "bugünkü makrom ne?",
+            "bugün kaç kalori kaldı?",
+            "bugün ne yedim?",
+            "bugünkü proteinim yeterli mi?"
+        ]),
+        ("Tarih ve Takvim", [
+            "dün ne yemişim?",
+            "24 Mayıs ne yedim?",
+            "geçen hafta yemek günlüğüm",
+            "Mayıs yemek özetim"
+        ]),
+        ("Kalori Aralıkları", [
+            "bu hafta kalori ortalamam?",
+            "bu ay kalori ortalamam?",
+            "son 30 gün kalori açığım nasıl?",
+            "son 90 gün özetim"
+        ]),
+        ("Vücut Trendleri", [
+            "kilo trendim nasıl?",
+            "son 14 gün kilo hızım?",
+            "hedefe ulaşır mıyım?",
+            "plato mu yaşıyorum?"
+        ]),
+        ("Antrenman", [
+            "bugün antrenman var mı?",
+            "programım mantıklı mı?",
+            "son 30 gün antrenman frekansım?",
+            "cut döneminde antrenmanı değiştirmeli miyim?"
+        ]),
+        ("Adım ve Aktivite", [
+            "bugünkü adımım kaç?",
+            "cut için adımım yeterli mi?",
+            "adım ortalamam düşük mü?",
+            "NEAT artırmak mantıklı mı?"
+        ]),
+        ("Beslenme ve Mikro", [
+            "mikro eksiklerim ne?",
+            "lifim düşük mü?",
+            "protein hedefimi nasıl tamamlarım?",
+            "beslenmemde çeşitlilik iyi mi?"
+        ]),
+        ("Tarif ve Preset", [
+            "protein bowl tarifi öner",
+            "whey ile tatlı tarifi bul",
+            "kayıtlı tariflerime bak",
+            "bugünkü makroya göre öğün öner"
+        ]),
+        ("@ Etiketler", [
+            "@Kalori bu ay ortalamam?",
+            "@Takvim dün ne yemişim?",
+            "@Antrenman programım mantıklı mı?",
+            "@Hepsi tüm veriye bakarak yorumla"
+        ])
     ]
 
-    private func starter(prompt: String) -> some View {
-        Button {
-            store.input = prompt
-            inputFocused = true
-        } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "sparkles").font(.system(size: 12)).foregroundStyle(ChatChrome.accent)
-                Text(prompt).font(Typography.caption).foregroundStyle(ChatChrome.secondary)
-                    .lineLimit(2).multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
+    /// Satır renkleri: 1. sıra mercan, 2. sıra adaçayı, 3. sıra amber.
+    private func promptSection(index: Int, title: String, tips: [String]) -> some View {
+        let dotColor: Color = {
+            switch index / 3 {
+            case 0:  return ChatChrome.accent
+            case 1:  return Palette.macroCarbs
+            default: return Palette.macroFat
             }
-            .padding(.horizontal, 13).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(ChatChrome.panel.opacity(0.7)))
-            .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.5))
-            .contentShape(Rectangle())
+        }()
+        let mono = title.hasPrefix("@")
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Circle().fill(dotColor).frame(width: 5, height: 5)
+                Text(title.uppercased(with: Locale(identifier: "tr_TR")))
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(ChatChrome.tertiary)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(tips, id: \.self) { tip in
+                    PromptTipRow(text: tip, mono: mono) {
+                        store.input = tip
+                        inputFocused = true
+                    }
+                }
+            }
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Composer
@@ -645,13 +711,15 @@ struct ChatPageView: View {
                 }
                 sendButton
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous).fill(ChatChrome.panelRaised))
-            .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous).strokeBorder(inputFocused ? ChatChrome.accent.opacity(0.55) : ChatChrome.borderStrong, lineWidth: inputFocused ? 1.2 : 0.6))
+            .padding(.horizontal, 18).padding(.vertical, 12)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(ChatChrome.background))
+            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(inputFocused ? ChatChrome.accent.opacity(0.4) : ChatChrome.borderStrong, lineWidth: 1))
             .animation(.easeInOut(duration: 0.15), value: inputFocused)
 
-            Text("↩ gönder · ⇧↩ yeni satır · @ ile veri etiketle")
-                .font(Typography.label).foregroundStyle(ChatChrome.quaternary)
+            Text("↵ gönder · ⇧↵ yeni satır · @ ile veri etiketle")
+                .font(.system(size: 10.5))
+                .foregroundStyle(ChatChrome.quaternary)
+                .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
@@ -767,14 +835,14 @@ struct ChatPageView: View {
             if store.isSending { store.stop() } else { sendWithContext() }
         } label: {
             Image(systemName: store.isSending ? "stop.fill" : "arrow.up")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(store.isSending ? ChatChrome.primary : ChatChrome.ink)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(store.isSending ? ChatChrome.panelPressed : (canSend ? ChatChrome.accent : ChatChrome.panelPressed)))
+                .font(.system(size: 12.5, weight: .bold))
+                .foregroundStyle(store.isSending ? ChatChrome.primary : (canSend ? ChatChrome.ink : ChatChrome.secondary))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(store.isSending ? ChatChrome.panelPressed : (canSend ? ChatChrome.accent : Palette.track)))
         }
         .buttonStyle(.plain)
         .disabled(!store.isSending && !canSend)
-        .help(store.isSending ? "Durdur" : "Gönder (↩)")
+        .help(store.isSending ? "Durdur" : "Gönder (↵)")
     }
 
     private var canSend: Bool {
@@ -789,5 +857,27 @@ struct ChatPageView: View {
         let skillScope = AgentDataScope.infer(query: store.input, explicitTags: allMentions)
         let skillData = AgentDataSnapshot.make(ctx: ctx, scope: skillScope)
         store.startSend(userContext: snapshot, skillData: skillData, ctx: ctx)
+    }
+}
+
+/// Boş ekran soru kütüphanesi satırı — hover'da aydınlanır, tıklayınca inputa yazılır.
+private struct PromptTipRow: View {
+    let text: String
+    let mono: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(text)
+                .font(mono ? .system(size: 11.5, design: .monospaced) : .system(size: 12.5))
+                .foregroundStyle(hovering ? ChatChrome.primary : ChatChrome.secondary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: hovering)
     }
 }

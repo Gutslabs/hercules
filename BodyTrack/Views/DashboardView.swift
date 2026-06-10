@@ -10,6 +10,12 @@ struct DashboardView: View {
     @State private var revealContent = false
     @State private var balancePeriod: DashboardBalancePeriod = .week
     @State private var balanceSummary: DashboardBalanceSummary?
+    @State private var selectedBodyMetric: MetricKind = .weight
+    @State private var mealsExpanded = false
+
+    /// Order of metrics in the Vücut card; the selected one fills the big slot,
+    /// the rest become compact rows.
+    private let bodyMetricOrder: [MetricKind] = [.weight, .bodyFat, .leanMass, .waist]
 
     init(today: Date = .now) {
         let calendar = Calendar.current
@@ -27,31 +33,15 @@ struct DashboardView: View {
     private var profile: UserProfile? { profiles.first }
     private var latest: Measurement? { measurements.first }
 
-    private var todaysWorkout: WorkoutSession? {
-        let weekday = Calendar.current.component(.weekday, from: Date())
-        return allWorkouts.first { $0.weekday == weekday }
-    }
-
     private var consumedCalories: Double {
         todaysFoods.reduce(0) { $0 + $1.calories }
     }
-
-    private var consumedProtein: Double {
-        todaysFoods.compactMap(\.protein).reduce(0, +)
-    }
-    private var consumedCarbs: Double {
-        todaysFoods.compactMap(\.carbs).reduce(0, +)
-    }
-    private var consumedFat: Double {
-        todaysFoods.compactMap(\.fat).reduce(0, +)
-    }
-
-    private var weightPoints: [TrendPoint] {
-        TrendAnalysis.points(measurements, for: .weight)
-    }
+    private var consumedProtein: Double { todaysFoods.compactMap(\.protein).reduce(0, +) }
+    private var consumedCarbs: Double { todaysFoods.compactMap(\.carbs).reduce(0, +) }
+    private var consumedFat: Double { todaysFoods.compactMap(\.fat).reduce(0, +) }
 
     private var weightStats: TrendStats {
-        TrendAnalysis.stats(weightPoints)
+        TrendAnalysis.stats(TrendAnalysis.points(measurements, for: .weight))
     }
 
     private var calorieResult: CalorieResult? {
@@ -76,31 +66,24 @@ struct DashboardView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let contentWidth = proxy.size.width
-            let compact = contentWidth < 1220
-            let expansive = contentWidth >= 1500
+            let compact = proxy.size.width < 1180
 
             ScrollView {
-                VStack(alignment: .leading, spacing: compact ? Spacing.xl : Spacing.xxl) {
+                VStack(alignment: .leading, spacing: compact ? 16 : 18) {
                     header(compact: compact)
                         .dashboardReveal(revealContent, delay: 0.02)
-                    overviewMosaic(compact: compact, expansive: expansive)
+                    heroCard(compact: compact)
                         .dashboardReveal(revealContent, delay: 0.08)
-                    if let calorieResult {
-                        caloriesSummary(calorieResult, compact: compact)
-                            .dashboardReveal(revealContent, delay: 0.14)
-                        balancePanel(calorieResult, compact: compact)
-                            .dashboardReveal(revealContent, delay: 0.18)
-                    } else {
-                        setupNudge(compact: compact)
-                            .dashboardReveal(revealContent, delay: 0.14)
+                    bodyCard(compact: compact)
+                        .dashboardReveal(revealContent, delay: 0.14)
+                    if let r = calorieResult {
+                        balanceCard(r, compact: compact)
+                            .dashboardReveal(revealContent, delay: 0.20)
                     }
-                    quickCharts(compact: compact, expansive: expansive)
-                        .dashboardReveal(revealContent, delay: 0.24)
-                    Spacer(minLength: 24)
+                    Spacer(minLength: 20)
                 }
-                .padding(.horizontal, compact ? Spacing.xl : (expansive ? 44 : Spacing.xxl))
-                .padding(.vertical, compact ? Spacing.xl : Spacing.xxl)
+                .padding(.horizontal, compact ? 20 : 40)
+                .padding(.vertical, compact ? 24 : 32)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -109,435 +92,259 @@ struct DashboardView: View {
             revealContent = true
             refreshBalanceSummary()
         }
-        .onChange(of: balancePeriod) { _, _ in
-            refreshBalanceSummary()
-        }
-        .onChange(of: todaysFoods.count) { _, _ in
-            refreshBalanceSummary()
-        }
-        .onChange(of: consumedCalories) { _, _ in
-            refreshBalanceSummary()
-        }
+        .onChange(of: balancePeriod) { _, _ in refreshBalanceSummary() }
+        .onChange(of: todaysFoods.count) { _, _ in refreshBalanceSummary() }
+        .onChange(of: consumedCalories) { _, _ in refreshBalanceSummary() }
     }
+
+    // MARK: - Header
 
     @ViewBuilder
     private func header(compact: Bool) -> some View {
         if compact {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Genel Bakış").eyebrow()
-                Text("Hercules")
-                    .font(Typography.title)
-                    .foregroundStyle(Palette.textPrimary)
-                if let last = latest {
-                    lastUpdateBadge(last.date)
-                        .padding(.top, 4)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                headerTitle
+                if let last = latest { headerLastMeasure(last.date) }
             }
         } else {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Genel Bakış").eyebrow()
-                    Text("Hercules")
-                        .font(Typography.title)
-                        .foregroundStyle(Palette.textPrimary)
-                }
+                headerTitle
                 Spacer()
-                if let last = latest {
-                    lastUpdateBadge(last.date)
-                }
+                if let last = latest { headerLastMeasure(last.date) }
             }
         }
     }
 
-    private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: .now)
-        let salutation: String
-        switch hour {
-        case 5..<12: salutation = "Günaydın"
-        case 12..<17: salutation = "İyi günler"
-        case 17..<22: salutation = "İyi akşamlar"
-        default: salutation = "İyi geceler"
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Genel Bakış").eyebrow()
+            Text("Hercules")
+                .font(.system(size: 22, weight: .bold))
+                .tracking(-0.2)
+                .foregroundStyle(Palette.textPrimary)
         }
-        let name = profile?.name.isEmpty == false ? ", \(profile!.name)" : ""
-        return salutation + name
     }
 
-    private func lastUpdateBadge(_ date: Date) -> some View {
+    private func headerLastMeasure(_ date: Date) -> some View {
         HStack(spacing: 8) {
             Circle().fill(Palette.accent).frame(width: 6, height: 6)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("Son ölçüm").eyebrow()
-                Text(Fmt.dateLong.string(from: date))
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textPrimary)
+            Text("Son Ölçüm").eyebrow()
+            Text(Fmt.dateLong.string(from: date))
+                .font(Typography.bodyBold)
+                .foregroundStyle(Palette.textPrimary)
+        }
+    }
+
+    // MARK: - Hero
+
+    private func heroCard(compact: Bool) -> some View {
+        VStack(spacing: 0) {
+            heroMain(compact: compact)
+                .padding(.horizontal, compact ? 22 : 36)
+                .padding(.top, compact ? 24 : 32)
+                .padding(.bottom, compact ? 22 : 26)
+            Hairline()
+            heroMealStrip
+                .padding(.horizontal, compact ? 22 : 36)
+                .padding(.vertical, 14)
+            if mealsExpanded && !todaysFoods.isEmpty {
+                mealsList
+                    .padding(.horizontal, compact ? 22 : 36)
+                    .padding(.bottom, 12)
+                    .transition(.opacity)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surface.opacity(0.76))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.5)
-        )
-        .overlay(alignment: .top) {
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
-                .blendMode(.screen)
+        .dashboardCard()
+    }
+
+    private var mealsList: some View {
+        VStack(spacing: 0) {
+            ForEach(todaysFoods) { food in
+                HeroMealRow(food: food) {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        ctx.delete(food)
+                        ctx.saveOrReport()
+                    }
+                }
+            }
         }
     }
 
     @ViewBuilder
-    private func overviewMosaic(compact: Bool, expansive: Bool) -> some View {
+    private func heroMain(compact: Bool) -> some View {
         if compact {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                overviewHero(compact: true)
-                signalRail(compact: true)
-                heroMetrics(compact: true, expansive: expansive)
+            VStack(alignment: .leading, spacing: 24) {
+                heroLeft(compact: true)
+                if let r = calorieResult {
+                    heroRing(r)
+                    Hairline()
+                    heroMacros(r)
+                } else {
+                    heroSetup()
+                }
             }
         } else {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                HStack(alignment: .top, spacing: Spacing.md) {
-                    overviewHero(compact: false)
-                        .frame(maxWidth: .infinity)
-                    signalRail(compact: false)
-                        .frame(width: expansive ? 360 : 320)
+            HStack(alignment: .top, spacing: 36) {
+                heroLeft(compact: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let r = calorieResult {
+                    heroRing(r)
+                        .frame(width: 232)
+                    heroMacros(r)
+                        .frame(width: 340)
+                        .overlay(alignment: .leading) {
+                            Rectangle()
+                                .fill(Palette.border)
+                                .frame(width: 0.5)
+                                .offset(x: -18)
+                        }
+                } else {
+                    heroSetup()
+                        .frame(width: 608)
                 }
-                heroMetrics(compact: false, expansive: expansive)
             }
+        }
+    }
+
+    private func heroLeft(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(greeting)
+                .font(.system(size: compact ? 32 : 40, weight: .semibold))
+                .tracking(-0.8)
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(heroDetail(calorieResult))
+                .font(Typography.body)
+                .foregroundStyle(Palette.textSecondary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 380, alignment: .leading)
+
+            heroChips(compact: compact)
+                .padding(.top, 6)
         }
     }
 
     @ViewBuilder
-    private func overviewHero(compact: Bool) -> some View {
-        let result = calorieResult
-        let remaining = result.map(remainingCalories)
-        let ringColor = result.map(remainingColor) ?? Palette.accent
+    private func heroChips(compact: Bool) -> some View {
+        let goalSub = goalDetail.isEmpty ? nil : goalDetail
+        let progressSub = progressDetail(weightStats).isEmpty ? nil : progressDetail(weightStats)
 
-        Group {
-            if compact {
-                VStack(alignment: .leading, spacing: Spacing.xl) {
-                    heroCopy(result)
-                    heroPlanBlock(result, remaining: remaining, ringColor: ringColor, compact: true)
-                }
-            } else {
-                HStack(alignment: .center, spacing: Spacing.xxl) {
-                    heroCopy(result)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    heroPlanBlock(result, remaining: remaining, ringColor: ringColor, compact: false)
-                        .frame(width: 292)
-                }
+        if compact {
+            VStack(alignment: .leading, spacing: 14) {
+                HeroStatColumn(label: "Hedef", value: goalTitle, sub: goalSub)
+                HeroStatColumn(label: "Ritim", value: cadenceTitle)
+                HeroStatColumn(label: "İlerleme", value: progressTitle(weightStats), sub: progressSub)
             }
-        }
-        .padding(compact ? Spacing.xl : Spacing.xxl)
-        .frame(maxWidth: .infinity, minHeight: compact ? 0 : 282, alignment: .leading)
-        .background {
-            ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                    .fill(Palette.surface.opacity(0.82))
-                DashboardHeroLines()
-                    .stroke(Palette.borderStrong.opacity(0.55), lineWidth: 0.7)
-                    .frame(width: 260, height: 220)
-                    .offset(x: 28, y: -18)
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.75)
-        }
-        .shadow(color: Palette.accent.opacity(0.08), radius: 34, x: 0, y: 22)
-    }
-
-    private func heroCopy(_ result: CalorieResult?) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(spacing: 8) {
-                DashboardBreathingStatusDot(color: result == nil ? Palette.warning : Palette.accent)
-                Text(result == nil ? "Kurulum bekliyor" : "Canlı plan")
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.textSecondary)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text(greeting)
-                    .font(Typography.display(46))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.65)
-                Text(heroDetail(result))
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 520, alignment: .leading)
-            }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Spacing.sm) {
-                    heroChips
-                }
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    heroChips
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var heroChips: some View {
-        DashboardMetricChip(
-            icon: "target",
-            label: "Hedef",
-            value: goalTitle,
-            tint: Palette.warning
-        )
-        DashboardMetricChip(
-            icon: "calendar.badge.clock",
-            label: "Ritim",
-            value: cadenceTitle,
-            tint: cadenceTint
-        )
-        if let workout = todaysWorkout {
-            DashboardMetricChip(
-                icon: "figure.strengthtraining.traditional",
-                label: "Bugün",
-                value: workout.name,
-                tint: Palette.positive
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func heroPlanBlock(
-        _ result: CalorieResult?,
-        remaining: Double?,
-        ringColor: Color,
-        compact: Bool
-    ) -> some View {
-        if let result, let remaining {
-            let isOver = remaining < 0
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                CalorieProgressRing(
-                    progress: calorieProgress(result),
-                    tint: ringColor,
-                    value: "\(isOver ? "+" : "")\(Fmt.int(abs(remaining)))",
-                    label: isOver ? "kcal fazla" : "kcal kaldı",
-                    subtitle: "Hedef \(Fmt.int(result.goalCalories))"
-                )
-                .frame(width: compact ? 180 : 212, height: compact ? 180 : 212)
-
-                HStack(spacing: Spacing.md) {
-                    ringMetric("Tüketilen", value: "\(Fmt.int(consumedCalories)) kcal")
-                    ringMetric("TDEE", value: "\(Fmt.int(result.tdee)) kcal")
-                }
-            }
-            .frame(maxWidth: compact ? .infinity : nil, alignment: .leading)
         } else {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                Image(systemName: "scope")
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(Palette.warning)
-                Text(setupMissingTitle)
-                    .font(Typography.titleSmall)
-                    .foregroundStyle(Palette.textPrimary)
-                Text(setupMissingDetail)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 0) {
+                HeroStatColumn(label: "Hedef", value: goalTitle, sub: goalSub)
+                    .frame(maxWidth: 150, alignment: .leading)
+                chipRule
+                HeroStatColumn(label: "Ritim", value: cadenceTitle)
+                    .frame(maxWidth: 150, alignment: .leading)
+                chipRule
+                HeroStatColumn(label: "İlerleme", value: progressTitle(weightStats), sub: progressSub)
+                    .frame(maxWidth: 150, alignment: .leading)
+                Spacer(minLength: 0)
             }
-            .padding(Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .fill(Palette.surfaceElevated.opacity(0.72))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .strokeBorder(Palette.borderStrong, lineWidth: 0.5)
-            )
         }
     }
 
-    private func ringMetric(_ label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+    private var chipRule: some View {
+        Rectangle()
+            .fill(Palette.border)
+            .frame(width: 0.5, height: 40)
+            .padding(.horizontal, 20)
+    }
+
+    private func heroRing(_ r: CalorieResult) -> some View {
+        let remaining = remainingCalories(r)
+        let isOver = remaining < 0
+        return VStack(spacing: 16) {
+            CalorieProgressRing(
+                progress: calorieProgress(r),
+                tint: ringTint(r),
+                value: "\(isOver ? "+" : "")\(Fmt.int(abs(remaining)))",
+                label: isOver ? "kcal fazla" : "kcal kaldı",
+                subtitle: "Hedef \(Fmt.int(r.goalCalories))",
+                labelColor: isOver ? ringTint(r) : Palette.textTertiary
+            )
+            .frame(width: 208, height: 208)
+
+            HStack(spacing: 0) {
+                ringStat("Tüketilen", "\(Fmt.int(consumedCalories)) kcal")
+                Rectangle()
+                    .fill(Palette.border)
+                    .frame(width: 0.5, height: 28)
+                    .padding(.horizontal, 18)
+                ringStat("TDEE", "\(Fmt.int(r.tdee)) kcal")
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func ringStat(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 4) {
             Text(label).eyebrow()
             Text(value)
                 .font(Typography.mono)
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private func heroMacros(_ r: CalorieResult) -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text("Günlük Plan").eyebrow()
+            HeroMacroRow(name: "Protein", consumed: consumedProtein, target: r.protein.grams, percent: r.protein.percent, tint: Palette.macroProtein)
+            HeroMacroRow(name: "Karbonhidrat", consumed: consumedCarbs, target: r.carbs.grams, percent: r.carbs.percent, tint: Palette.macroCarbs)
+            HeroMacroRow(name: "Yağ", consumed: consumedFat, target: r.fat.grams, percent: r.fat.percent, tint: Palette.macroFat)
+            Hairline()
+                .padding(.top, 2)
+            HStack(alignment: .top, spacing: 0) {
+                heroMicro("Su", "\(Fmt.num(r.water, digits: 1)) L")
+                heroMicroDivider
+                heroMicro("Lif", "\(Fmt.int(r.fiber)) g")
+                heroMicroDivider
+                heroMicro("Yağsız Kütle hedefi", "\(Fmt.num(r.leanMass, digits: 1)) kg")
+            }
+        }
+    }
+
+    private func heroMicro(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(Typography.micro)
+                .foregroundStyle(Palette.textQuaternary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(value)
+                .font(Typography.mono)
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func heroDetail(_ result: CalorieResult?) -> String {
-        guard let result else { return setupMissingDetail }
-        let remaining = remainingCalories(result)
-        if remaining < 0 {
-            return "Bugünkü plan hedefin üzerinde. Makroları ve kalan ritmi aynı yerde tutup yarına daha sakin bir rota bırak."
-        }
-        if todaysFoods.isEmpty {
-            return "Bugün henüz yemek girişi yok. İlk kayıt geldiğinde kalori, makro ve hedef sapması burada netleşir."
-        }
-        return "Bugünün kayıtları hedefle karşılaştırıldı. Kalan kalori, makrolar ve ölçüm ritmi tek bakışta okunuyor."
+    private var heroMicroDivider: some View {
+        Rectangle()
+            .fill(Palette.border)
+            .frame(width: 0.5, height: 28)
+            .padding(.horizontal, 12)
     }
 
-    private func signalRail(compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            DashboardSignalRow(
-                icon: "waveform.path.ecg",
-                eyebrow: "Ritim",
-                title: cadenceTitle,
-                detail: cadenceDetail,
-                tint: cadenceTint
-            )
-            Hairline()
-            DashboardSignalRow(
-                icon: "chart.line.uptrend.xyaxis",
-                eyebrow: "İlerleme",
-                title: progressTitle(weightStats),
-                detail: progressDetail(weightStats).isEmpty ? "Trend için en az iki ölçüm gerekli." : progressDetail(weightStats),
-                tint: Palette.positive
-            )
-            Hairline()
-            DashboardSignalRow(
-                icon: "flag.checkered",
-                eyebrow: "Hedef",
-                title: goalTitle,
-                detail: goalDetail.isEmpty ? "Profilde hedef ağırlık girilirse mesafe hesaplanır." : goalDetail,
-                tint: Palette.warning
-            )
-        }
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, minHeight: compact ? 0 : 282, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .fill(Palette.surface.opacity(0.74))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.75)
-        )
-    }
-
-    @ViewBuilder
-    private func heroMetrics(compact: Bool, expansive: Bool) -> some View {
-        let kinds: [MetricKind] = [.weight, .bodyFat, .leanMass, .waist]
-
-        if compact {
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: Spacing.md), GridItem(.flexible(), spacing: Spacing.md)],
-                spacing: Spacing.md
-            ) {
-                ForEach(kinds, id: \.self) { metricTile($0) }
-            }
-        } else {
-            HStack(alignment: .top, spacing: Spacing.md) {
-                metricTile(.weight)
-                    .frame(minWidth: expansive ? 420 : 340, maxWidth: .infinity)
-                metricTile(.bodyFat)
-                    .frame(width: expansive ? 290 : 240)
-                metricTile(.leanMass)
-                    .frame(width: expansive ? 290 : 240)
-                metricTile(.waist)
-                    .frame(width: expansive ? 290 : 240)
-            }
-        }
-    }
-
-    private func metricTile(_ kind: MetricKind) -> some View {
-        let pts = TrendAnalysis.points(measurements, for: kind)
-        let stats = TrendAnalysis.stats(pts)
-        return MetricTile(
-            label: kind.label,
-            value: Fmt.numOpt(stats.current, digits: 1),
-            unit: kind.unit,
-            delta: stats.delta,
-            lowerIsBetter: kind.lowerIsBetter,
-            sparkline: pts,
-            accent: metricAccent(kind)
-        )
-    }
-
-    private func metricAccent(_ kind: MetricKind) -> Color {
-        switch kind {
-        case .weight: return Palette.accent
-        case .bodyFat, .fatMass, .waist: return Palette.warning
-        case .leanMass: return Palette.positive
-        case .chest, .neck: return Palette.textSecondary
-        }
-    }
-
-    private var cadenceTitle: String {
-        guard let days = TrendAnalysis.daysSinceLast(measurements) else { return "İlk ölçümünü ekle" }
-        if days == 0 { return "Bugün güncel" }
-        if days == 1 { return "1 gün önce ölçüldü" }
-        return "\(days) gün önce ölçüldü"
-    }
-
-    private func progressTitle(_ stats: TrendStats) -> String {
-        guard let weekly = stats.weeklyChange else { return "—" }
-        return "\(Fmt.signed(weekly, digits: 2)) kg/hafta"
-    }
-
-    private func progressDetail(_ stats: TrendStats) -> String {
-        guard let total = stats.delta, stats.pointCount >= 2 else { return "" }
-        return "Toplam \(Fmt.signed(total, digits: 1)) kg"
-    }
-
-    private var goalTitle: String {
-        guard let p = profile else { return "—" }
-        return p.goal.label
-    }
-
-    private var goalDetail: String {
-        guard let p = profile else { return "" }
-        if let target = p.targetWeight, let current = latest?.weight {
-            let remaining = current - target
-            if abs(remaining) < 0.2 { return "Hedefte" }
-            return "\(Fmt.num(abs(remaining), digits: 1)) kg kaldı"
-        }
-        return ""
-    }
-
-    private var cadenceDetail: String {
-        guard let days = TrendAnalysis.daysSinceLast(measurements) else {
-            return "İlk ölçüm geldikten sonra trend ritmi açılır."
-        }
-        if days == 0 { return "Bugünkü veri taze; plan hesapları güvenilir." }
-        if days <= 3 { return "Ölçüm yakın tarihli, trend okumaları hala sağlam." }
-        return "Yeni ölçüm girersen grafik ve hedef mesafesi keskinleşir."
-    }
-
-    private var cadenceTint: Color {
-        guard let days = TrendAnalysis.daysSinceLast(measurements) else { return Palette.warning }
-        if days <= 1 { return Palette.positive }
-        if days <= 4 { return Palette.warning }
-        return Palette.negative
-    }
-
-    private var setupMissingTitle: String {
-        if profile == nil { return "Profil tamamlanmalı" }
-        if latest?.weight == nil { return "Kilo ölçümü bekleniyor" }
-        return "Plan verisi eksik"
-    }
-
-    private var setupMissingDetail: String {
-        if profile == nil {
-            return "Kalori ve makro hedefleri için profil bilgilerini ekle."
-        }
-        if latest?.weight == nil {
-            return "Kalori hesabı için en az bir kilo ölçümü gerekli."
-        }
-        return "Hedef planını hesaplamak için eksik alanları tamamla."
-    }
-
-    private func setupNudge(compact: Bool) -> some View {
-        HStack(alignment: .top, spacing: Spacing.lg) {
-            Image(systemName: "checklist.checked")
-                .font(.system(size: 20, weight: .medium))
+    private func heroSetup() -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "scope")
+                .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(Palette.warning)
-                .frame(width: 34, height: 34)
+                .frame(width: 40, height: 40)
                 .background(Circle().fill(Palette.warning.opacity(0.12)))
             VStack(alignment: .leading, spacing: 5) {
                 Text(setupMissingTitle)
@@ -550,288 +357,214 @@ struct DashboardView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(compact ? Spacing.lg : Spacing.xl)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface.opacity(0.78))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.5)
-        )
-    }
-
-    private func calorieProgress(_ r: CalorieResult) -> Double {
-        guard r.goalCalories > 0 else { return 0 }
-        return min(1, max(0, consumedCalories / r.goalCalories))
-    }
-
-    private func caloriesSummary(_ r: CalorieResult, compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Günlük Plan").eyebrow()
-                if let w = todaysWorkout {
-                    HStack(spacing: 5) {
-                        Image(systemName: "figure.strengthtraining.traditional")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(Palette.textTertiary)
-                        Text("\(w.name) · hedef sabit")
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textSecondary)
-                    }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule().fill(Palette.surfaceElevated)
-                    )
-                }
-                Spacer()
-            }
-
-            if compact {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    calorieCore(r)
-                    Hairline()
-                    macroTargets(r, compact: true)
-                    Hairline()
-                    supportStats(r)
-                }
-            } else {
-                HStack(alignment: .top, spacing: Spacing.xl) {
-                    calorieCore(r)
-                        .frame(minWidth: 180, idealWidth: 220, maxWidth: 260, alignment: .leading)
-
-                    Divider().background(Palette.border)
-
-                    macroTargets(r, compact: false)
-                        .frame(maxWidth: .infinity)
-
-                    Divider().background(Palette.border)
-
-                    supportStats(r)
-                        .frame(minWidth: 160, idealWidth: 180, maxWidth: 200, alignment: .leading)
-                }
-            }
-
-            if let warning = goalDeviationWarning(r) {
-                warningBanner(warning)
-            }
-
-            Hairline()
-            if todaysFoods.isEmpty {
-                DashboardInlineEmptyState(
-                    icon: "fork.knife",
-                    title: "Bugün yemek kaydı yok",
-                    detail: "İlk öğün eklendiğinde makro ve kalori sapması burada görünür."
-                )
-            } else {
-                todaysFoodsList
-            }
-        }
-        .padding(compact ? Spacing.lg : Spacing.xl)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface.opacity(0.88))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
-    }
-
-    private func calorieCore(_ r: CalorieResult) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Hedef Kalori").eyebrow()
-            HStack(alignment: .lastTextBaseline, spacing: 6) {
-                let remaining = remainingCalories(r)
-                let isOver = remaining < 0
-                Text("\(isOver ? "+" : "")\(Fmt.int(abs(remaining)))")
-                    .font(Typography.display(48))
-                    .foregroundStyle(remainingColor(r))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text(isOver ? "kcal fazla" : "kcal kaldı")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-            }
-            Text("Hedef \(Fmt.int(r.goalCalories)) · Tüketilen \(Fmt.int(consumedCalories))")
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-    }
-
-    private func macroTargets(_ r: CalorieResult, compact: Bool) -> some View {
-        VStack(spacing: Spacing.sm) {
-            MacroBar(macros: r)
-            if compact {
-                VStack(spacing: Spacing.sm) {
-                    MacroLegend(name: "Protein", grams: r.protein.grams, percent: r.protein.percent, tint: Palette.macroProtein, consumed: consumedProtein)
-                    MacroLegend(name: "Karbonhidrat", grams: r.carbs.grams, percent: r.carbs.percent, tint: Palette.macroCarbs, consumed: consumedCarbs)
-                    MacroLegend(name: "Yağ", grams: r.fat.grams, percent: r.fat.percent, tint: Palette.macroFat, consumed: consumedFat)
-                }
-            } else {
-                HStack(spacing: Spacing.lg) {
-                    MacroLegend(name: "Protein", grams: r.protein.grams, percent: r.protein.percent, tint: Palette.macroProtein, consumed: consumedProtein)
-                    MacroLegend(name: "Karbonhidrat", grams: r.carbs.grams, percent: r.carbs.percent, tint: Palette.macroCarbs, consumed: consumedCarbs)
-                    MacroLegend(name: "Yağ", grams: r.fat.grams, percent: r.fat.percent, tint: Palette.macroFat, consumed: consumedFat)
-                }
-            }
-        }
-    }
-
-    private func supportStats(_ r: CalorieResult) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            StatRow(label: "Su", value: "\(Fmt.num(r.water, digits: 1)) L")
-            StatRow(label: "Lif", value: "\(Fmt.int(r.fiber)) g")
-            StatRow(label: "Yağsız Kütle", value: "\(Fmt.num(r.leanMass, digits: 1)) kg")
-        }
-    }
-
-    private func remainingCalories(_ r: CalorieResult) -> Double {
-        r.goalCalories - consumedCalories  // negatif olabilir = hedef aşıldı
-    }
-
-    private func remainingColor(_ r: CalorieResult) -> Color {
-        let remaining = remainingCalories(r)
-        if remaining < 0 { return Palette.negative }
-        if remaining < r.goalCalories * 0.15 { return Palette.warning }
-        return Palette.textPrimary
-    }
-
-    /// Kilogram başına yaklaşık 7700 kcal (yağ dokusu).
-    static let kcalPerKg: Double = 7700
-
-    /// Hedef sapma uyarısı — sadece hedef aşıldığında dolu döner.
-    private func goalDeviationWarning(_ r: CalorieResult) -> (title: String, detail: String, color: Color, icon: String)? {
-        let overshoot = consumedCalories - r.goalCalories  // pozitif = aşıldı
-        guard overshoot > 0 else { return nil }
-
-        let actualSurplus = consumedCalories - r.tdee  // TDEE'ye göre gerçek fazla
-        let goalAdj = profile?.goal.calorieAdjustment ?? 0
-
-        if goalAdj < 0 {
-            // Kilo verme hedefi
-            if actualSurplus > 0 {
-                let grams = (actualSurplus / Self.kcalPerKg) * 1000.0
-                return (
-                    "Bugün kilo alma günü oldu",
-                    "Hedefin kilo verme ama \(Fmt.int(actualSurplus)) kcal fazla aldın → ~\(Fmt.int(grams)) g potansiyel artış. Yarın telafi et.",
-                    Palette.negative,
-                    "exclamationmark.triangle.fill"
-                )
-            } else {
-                let extraDays = abs(overshoot / goalAdj)
-                return (
-                    "Açık küçüldü",
-                    "Hedef açığını \(Fmt.int(overshoot)) kcal aştın → ~\(Fmt.num(extraDays, digits: 1)) gün gecikme.",
-                    Palette.warning,
-                    "exclamationmark.triangle"
-                )
-            }
-        } else if goalAdj == 0 {
-            // Koruma
-            let grams = (max(0, actualSurplus) / Self.kcalPerKg) * 1000.0
-            return (
-                "Hedef üzerinde",
-                "+\(Fmt.int(overshoot)) kcal · ~\(Fmt.int(grams)) g potansiyel artış.",
-                Palette.warning,
-                "info.circle"
-            )
-        } else {
-            // Kilo alma — overshoot fazlası genelde sorun değil
-            return (
-                "Hedefin biraz üstünde",
-                "+\(Fmt.int(overshoot)) kcal fazla aldın. Kilo alma hedefinde isen tempo iyi.",
-                Palette.textSecondary,
-                "info.circle"
-            )
-        }
-    }
-
-    private func warningBanner(_ w: (title: String, detail: String, color: Color, icon: String)) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: w.icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(w.color)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(w.title)
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textPrimary)
-                Text(w.detail)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(10)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Palette.surfaceElevated)
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Palette.surfaceElevated.opacity(0.6))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 0.5)
         )
     }
 
-    private var todaysFoodsList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Bugünün Yemekleri").eyebrow()
-                Spacer()
-                ViewThatFits(in: .horizontal) {
-                    Text("\(todaysFoods.count) öğe · \(Fmt.int(consumedCalories)) kcal · P \(Fmt.int(consumedProtein))g · K \(Fmt.int(consumedCarbs))g · Y \(Fmt.int(consumedFat))g")
-                    Text("\(todaysFoods.count) öğe · \(Fmt.int(consumedCalories)) kcal")
-                }
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
+    @ViewBuilder
+    private var heroMealStrip: some View {
+        if todaysFoods.isEmpty {
+            HStack(spacing: 12) {
+                Image(systemName: "fork.knife")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.textTertiary)
+                Text("Bugün yemek kaydı yok")
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textPrimary)
+                Text("İlk öğün eklendiğinde makro ve kalori sapması burada görünür.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
-            VStack(spacing: 4) {
-                ForEach(todaysFoods) { food in
-                    FoodRow(food: food) {
-                        ctx.delete(food)
-                        ctx.saveOrReport()
-                    }
+        } else {
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                    mealsExpanded.toggle()
                 }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "fork.knife")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.textTertiary)
+                    Text("\(todaysFoods.count) öğün kayıtlı")
+                        .font(Typography.bodyBold)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("\(Fmt.int(consumedCalories)) kcal · P \(Fmt.int(consumedProtein))g · K \(Fmt.int(consumedCarbs))g · Y \(Fmt.int(consumedFat))g")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Palette.textQuaternary)
+                        .rotationEffect(.degrees(mealsExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(mealsExpanded ? "Öğünleri gizle" : "Öğünleri aç — silmek için satırdaki çöp ikonunu kullan")
+        }
+    }
+
+    // MARK: - Vücut (body composition)
+
+    private func bodyCard(compact: Bool) -> some View {
+        let selected = selectedBodyMetric
+        let rows = bodyMetricOrder.filter { $0 != selected }
+
+        return VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Vücut").eyebrow()
+                Text("Son 30 gün")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+                Spacer()
+            }
+
+            if compact {
+                VStack(alignment: .leading, spacing: 18) {
+                    bodyBig(selected)
+                    bodyRows(rows)
+                }
+            } else {
+                HStack(alignment: .center, spacing: 48) {
+                    bodyBig(selected)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    bodyRows(rows)
+                        .frame(width: 380)
+                }
+            }
+        }
+        .padding(compact ? 22 : 28)
+        .dashboardCard()
+    }
+
+    private func bodyBig(_ k: MetricKind) -> some View {
+        let recent = recentPoints(k)
+        let current = TrendAnalysis.stats(TrendAnalysis.points(measurements, for: k)).current
+        let delta = windowDelta(recent)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Text(k.label)
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textSecondary)
+                DeltaBadge(delta: delta, lowerIsBetter: lowerIsBetter(k))
+            }
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                Text(Fmt.numOpt(current, digits: 1))
+                    .font(.system(size: 46, weight: .semibold))
+                    .monospacedDigit()
+                    .tracking(-0.6)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .contentTransition(.numericText())
+                Text(k.unit)
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(Palette.textQuaternary)
+            }
+            InteractiveSparkline(points: recent, accent: metricAccent(k), unit: k.unit)
+                .frame(height: 96)
+                .opacity(recent.count >= 2 ? 1 : 0)
+        }
+        .id(k)
+        .transition(.opacity)
+    }
+
+    private func bodyRows(_ rows: [MetricKind]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element) { index, k in
+                if index > 0 { Hairline() }
+                let recent = recentPoints(k)
+                let current = TrendAnalysis.stats(TrendAnalysis.points(measurements, for: k)).current
+                BodyMetricRow(
+                    name: k.label,
+                    value: Fmt.numOpt(current, digits: 1),
+                    unit: k.unit,
+                    points: recent,
+                    delta: windowDelta(recent),
+                    lowerIsBetter: lowerIsBetter(k),
+                    accent: metricAccent(k),
+                    onTap: {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            selectedBodyMetric = k
+                        }
+                    }
+                )
             }
         }
     }
 
-    private func balancePanel(_ r: CalorieResult, compact: Bool) -> some View {
-        let summary = balanceSummary
-        return VStack(alignment: .leading, spacing: Spacing.lg) {
+    /// Last `days` of measurement points; falls back to the full series when the
+    /// window is too sparse to draw.
+    private func recentPoints(_ k: MetricKind, days: Int = 30) -> [TrendPoint] {
+        let all = TrendAnalysis.points(measurements, for: k)
+        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Calendar.current.startOfDay(for: .now)) ?? .distantPast
+        let recent = all.filter { $0.date >= cutoff }
+        return recent.count >= 2 ? recent : all
+    }
+
+    /// Change across the visible window (last − first), i.e. the 30-day delta.
+    private func windowDelta(_ points: [TrendPoint]) -> Double? {
+        guard let first = points.first, let last = points.last, points.count >= 2 else { return nil }
+        return last.value - first.value
+    }
+
+    /// Tüm trend çizgileri Görünüm ▸ Grafik Rengi'ni izler (spec: sparkline = chart).
+    private func metricAccent(_ kind: MetricKind) -> Color {
+        _ = kind
+        return Palette.chart
+    }
+
+    /// Goal-aware "good direction": for weight, down is good only when cutting.
+    private func lowerIsBetter(_ kind: MetricKind) -> Bool {
+        switch kind {
+        case .bodyFat, .fatMass, .waist: return true
+        case .leanMass: return false
+        case .weight: return (profile?.goal.calorieAdjustment ?? 0) < 0
+        case .chest, .neck: return false
+        }
+    }
+
+    // MARK: - Kalori Dengesi (balance)
+
+    private func balanceCard(_ r: CalorieResult, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                    balanceHeader
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    balanceHeaderLabel
                     Spacer()
                     balancePeriodSelector
                 }
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    balanceHeader
+                VStack(alignment: .leading, spacing: 12) {
+                    balanceHeaderLabel
                     balancePeriodSelector
                 }
             }
 
-            if let summary {
+            if let summary = balanceSummary {
                 if compact {
-                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                    VStack(alignment: .leading, spacing: 18) {
                         balanceLead(summary)
-                        Hairline()
-                        balanceMetrics(summary, compact: true)
+                        balanceStats(summary, compact: true)
                     }
                 } else {
-                    HStack(alignment: .top, spacing: Spacing.xl) {
+                    HStack(alignment: .center, spacing: 40) {
                         balanceLead(summary)
-                            .frame(minWidth: 250, idealWidth: 320, maxWidth: 360, alignment: .leading)
-                        Divider().background(Palette.border)
-                        balanceMetrics(summary, compact: false)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .frame(width: 300, alignment: .leading)
+                        balanceStats(summary, compact: false)
+                            .frame(maxWidth: .infinity)
                     }
                 }
             } else {
@@ -842,28 +575,21 @@ struct DashboardView: View {
                 )
             }
 
-            Text("Hesap: \(Fmt.int(r.tdee)) kcal TDEE tabanı + kayıtlı adım yakımı + gerçek antrenman; antrenman kaydı yoksa programdaki spor günü tahmini - tüketilen kalori.")
+            Text("Hesap: \(Fmt.int(r.tdee)) kcal TDEE tabanı + kayıtlı adım yakımı + gerçek antrenman; antrenman kaydı yoksa programdaki spor günü tahmini − tüketilen kalori.")
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textQuaternary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(compact ? Spacing.lg : Spacing.xl)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface.opacity(0.88))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
+        .padding(compact ? 22 : 28)
+        .dashboardCard()
     }
 
-    private var balanceHeader: some View {
+    private var balanceHeaderLabel: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("Kalori Dengesi").eyebrow()
             Text(balancePeriod.title)
                 .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
+                .foregroundStyle(Palette.textQuaternary)
         }
     }
 
@@ -901,17 +627,19 @@ struct DashboardView: View {
     }
 
     private func balanceLead(_ summary: DashboardBalanceSummary) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(summary.trackedDays > 0 ? "Net sonuç" : "Kayıt yok").eyebrow()
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .lastTextBaseline, spacing: 7) {
                 Text(summary.displayValue)
-                    .font(Typography.display(44))
+                    .font(.system(size: 38, weight: .semibold))
+                    .monospacedDigit()
+                    .tracking(-0.5)
                     .foregroundStyle(summary.tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
+                    .contentTransition(.numericText())
                 Text(summary.resultLabel)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
             }
             Text(summary.detail)
@@ -921,43 +649,107 @@ struct DashboardView: View {
         }
     }
 
-    private func balanceMetrics(_ summary: DashboardBalanceSummary, compact: Bool) -> some View {
+    private func balanceStats(_ summary: DashboardBalanceSummary, compact: Bool) -> some View {
         let columns = compact
             ? [GridItem(.flexible()), GridItem(.flexible())]
             : [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: Spacing.md) {
-            balanceMetric("Tüketim", value: "\(Fmt.int(summary.foodCalories)) kcal", icon: "fork.knife", tint: Palette.textSecondary)
-            balanceMetric("Adım", value: "\(Fmt.int(Double(summary.stepCount))) · \(Fmt.int(summary.stepCalories)) kcal", icon: "figure.walk", tint: Palette.positive)
-            balanceMetric("Spor", value: "\(summary.workoutDays) gün · \(Fmt.int(summary.workoutCalories)) kcal", icon: "figure.strengthtraining.traditional", tint: Palette.warning)
-            balanceMetric("Kayıtlı", value: "\(summary.trackedDays)/\(summary.calendarDays) gün", icon: "calendar", tint: Palette.accent)
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+            BalanceStatColumn(label: "Tüketim", value: "\(Fmt.int(summary.foodCalories)) kcal")
+            BalanceStatColumn(label: "Adım", value: "\(Fmt.int(Double(summary.stepCount))) · \(Fmt.int(summary.stepCalories)) kcal")
+            BalanceStatColumn(label: "Spor", value: "\(summary.workoutDays) gün · \(Fmt.int(summary.workoutCalories)) kcal")
+            BalanceStatColumn(label: "Kayıtlı", value: "\(summary.trackedDays)/\(summary.calendarDays) gün")
         }
     }
 
-    private func balanceMetric(_ label: String, value: String, icon: String, tint: Color) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(tint.opacity(0.12)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label.uppercased())
-                    .font(Typography.label)
-                    .foregroundStyle(Palette.textQuaternary)
-                Text(value)
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
+    // MARK: - Copy / derived values
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: .now)
+        let salutation: String
+        switch hour {
+        case 5..<12: salutation = "Günaydın"
+        case 12..<17: salutation = "İyi günler"
+        case 17..<22: salutation = "İyi akşamlar"
+        default: salutation = "İyi geceler"
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Palette.surfaceElevated.opacity(0.64))
-        )
+        let name = profile?.name.isEmpty == false ? ", \(profile!.name)" : ""
+        return salutation + name
     }
+
+    private func heroDetail(_ result: CalorieResult?) -> String {
+        guard let result else { return setupMissingDetail }
+        if remainingCalories(result) < 0 { return "Bugünkü plan hedefin üzerinde." }
+        if todaysFoods.isEmpty { return "Henüz giriş yok." }
+        return "Bugünün kayıtları hedefle karşılaştırıldı."
+    }
+
+    private var cadenceTitle: String {
+        guard let days = TrendAnalysis.daysSinceLast(measurements) else { return "İlk ölçümünü ekle" }
+        if days == 0 { return "Bugün güncel" }
+        if days == 1 { return "1 gün önce ölçüldü" }
+        return "\(days) gün önce ölçüldü"
+    }
+
+    private func progressTitle(_ stats: TrendStats) -> String {
+        guard let weekly = stats.weeklyChange else { return "—" }
+        return "\(Fmt.signed(weekly, digits: 2)) kg/hafta"
+    }
+
+    private func progressDetail(_ stats: TrendStats) -> String {
+        guard let total = stats.delta, stats.pointCount >= 2 else { return "" }
+        return "Toplam \(Fmt.signed(total, digits: 1)) kg"
+    }
+
+    private var goalTitle: String {
+        guard let p = profile else { return "—" }
+        return p.goal.label
+    }
+
+    private var goalDetail: String {
+        guard let p = profile else { return "" }
+        if let target = p.targetWeight, let current = latest?.weight {
+            let remaining = current - target
+            if abs(remaining) < 0.2 { return "Hedefte" }
+            return "\(Fmt.num(abs(remaining), digits: 1)) kg kaldı"
+        }
+        return ""
+    }
+
+    private var setupMissingTitle: String {
+        if profile == nil { return "Profil tamamlanmalı" }
+        if latest?.weight == nil { return "Kilo ölçümü bekleniyor" }
+        return "Plan verisi eksik"
+    }
+
+    private var setupMissingDetail: String {
+        if profile == nil {
+            return "Kalori ve makro hedefleri için profil bilgilerini ekle."
+        }
+        if latest?.weight == nil {
+            return "Kalori hesabı için en az bir kilo ölçümü gerekli."
+        }
+        return "Hedef planını hesaplamak için eksik alanları tamamla."
+    }
+
+    // MARK: - Calorie math
+
+    private func calorieProgress(_ r: CalorieResult) -> Double {
+        guard r.goalCalories > 0 else { return 0 }
+        return min(1, max(0, consumedCalories / r.goalCalories))
+    }
+
+    private func remainingCalories(_ r: CalorieResult) -> Double {
+        r.goalCalories - consumedCalories  // negatif olabilir = hedef aşıldı
+    }
+
+    private func ringTint(_ r: CalorieResult) -> Color {
+        let remaining = remainingCalories(r)
+        if remaining < 0 { return Palette.negative }
+        if remaining < r.goalCalories * 0.15 { return Palette.warning }
+        return Palette.chart   // Görünüm ▸ Grafik Rengi seçimi
+    }
+
+    // MARK: - Balance computation
 
     private func refreshBalanceSummary() {
         guard let result = calorieResult else {
@@ -1101,56 +893,6 @@ struct DashboardView: View {
                 return
             }
             dict[day] = log
-        }
-    }
-
-    @ViewBuilder
-    private func quickCharts(compact: Bool, expansive: Bool) -> some View {
-        let weightPts = weightPoints
-        let bodyFatPts = TrendAnalysis.points(measurements, for: .bodyFat)
-        let weightGoal: (start: TrendPoint, end: TrendPoint)? = {
-            guard let target = profile?.targetWeight else { return nil }
-            return TrendAnalysis.goalBand(from: weightPts, target: target)
-        }()
-
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("Trendler").eyebrow()
-            if compact {
-                VStack(spacing: Spacing.md) {
-                    MetricChart(
-                        title: MetricKind.weight.label,
-                        unit: MetricKind.weight.unit,
-                        points: weightPts,
-                        goalBand: weightGoal,
-                        height: 180
-                    )
-                    MetricChart(
-                        title: MetricKind.bodyFat.label,
-                        unit: MetricKind.bodyFat.unit,
-                        points: bodyFatPts,
-                        height: 180
-                    )
-                }
-            } else {
-                HStack(alignment: .top, spacing: Spacing.md) {
-                    MetricChart(
-                        title: MetricKind.weight.label,
-                        unit: MetricKind.weight.unit,
-                        points: weightPts,
-                        goalBand: weightGoal,
-                        height: 220
-                    )
-                    .frame(minWidth: 520, maxWidth: .infinity)
-
-                    MetricChart(
-                        title: MetricKind.bodyFat.label,
-                        unit: MetricKind.bodyFat.unit,
-                        points: bodyFatPts,
-                        height: 220
-                    )
-                    .frame(width: expansive ? 520 : 420)
-                }
-            }
         }
     }
 }

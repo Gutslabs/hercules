@@ -99,6 +99,10 @@ final class CodexAuth {
     private let oauthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     private let oauthTokenURL = URL(string: "https://auth.openai.com/oauth/token")!
 
+    /// Uçuştaki tek refresh — eşzamanlı çağrılar aynı (rotasyona giren) refresh
+    /// token'ı paralel POST etmesin diye in-flight yenilemeyi tekilleştirir.
+    private var refreshTask: Task<CodexTokens, Error>?
+
     /// Token'lar Keychain'de tutulur (düz-metin dosya + yedeklere sızma riski yok).
     private static let keychainService = "hercules.codex"
     private static let keychainAccount = "tokens"
@@ -144,11 +148,18 @@ final class CodexAuth {
     /// Geçerli erişim token'ı al — gerektiğinde otomatik yenile.
     /// İlk defa çağrılırsa Codex CLI'dan import et.
     func ensureFreshToken() async throws -> CodexTokens {
-        var tokens = try loadTokens()
-        if tokens.isExpiringSoon {
-            tokens = try await refresh(tokens)
+        let tokens = try loadTokens()
+        guard tokens.isExpiringSoon else { return tokens }
+        // Zaten uçuşta bir yenileme varsa ona katıl (rotasyona giren refresh
+        // token'ı paralel POST etme). Kontrol+atama main actor üzerinde
+        // senkron olduğu için aynı anda en fazla bir yenileme uçuşta olabilir.
+        if let inFlight = refreshTask {
+            return try await inFlight.value
         }
-        return tokens
+        let task = Task { try await self.refresh(tokens) }
+        refreshTask = task
+        defer { refreshTask = nil }
+        return try await task.value
     }
 
     /// Codex CLI'dan ilk seferlik import (Hercules store'una kopyala).

@@ -4,25 +4,31 @@ import SwiftData
 import AppKit
 #endif
 
+/// Chat kromu — tüm token'lar Palette'e bağlı: açık/koyu tema + semantik şema
+/// değişimi chat yüzeylerine de otomatik yansır.
 enum ChatChrome {
-    static let background = Color(red: 0.052, green: 0.052, blue: 0.058)
-    static let panel = Color(red: 0.078, green: 0.078, blue: 0.086)
-    static let panelRaised = Color(red: 0.118, green: 0.118, blue: 0.128)
-    static let panelPressed = Color(red: 0.158, green: 0.158, blue: 0.168)
-    static let border = Color.white.opacity(0.075)
-    static let borderStrong = Color.white.opacity(0.145)
-    static let primary = Color.white.opacity(0.94)
-    static let secondary = Color.white.opacity(0.68)
-    static let tertiary = Color.white.opacity(0.46)
-    static let quaternary = Color.white.opacity(0.28)
-    static let accent = Palette.accent
-    static let accentSoft = Palette.accent.opacity(0.14)
-    static let positive = Color(red: 0.54, green: 0.82, blue: 0.68)
-    static let ink = Color.black.opacity(0.90)
-    static let white = Color.white.opacity(0.92)
-    static let whiteSoft = Color.white.opacity(0.12)
-    static let userBubble = Color.white.opacity(0.13)
-    static let assistantBubble = Color(red: 0.095, green: 0.095, blue: 0.105)
+    static var background: Color { Palette.background }
+    static var panel: Color { Palette.surface }
+    static var panelRaised: Color { Palette.surfaceElevated }
+    static var panelPressed: Color { Palette.surfaceElevated }
+    static var border: Color { Palette.border }
+    static var borderStrong: Color { Palette.borderStrong }
+    static var primary: Color { Palette.textPrimary }
+    static var secondary: Color { Palette.textSecondary }
+    static var tertiary: Color { Palette.textTertiary }
+    static var quaternary: Color { Palette.textQuaternary }
+    static var accent: Color { Palette.accent }
+    static var accentSoft: Color { Palette.accentSoft }
+    static var positive: Color { Palette.positive }
+    /// Dolgulu (btnBg) yüzey üstündeki yazı/ikon.
+    static var ink: Color { Palette.btnFg }
+    /// Dolgulu buton zemini (açıkta mürekkep, koyuda kağıt).
+    static var white: Color { Palette.btnBg }
+    static var whiteSoft: Color { Palette.track }
+    static var userBubble: Color { Palette.fieldFill }
+    static var assistantBubble: Color { Palette.surface }
+    /// V1 kart zemini (öğün/aksiyon kartları).
+    static var card: Color { Palette.surface }
 }
 
 extension Notification.Name {
@@ -37,7 +43,6 @@ struct ChatSidebar: View {
     var minWidth: CGFloat = 320
     var maxWidth: CGFloat = 560
     var onClose: () -> Void
-    var onSwitchToDock: () -> Void = {}
 
     @State private var currentProvider: AIProvider = AIKeyStore.shared.provider
     @State private var currentModel: String = AIKeyStore.shared.model
@@ -56,6 +61,7 @@ struct ChatSidebar: View {
     @State private var presetQuery = ""
     @State private var presetFeedback: String? = nil
     @State private var confirmingClear = false
+    @State private var showingOptions = false
     @State private var collapseHandleHovering = false
     @State private var resizeCursorActive = false
     @State private var resizeStartWidth: CGFloat? = nil
@@ -99,14 +105,11 @@ struct ChatSidebar: View {
             .frame(maxWidth: .infinity)
             .background(ChatChrome.background)
 
-            Rectangle()
-                .fill(ChatChrome.border)
-                .frame(width: 0.5)
-                .allowsHitTesting(false)
-
             resizeHandle
         }
         .frame(width: width)
+        .focusEffectDisabled()
+        .killFocusRing()
         .onReceive(NotificationCenter.default.publisher(for: .aiChatShouldResignInputFocus)) { _ in
             inputFocused = false
         }
@@ -199,40 +202,27 @@ struct ChatSidebar: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                AssistantMark(size: 30, cornerRadius: 9)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 9) {
+                Circle()
+                    .fill(ChatChrome.positive)
+                    .frame(width: 7, height: 7)
+                    .padding(.top, 5)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 7) {
-                        Text("Codex")
-                            .font(Typography.bodyBold)
-                            .foregroundStyle(ChatChrome.primary)
-                            .lineLimit(1)
-                        Circle()
-                            .fill(ChatChrome.positive)
-                            .frame(width: 5, height: 5)
-                    }
-                    HStack(spacing: 4) {
-                        Text(currentModel)
-                        if currentProvider.supportsIntelligence {
-                            Text("· \(currentIntelligence.label)")
-                        }
-                    }
-                    .font(Typography.caption)
-                    .foregroundStyle(ChatChrome.tertiary)
-                    .lineLimit(1)
+                    Text("Koç")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(ChatChrome.primary)
+                        .lineLimit(1)
+                    Text(ChatModelInfo.line(provider: currentProvider, model: currentModel, intelligence: currentIntelligence))
+                        .font(.system(size: 10.5, weight: .regular, design: .monospaced))
+                        .foregroundStyle(ChatChrome.tertiary)
+                        .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
-                Button(action: onSwitchToDock) {
-                    headerIcon("arrow.down")
-                }
-                .buttonStyle(.plain)
-                .help("Alt chat moduna geç")
-
-                chatOptionsMenu
+                optionsButton
             }
 
             if !store.currentConversationTitle.isEmpty {
@@ -240,7 +230,7 @@ struct ChatSidebar: View {
                     .font(Typography.caption)
                     .foregroundStyle(ChatChrome.quaternary)
                     .lineLimit(1)
-                    .padding(.leading, 40)
+                    .padding(.leading, 16)
             }
         }
         .padding(.horizontal, Spacing.lg)
@@ -257,138 +247,31 @@ struct ChatSidebar: View {
         }
     }
 
-    private var chatOptionsMenu: some View {
-        Menu {
-            Section("Sohbet") {
-	                Button {
-	                    store.newChat()
-	                } label: {
-                    Label("Yeni sohbet", systemImage: "square.and.pencil")
-                }
-                .disabled(store.isSending)
-
-                if !store.conversationList.isEmpty {
-                    Menu {
-                        ForEach(store.conversationList) { conversation in
-	                            Button {
-	                                store.selectConversation(conversation.id)
-	                            } label: {
-                                Label(
-                                    conversation.title,
-                                    systemImage: conversation.id == store.currentConversationID ? "checkmark.circle.fill" : "message"
-                                )
-                            }
-                            .disabled(store.isSending)
-                        }
-                    } label: {
-                        Label("Geçmiş sohbetler", systemImage: "clock")
-                    }
-                }
-            }
-
-            Section("Model") {
-                Menu {
-                    ForEach(AIProvider.selectable) { provider in
-                        Button {
-                            AIKeyStore.shared.provider = provider
-                            currentProvider = provider
-                            currentModel = AIKeyStore.shared.model
-                            NotificationCenter.default.post(name: .aiClientChanged, object: nil)
-                        } label: {
-                            Label(provider.label, systemImage: provider == currentProvider ? "checkmark" : "circle")
-                        }
-                    }
-                } label: {
-                    Label("Sağlayıcı", systemImage: "cpu")
-                }
-
-                Menu {
-                    ForEach(currentProvider.availableModels, id: \.self) { model in
-                        Button {
-                            AIKeyStore.shared.model = model
-                            currentModel = model
-                            NotificationCenter.default.post(name: .aiClientChanged, object: nil)
-                        } label: {
-                            Label(model, systemImage: model == currentModel ? "checkmark" : "circle")
-                        }
-                    }
-                } label: {
-                    Label("Model", systemImage: "switch.2")
-                }
-
-                if currentProvider.supportsIntelligence {
-                    Menu {
-                        ForEach(IntelligenceLevel.allCases) { level in
-                            Button {
-                                AIKeyStore.shared.intelligence = level
-                                currentIntelligence = level
-                                NotificationCenter.default.post(name: .aiClientChanged, object: nil)
-                            } label: {
-                                Label(level.label, systemImage: level == currentIntelligence ? "checkmark" : "circle")
-                            }
-                        }
-                    } label: {
-                        Label("Düşünme seviyesi", systemImage: "slider.horizontal.3")
-                    }
-                }
-            }
-
-            Section("Panel") {
-                Button(role: .destructive) {
-                    confirmingClear = true
-                } label: {
-                    Label("Bu sohbeti sil", systemImage: "trash")
-                }
-                .disabled(!canDeleteConversation || store.isSending)
-            }
+    /// V1 "···" — native Menu yerine ChatOptionsPanel popover'ı.
+    private var optionsButton: some View {
+        Button {
+            showingOptions = true
         } label: {
             headerIcon("ellipsis")
         }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .help("Chat ayarları")
+        .popover(isPresented: $showingOptions, arrowEdge: .bottom) {
+            ChatOptionsPanel(
+                store: store,
+                presetCount: foodPresets.count,
+                canDelete: canDeleteConversation && !store.isSending,
+                onOpenPresets: { DispatchQueue.main.async { showingPresetWidget = true } },
+                onDelete: { DispatchQueue.main.async { confirmingClear = true } },
+                onDismiss: { showingOptions = false }
+            )
+        }
         .confirmationDialog("Bu sohbet silinsin mi?", isPresented: $confirmingClear, titleVisibility: .visible) {
             Button("Sohbeti sil", role: .destructive) { store.clear() }
             Button("İptal", role: .cancel) {}
         } message: {
             Text("Bu sohbetteki tüm mesajlar kalıcı olarak silinir.")
         }
-    }
-
-    private var historyMenu: some View {
-        Menu {
-	            Button {
-	                store.newChat()
-	            } label: {
-                Label("Yeni sohbet", systemImage: "square.and.pencil")
-            }
-            .disabled(store.isSending)
-
-            Divider()
-
-            Section("Son sohbetler") {
-                ForEach(store.conversationList) { conversation in
-	                    Button {
-	                        store.selectConversation(conversation.id)
-	                    } label: {
-                        Label(
-                            conversation.title,
-                            systemImage: conversation.id == store.currentConversationID ? "checkmark.circle.fill" : "message"
-                        )
-                    }
-                    .disabled(store.isSending)
-                }
-            }
-        } label: {
-            headerIcon("clock")
-        }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .buttonStyle(.plain)
-        .disabled(store.conversationList.isEmpty)
-        .opacity(store.conversationList.isEmpty ? 0.45 : 1)
-        .help("Sohbet geçmişi")
     }
 
     private func headerIcon(_ systemName: String) -> some View {
@@ -398,94 +281,6 @@ struct ChatSidebar: View {
             .frame(width: 26, height: 26)
             .background(Circle().fill(ChatChrome.panelRaised))
             .overlay(Circle().strokeBorder(ChatChrome.border, lineWidth: 0.5))
-    }
-
-    private var modelPicker: some View {
-        Menu {
-            Section("Sağlayıcı") {
-                ForEach(AIProvider.selectable) { p in
-                    Button {
-                        AIKeyStore.shared.provider = p
-                        currentProvider = p
-                        currentModel = AIKeyStore.shared.model
-                        NotificationCenter.default.post(name: .aiClientChanged, object: nil)
-                    } label: {
-                        if p == currentProvider {
-                            Label(p.label, systemImage: "checkmark")
-                        } else {
-                            Text(p.label)
-                        }
-                    }
-                }
-            }
-            Section("Model") {
-                ForEach(currentProvider.availableModels, id: \.self) { m in
-                    Button {
-                        AIKeyStore.shared.model = m
-                        currentModel = m
-                        NotificationCenter.default.post(name: .aiClientChanged, object: nil)
-                    } label: {
-                        if m == currentModel {
-                            Label(m, systemImage: "checkmark")
-                        } else {
-                            Text(m)
-                        }
-                    }
-                }
-            }
-            if currentProvider.supportsIntelligence {
-                Section("Intelligence") {
-                    ForEach(IntelligenceLevel.allCases) { e in
-                        Button {
-                            AIKeyStore.shared.intelligence = e
-                            currentIntelligence = e
-                            NotificationCenter.default.post(name: .aiClientChanged, object: nil)
-                        } label: {
-                            if e == currentIntelligence {
-                                Label(e.label, systemImage: "checkmark")
-                            } else {
-                                Text(e.label)
-                            }
-                        }
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(currentProvider.label)
-                            .font(Typography.bodyBold)
-                            .foregroundStyle(ChatChrome.primary)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(ChatChrome.tertiary)
-                    }
-                    HStack(spacing: 4) {
-                        Text(currentModel)
-                            .font(Typography.caption)
-                            .foregroundStyle(ChatChrome.tertiary)
-                            .lineLimit(1)
-                        if currentProvider.supportsIntelligence {
-                            Text("· \(currentIntelligence.label)")
-                                .font(Typography.caption)
-                            .foregroundStyle(ChatChrome.secondary)
-                        }
-                    }
-                    Text(store.currentConversationTitle)
-                        .font(Typography.caption)
-                        .foregroundStyle(ChatChrome.quaternary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(ChatChrome.panel))
-            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.5))
-        }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -793,7 +588,8 @@ struct ChatSidebar: View {
         inputFocused = true
     }
 
-    /// Input bar üstündeki ipucu — neyin AI'ya gideceğini gerçek zamanlı gösterir.
+    /// V1 "GÖNDERİLECEK" şeridi — AI'ya gidecek bağlamı çiplerle gösterir.
+    /// Aktif çip mercan, pasif çip gri; pasif öneri çipine tıklayınca @etiket eklenir.
     @ViewBuilder
     private var mentionHint: some View {
         let chatMentions = UserContextSnapshot.parseMentions(store.input)
@@ -801,83 +597,70 @@ struct ChatSidebar: View {
         let aboutActive = UserContextSnapshot.aboutSection(ctx: ctx) != nil
         let supplementsActive = UserContextSnapshot.supplementsSection(ctx: ctx) != nil
         let allMentions = chatMentions.union(aboutMentions)
+        let core: [MentionTag] = [.olcumler, .antrenman, .takvim]
+        let extraActive = allMentions.filter { !core.contains($0) }.sorted { $0.displayName < $1.displayName }
+        let selectedCount = (aboutActive ? 1 : 0) + (supplementsActive ? 1 : 0) + allMentions.count
 
-        if !allMentions.isEmpty || aboutActive || supplementsActive {
-            // Aktif gönderim — kullanıcı görüyor neyin gittiğini
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 5) {
-                    Image(systemName: "sparkles.rectangle.stack")
-                        .font(.system(size: 9, weight: .medium))
-                    Text("Gönderilecek")
-                        .font(Typography.captionBold)
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(allMentions.isEmpty ? ChatChrome.tertiary : ChatChrome.primary)
-
-                ChatHintFlow(spacing: 5) {
-                    if aboutActive {
-                        contextChip("Hakkında", icon: "person.crop.circle", tint: ChatChrome.primary)
-                    }
-                    if supplementsActive {
-                        contextChip("Supplements", icon: "pills.fill", tint: ChatChrome.primary)
-                    }
-                    ForEach(allMentions.map(\.displayName).sorted(), id: \.self) { name in
-                        contextChip(name, icon: nil, tint: ChatChrome.primary)
-                    }
-                    if !aboutMentions.isEmpty {
-                        contextChip("bio'dan", icon: "link", tint: ChatChrome.tertiary)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .transition(.opacity)
-        } else {
-            ChatHintFlow(spacing: 5) {
-                HStack(spacing: 5) {
-                    Image(systemName: "at")
-                        .font(.system(size: 9, weight: .medium))
-                    Text("@ yaz seç")
-                        .font(Typography.caption)
-                }
-                HStack(spacing: 0) {
-                    Text("@all")
-                        .font(Typography.captionBold)
-                    Text(" tüm veri")
-                        .font(Typography.caption)
-                }
-                HStack(spacing: 0) {
-                    Text("Profil → Hakkında")
-                        .font(Typography.captionBold)
-                    Text(" yaz")
-                        .font(Typography.caption)
-                }
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text("GÖNDERİLECEK")
+                    .font(Typography.label)
+                    .tracking(0.9)
+                    .foregroundStyle(ChatChrome.quaternary)
+                Text(selectedCount > 0 ? "\(selectedCount) bağlam seçili" : "çiplere tıkla ya da @ yaz")
+                    .font(Typography.caption)
+                    .foregroundStyle(ChatChrome.tertiary)
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(ChatChrome.quaternary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ChatHintFlow(spacing: 5) {
+                contextChip(
+                    "Hakkımda",
+                    active: aboutActive,
+                    help: aboutActive ? "Profil ▸ Hakkımda her mesajla gider" : "Profil ▸ Hakkımda boş"
+                )
+                contextChip(
+                    "Supplements",
+                    active: supplementsActive,
+                    help: supplementsActive ? "Supplement listen her mesajla gider" : "Hakkımda'da supplement bölümü yok"
+                )
+                ForEach(core, id: \.self) { tag in
+                    contextChip(tag.displayName, active: allMentions.contains(tag)) {
+                        addMentionChip(tag)
+                    }
+                }
+                ForEach(extraActive, id: \.self) { tag in
+                    contextChip(tag.displayName, active: true)
+                }
+                if !aboutMentions.isEmpty {
+                    contextChip("bio'dan", active: false, help: "Hakkımda metnindeki @etiketlerden geliyor")
+                }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Pasif çipe tıklanınca @etiketi input'un sonuna ekler (zaten varsa dokunmaz).
+    private func addMentionChip(_ tag: MentionTag) {
+        guard !UserContextSnapshot.parseMentions(store.input).contains(tag) else { return }
+        var text = store.input
+        if !text.isEmpty, text.last?.isWhitespace != true {
+            text += " "
+        }
+        store.input = text + "@\(tag.displayName) "
+    }
+
+    /// V1 preset satırı — "Presetler" + gri alt metin aynı satırda, sağda mono sayaç + chevron.
     private var presetLauncher: some View {
         Button {
             showingPresetWidget.toggle()
         } label: {
-            HStack(spacing: 9) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(ChatChrome.whiteSoft)
-                        .frame(width: 30, height: 30)
-                        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(ChatChrome.border, lineWidth: 0.5))
-                    Image(systemName: "takeoutbag.and.cup.and.straw")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(ChatChrome.primary)
-                }
-
-                VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text("Presetler")
                         .font(Typography.captionBold)
                         .foregroundStyle(ChatChrome.primary)
-                    Text(presetFeedback ?? "Sık kullandıklarını ekle")
+                    Text(presetFeedback ?? "sık kullandıklarını ekle")
                         .font(Typography.caption)
                         .foregroundStyle(presetFeedback == nil ? ChatChrome.tertiary : ChatChrome.positive)
                         .lineLimit(1)
@@ -886,28 +669,30 @@ struct ChatSidebar: View {
                 Spacer(minLength: 0)
 
                 Text("\(foodPresets.count)")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(ChatChrome.ink)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(ChatChrome.white))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(ChatChrome.primary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().fill(ChatChrome.panelRaised))
+                    .overlay(Capsule().strokeBorder(ChatChrome.border, lineWidth: 0.5))
 
                 Image(systemName: "chevron.up")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(ChatChrome.tertiary)
                     .rotationEffect(.degrees(showingPresetWidget ? 180 : 0))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(showingPresetWidget ? ChatChrome.panelPressed : ChatChrome.panelRaised.opacity(0.72))
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(showingPresetWidget ? ChatChrome.panelPressed : ChatChrome.panelRaised.opacity(0.55))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .strokeBorder(showingPresetWidget ? ChatChrome.borderStrong : ChatChrome.border, lineWidth: 0.55)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.16), value: showingPresetWidget)
@@ -924,20 +709,32 @@ struct ChatSidebar: View {
         .help("Presetler")
     }
 
-    private func contextChip(_ text: String, icon: String?, tint: Color) -> some View {
-        HStack(spacing: 4) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: 8, weight: .semibold))
+    /// V1 bağlam çipi — aktif: mercan zemin+çerçeve; pasif: gri çerçeve.
+    /// `action` verilirse tıklanabilir (öneri çipi).
+    private func contextChip(_ text: String, active: Bool, help: String? = nil, action: (() -> Void)? = nil) -> some View {
+        let label = Text(text)
+            .font(Typography.captionBold)
+            .foregroundStyle(active ? ChatChrome.accent : ChatChrome.tertiary)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(active ? ChatChrome.accentSoft : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(active ? ChatChrome.accent.opacity(0.42) : ChatChrome.border, lineWidth: 0.75)
+            )
+        return Group {
+            if let action {
+                Button(action: action) { label.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+            } else {
+                label
             }
-            Text(text)
-                .font(Typography.captionBold)
-                .lineLimit(1)
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(tint.opacity(0.12)))
+        .help(help ?? "")
     }
 
     private var inputBar: some View {
@@ -959,13 +756,12 @@ struct ChatSidebar: View {
                     } label: {
                         Image(systemName: store.isSending ? "stop.fill" : "arrow.up")
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle((canSendInput || store.isSending) ? ChatChrome.ink : ChatChrome.quaternary)
+                            .foregroundStyle(ChatChrome.ink.opacity((canSendInput || store.isSending) ? 1 : 0.5))
                             .frame(width: 36, height: 36)
                             .background(
                                 Circle()
-                                    .fill((canSendInput || store.isSending) ? ChatChrome.white : ChatChrome.panelPressed)
+                                    .fill(ChatChrome.accent.opacity((canSendInput || store.isSending) ? 1 : 0.35))
                             )
-                            .overlay(Circle().strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
                     .disabled(!store.isSending && !canSendInput)
@@ -974,18 +770,9 @@ struct ChatSidebar: View {
                     .accessibilityLabel(store.isSending ? "Yanıtı durdur" : "Mesajı gönder")
                 }
             }
-            .padding(Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .fill(ChatChrome.panel.opacity(0.86))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .strokeBorder(ChatChrome.border, lineWidth: 0.55)
-            )
-            .padding(.horizontal, Spacing.md)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.top, 10)
             .padding(.bottom, Spacing.md)
-            .padding(.top, 2)
         }
         .background(ChatChrome.background)
     }
@@ -1083,7 +870,7 @@ struct ChatSidebar: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(inputFocused ? ChatChrome.borderStrong : ChatChrome.border, lineWidth: 0.55)
+                .strokeBorder(ChatChrome.accent.opacity(inputFocused ? 0.62 : 0.34), lineWidth: 1)
         )
     }
 }

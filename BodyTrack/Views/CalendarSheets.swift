@@ -237,7 +237,7 @@ struct PlanSetupSheet: View {
                     .padding(.vertical, 9)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(paceMode == mode ? Color.white.opacity(0.07) : Palette.surfaceElevated)
+                            .fill(paceMode == mode ? Palette.track : Palette.surfaceElevated)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
@@ -264,7 +264,7 @@ struct PlanSetupSheet: View {
                             .frame(width: 32, height: 28)
                             .background(
                                 RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
-                                    .fill(monthsInput == m ? Color.white.opacity(0.07) : Palette.surfaceElevated)
+                                    .fill(monthsInput == m ? Palette.track : Palette.surfaceElevated)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)

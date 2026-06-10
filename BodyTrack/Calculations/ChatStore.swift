@@ -557,6 +557,15 @@ final class ChatStore {
         return dir.appendingPathComponent("chat-history.json")
     }
 
+    private static func backupUnreadableHistory(at url: URL) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let backupURL = url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)-unreadable-\(formatter.string(from: Date())).json")
+        try? FileManager.default.copyItem(at: url, to: backupURL)
+    }
+
     private func backfillMemoriesFromHistoryIfNeeded() {
         let signature = Self.memoryBackfillSignature(for: conversations)
         guard !signature.isEmpty,
@@ -666,6 +675,9 @@ final class ChatStore {
             return
         }
 
+        // İki şema da çözülemedi: bozuk/sürüm-uyumsuz dosyayı silmeden önce
+        // orijinal baytları bir kenara kopyala (geçici decode hatasında veri kaybını önler).
+        Self.backupUnreadableHistory(at: historyURL)
         startBlankConversation()
     }
 

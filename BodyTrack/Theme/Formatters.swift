@@ -68,6 +68,13 @@ enum Fmt {
         return f
     }()
 
+    static let dayMonth: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMMM"
+        return f
+    }()
+
     static let dateMonthAxis: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "tr_TR")

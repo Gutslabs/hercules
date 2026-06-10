@@ -544,25 +544,27 @@ enum UserContextSnapshot {
         guard let latest = withWeight.first, withWeight.count >= 2 else { return nil }
 
         let now = Date()
-        func closest(daysAgo: Int) -> (Date, Double)? {
+        func closest(daysAgo: Int, toleranceDays: Double) -> (Date, Double)? {
             let target = Calendar.current.date(byAdding: .day, value: -daysAgo, to: now) ?? now
-            return withWeight.min(by: { abs($0.0.timeIntervalSince(target)) < abs($1.0.timeIntervalSince(target)) })
+            guard let best = withWeight.min(by: { abs($0.0.timeIntervalSince(target)) < abs($1.0.timeIntervalSince(target)) }),
+                  abs(best.0.timeIntervalSince(target)) <= toleranceDays * 86_400 else { return nil }
+            return best
         }
 
         var lines: [String] = ["[KİLO TRENDİ (son ölçümlere göre)]"]
-        if let w7 = closest(daysAgo: 7), abs(w7.0.timeIntervalSince(latest.0)) > 86_400 {
+        if let w7 = closest(daysAgo: 7, toleranceDays: 2.5), abs(w7.0.timeIntervalSince(latest.0)) > 86_400 {
             let delta = latest.1 - w7.1
             lines.append("- 7 gün önce: \(Fmt.num(w7.1, digits: 1)) kg → bugün \(Fmt.num(latest.1, digits: 1)) kg (\(Fmt.signed(delta, digits: 2)) kg)")
         }
-        if let w14 = closest(daysAgo: 14), abs(w14.0.timeIntervalSince(latest.0)) > 6 * 86_400 {
+        if let w14 = closest(daysAgo: 14, toleranceDays: 4), abs(w14.0.timeIntervalSince(latest.0)) > 6 * 86_400 {
             let delta = latest.1 - w14.1
             lines.append("- 14 gün önce: \(Fmt.num(w14.1, digits: 1)) kg (\(Fmt.signed(delta, digits: 2)) kg fark)")
         }
-        if let w30 = closest(daysAgo: 30), abs(w30.0.timeIntervalSince(latest.0)) > 14 * 86_400 {
+        if let w30 = closest(daysAgo: 30, toleranceDays: 10), abs(w30.0.timeIntervalSince(latest.0)) > 14 * 86_400 {
             let delta = latest.1 - w30.1
             lines.append("- 30 gün önce: \(Fmt.num(w30.1, digits: 1)) kg (\(Fmt.signed(delta, digits: 2)) kg fark)")
         }
-        if let w90 = closest(daysAgo: 90), abs(w90.0.timeIntervalSince(latest.0)) > 45 * 86_400 {
+        if let w90 = closest(daysAgo: 90, toleranceDays: 30), abs(w90.0.timeIntervalSince(latest.0)) > 45 * 86_400 {
             let delta = latest.1 - w90.1
             lines.append("- 90 gün önce: \(Fmt.num(w90.1, digits: 1)) kg (\(Fmt.signed(delta, digits: 2)) kg fark)")
         }

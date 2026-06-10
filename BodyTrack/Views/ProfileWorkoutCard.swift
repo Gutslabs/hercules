@@ -82,7 +82,7 @@ struct WorkoutRow: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(workout != nil ? Palette.surfaceElevated : Color.white.opacity(0.03))
+                    .fill(workout != nil ? Palette.surfaceElevated : Palette.fieldFill)
                     .frame(width: 28, height: 28)
                 if isToday {
                     Circle()
@@ -136,7 +136,7 @@ struct WorkoutRow: View {
         .contentShape(Rectangle())
         .background(
             RoundedRectangle(cornerRadius: Radius.sm - 2)
-                .fill(hovering ? Color.white.opacity(0.025) : Color.clear)
+                .fill(hovering ? Palette.fieldFill : Color.clear)
         )
         .onHover { hovering = $0 }
         .onTapGesture { onTap(workout) }

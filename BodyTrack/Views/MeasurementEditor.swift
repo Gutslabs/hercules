@@ -6,6 +6,10 @@ enum EditorMode {
     case edit(Measurement)
 }
 
+/// Tartı ekle / Tam ölçüm — V1 dili, kompakt (560px).
+/// İlkeler: mod seçimi segment (radio kart yok), tarih varsayılan GİZLİ
+/// ("Bugün · 15:50" çipi — kaçırılan gün için tıklayıp açılır), sağ özet
+/// paneli yok. Tek zorunlu alan: kilo; tam ölçümde detaylar opsiyonel.
 struct MeasurementEditor: View {
     enum CreateKind {
         case smart
@@ -18,6 +22,7 @@ struct MeasurementEditor: View {
     var onDelete: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @Query private var profiles: [UserProfile]
 
     @State private var date: Date
     @State private var weight: Double?
@@ -27,7 +32,20 @@ struct MeasurementEditor: View {
     @State private var neck: Double?
     @State private var note: String
     @State private var showExtra: Bool
+    @State private var dateOpen = false
     @State private var confirmingDelete = false
+    /// US Navy hesabı için boy — profilden gelir, yalnız bu kayıt için düzeltilebilir.
+    @State private var heightLocal: Double? = nil
+    /// false → yağ oranı bel+boyun+boydan otomatik; true → elle girilmiş değer korunur.
+    @State private var bodyFatManual: Bool
+    @FocusState private var weightFocused: Bool
+    @FocusState private var bodyFatFocused: Bool
+
+    private var fieldFill: Color { Palette.fieldFill }
+    private var segPaper: Color { Palette.btnBg }
+    private var segInk: Color { Palette.btnFg }
+
+    private static let trLocale = Locale(identifier: "tr_TR")
 
     init(
         mode: EditorMode,
@@ -47,6 +65,7 @@ struct MeasurementEditor: View {
             _chest = State(initialValue: nil)
             _neck = State(initialValue: nil)
             _note = State(initialValue: "")
+            _bodyFatManual = State(initialValue: false)
             let shouldShowExtra: Bool
             switch createKind {
             case .smart:
@@ -65,7 +84,11 @@ struct MeasurementEditor: View {
             _chest = State(initialValue: m.chest)
             _neck = State(initialValue: m.neck)
             _note = State(initialValue: m.note ?? "")
+            // Kayıtlı yağ oranı varsa otomatik hesap üstüne yazmasın.
+            _bodyFatManual = State(initialValue: m.bodyFat != nil)
+            // Not da detay alanında yaşıyor — notu olan kayıt tam ölçüm görünümüyle açılsın.
             let hasExtra = m.bodyFat != nil || m.waist != nil || m.chest != nil || m.neck != nil
+                || !(m.note ?? "").isEmpty
             _showExtra = State(initialValue: hasExtra)
         }
     }
@@ -75,116 +98,60 @@ struct MeasurementEditor: View {
         return false
     }
 
-    private var saveButtonTitle: String {
-        if isEditing { return "Kaydet" }
-        return showExtra ? "Tam Ölçüm Ekle" : "Tartı Ekle"
-    }
-
     private var editorTitle: String {
         if isEditing { return "Ölçümü düzenle" }
         return showExtra ? "Tam ölçüm" : "Tartı ekle"
     }
 
-    private var editorSubtitle: String {
-        if showExtra {
-            return "Kilo, yağ oranı ve çevre ölçülerini tek kayıtta topla."
-        }
-        return "Günlük akış için sadece kilo yeterli; detay alanları kapalı kalır."
+    private var saveButtonTitle: String {
+        if isEditing { return "Kaydet" }
+        return showExtra ? "Tam Ölçüm Ekle" : "Tartı Ekle"
     }
 
     private var modeHint: String {
-        if showExtra {
-            return "Haftalık ana kayıt: kilo + yağ % + bel + göğüs + boyun."
-        }
-        return "Hızlı tartı: kilo gir, devam et."
-    }
-
-    private var validationMessage: String? {
-        if weight == nil {
-            return "Kilo alanı gerekli."
-        }
-
-        if showExtra && bodyFat == nil && waist == nil && chest == nil && neck == nil {
-            return "Tam ölçüm için en az bir detay alanı gir."
-        }
-
-        return nil
+        showExtra ? "kilo zorunlu, detaylar opsiyonel" : "günlük akış için sadece kilo yeterli"
     }
 
     private var canSave: Bool {
-        validationMessage == nil
-    }
-
-    private var fatMass: Double? {
-        guard let weight, let bodyFat else { return nil }
-        return weight * bodyFat / 100
-    }
-
-    private var leanMass: Double? {
-        guard let weight, let bodyFat else { return nil }
-        return weight * (1 - bodyFat / 100)
-    }
-
-    private var editorWidth: CGFloat {
-        showExtra ? 760 : 700
-    }
-
-    private var editorHeight: CGFloat {
-        showExtra ? 720 : 620
+        weight != nil
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            editorHeader
+        VStack(alignment: .leading, spacing: 18) {
+            headerRow
+            dateRow
 
-            Hairline()
+            numberField(label: "Kilo", unit: "kg", value: $weight, big: true, required: true)
+                .focused($weightFocused)
 
-            HStack(alignment: .top, spacing: Spacing.xl) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Spacing.lg) {
-                        modeSection
-                        dateSection
-                        weightSection
-
-                        if showExtra {
-                            fullMeasurementSection
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .top).combined(with: .opacity),
-                                    removal: .opacity
-                                ))
-                        }
-
-                        noteSection
-                    }
-                    .padding(Spacing.xl)
-                }
-                .scrollContentBackground(.hidden)
-
-                editorSummary
-                    .frame(width: 230)
-                    .padding(.top, Spacing.xl)
-                    .padding(.trailing, Spacing.xl)
-                    .padding(.bottom, Spacing.xl)
+            if showExtra {
+                detailFields
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity),
+                        removal: .opacity
+                    ))
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Hairline()
-
-            editorFooter
+            footer
         }
-        .frame(width: editorWidth, height: editorHeight)
-        .background(editorBackground)
-        .clipShape(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous))
+        .padding(.init(top: 24, leading: 30, bottom: 20, trailing: 30))
+        .frame(width: 560)
+        .background(ZStack { Palette.background; Palette.surface })
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.7)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Palette.border, lineWidth: 1)
         )
-        .shadow(color: Palette.background.opacity(0.45), radius: 34, x: 0, y: 22)
-        .preferredColorScheme(.dark)
+        .shadow(color: .black.opacity(0.45), radius: 40, y: 30)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showExtra)
+        .animation(.easeInOut(duration: 0.16), value: dateOpen)
+        // ↵ herhangi bir alandayken kaydeder (mockup: "↵ kaydet").
+        .onSubmit {
+            if canSave { save(); dismiss() }
+        }
         .onAppear {
-            if case .create = mode {
-                date = .now
-            }
+            if heightLocal == nil { heightLocal = profiles.first?.height }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { weightFocused = true }
         }
         .confirmationDialog("Bu ölçüm silinsin mi?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Ölçümü Sil", role: .destructive) {
@@ -195,344 +162,421 @@ struct MeasurementEditor: View {
         }
     }
 
-    private var editorHeader: some View {
-        HStack(alignment: .center, spacing: Spacing.md) {
-            ZStack {
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .fill((showExtra ? Palette.accent : Color.white).opacity(showExtra ? 0.16 : 0.07))
-                    .frame(width: 46, height: 46)
-                Image(systemName: showExtra ? "ruler" : "scalemass")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(showExtra ? Palette.accent : Palette.textSecondary)
-            }
+    // MARK: - Header (eyebrow + başlık · segment · kapat)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(isEditing ? "KAYIT" : "YENİ KAYIT")
-                    .font(Typography.label)
-                    .tracking(1)
-                    .foregroundStyle(Palette.textQuaternary)
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isEditing ? "Kayıt" : "Yeni Kayıt").eyebrow()
                 Text(editorTitle)
-                    .font(Typography.title)
+                    .font(.system(size: 18, weight: .bold))
+                    .tracking(-0.2)
                     .foregroundStyle(Palette.textPrimary)
-                Text(editorSubtitle)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(2)
             }
-
-            Spacer(minLength: Spacing.lg)
-
+            Spacer(minLength: Spacing.md)
+            modeSegment
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(MeasurementPressButtonStyle())
-            .foregroundStyle(Palette.textSecondary)
-            .background(
-                Circle()
-                    .fill(Color.white.opacity(0.045))
-            )
-            .overlay(
-                Circle()
-                    .strokeBorder(Palette.border, lineWidth: 0.5)
-            )
-            .keyboardShortcut(.cancelAction)
-        }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.lg)
-    }
-
-    private var modeSection: some View {
-        MeasurementEditorSection(
-            title: "Kayıt modu",
-            subtitle: modeHint,
-            systemImage: showExtra ? "ruler" : "scalemass"
-        ) {
-            HStack(spacing: Spacing.sm) {
-                MeasurementEditorModeButton(
-                    title: "Tartı",
-                    subtitle: "Sadece kilo",
-                    systemImage: "scalemass",
-                    selected: !showExtra
-                ) {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                        showExtra = false
-                    }
-                }
-
-                MeasurementEditorModeButton(
-                    title: "Tam ölçüm",
-                    subtitle: "Kilo + detay",
-                    systemImage: "ruler",
-                    selected: showExtra
-                ) {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                        showExtra = true
-                    }
-                }
-            }
-        }
-    }
-
-    private var dateSection: some View {
-        MeasurementEditorSection(
-            title: "Zaman",
-            subtitle: "Kaydın tartıya çıktığın ana bağlansın.",
-            systemImage: "calendar.badge.clock"
-        ) {
-            StyledDateField(label: "Tarih ve saat", date: $date)
-        }
-    }
-
-    private var weightSection: some View {
-        MeasurementEditorSection(
-            title: "Tartı",
-            subtitle: showExtra ? "Tam ölçümün merkez değeri." : "Günlük trend için tek zorunlu alan.",
-            systemImage: "scalemass"
-        ) {
-            MeasurementEditorNumberField(
-                label: "Kilo",
-                unit: "kg",
-                value: $weight,
-                placeholder: "0.0",
-                required: true
-            )
-
-            if !showExtra {
-                Text("Yağ oranı ve çevreleri haftalık tam ölçümde aç.")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .padding(.top, 2)
-            }
-        }
-    }
-
-    private var fullMeasurementSection: some View {
-        MeasurementEditorSection(
-            title: "Tam ölçüm",
-            subtitle: "Detay alanları opsiyonel; en az birini doldurman yeterli.",
-            systemImage: "ruler"
-        ) {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: Spacing.md),
-                    GridItem(.flexible(), spacing: Spacing.md)
-                ],
-                spacing: Spacing.md
-            ) {
-                MeasurementEditorNumberField(
-                    label: "Yağ oranı",
-                    unit: "%",
-                    value: $bodyFat,
-                    placeholder: "0.0"
-                )
-                MeasurementEditorNumberField(
-                    label: "Bel",
-                    unit: "cm",
-                    value: $waist,
-                    placeholder: "0.0"
-                )
-                MeasurementEditorNumberField(
-                    label: "Göğüs",
-                    unit: "cm",
-                    value: $chest,
-                    placeholder: "0.0"
-                )
-                MeasurementEditorNumberField(
-                    label: "Boyun",
-                    unit: "cm",
-                    value: $neck,
-                    placeholder: "0.0"
-                )
-            }
-
-            Link(destination: URL(string: "https://www.agirsaglam.com/vucut-yag-orani-hesaplama/")!) {
-                Label("Yağ oranı hesapla", systemImage: "arrow.up.right")
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.textSecondary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.textQuaternary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Kapat (esc)")
         }
     }
 
-    private var noteSection: some View {
-        MeasurementEditorSection(
-            title: "Not",
-            subtitle: "Koşul bilgisi ileride sapmaları okumayı kolaylaştırır.",
-            systemImage: "text.alignleft"
-        ) {
-            TextField("ör: sabah aç karnına, antrenman sonrası", text: $note, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(Typography.body)
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(3...5)
-                .padding(12)
+    private var modeSegment: some View {
+        HStack(spacing: 2) {
+            segmentItem("Tartı", selected: !showExtra) { showExtra = false }
+            segmentItem("Tam Ölçüm", selected: showExtra) { showExtra = true }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.fieldFill))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+    }
+
+    private func segmentItem(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(selected ? segInk : Palette.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
                 .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Palette.surfaceElevated)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(selected ? segPaper : Color.clear)
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: 0.5)
-                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Tarih (varsayılan gizli çip — tıklayınca gün gezgini)
+
+    private var dateRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if dateOpen {
+                openDateChip
+                Text(relativeDayHint)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+            } else {
+                collapsedDateChip
+            }
+            Spacer(minLength: Spacing.md)
+            Text(modeHint)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
     }
 
-    private var editorSummary: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(spacing: 9) {
-                BreathingStatusDot(color: canSave ? Palette.positive : Palette.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(canSave ? "Kayıt hazır" : "Eksik alan")
-                        .font(Typography.captionBold)
-                        .foregroundStyle(Palette.textPrimary)
-                    Text(showExtra ? "Tam ölçüm" : "Hızlı tartı")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                }
+    private var collapsedDateChip: some View {
+        Button {
+            dateOpen = true
+        } label: {
+            HStack(spacing: 7) {
+                Text(shortDayLabel)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(Palette.textSecondary)
+                Text(Fmt.timeShort.string(from: date))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Palette.textQuaternary)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7.5, weight: .semibold))
+                    .foregroundStyle(Palette.textQuaternary)
             }
-
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                MeasurementEditorStat(label: "Kilo", value: weightText, unit: "kg")
-                MeasurementEditorStat(label: "Yağ oranı", value: optionalText(bodyFat), unit: "%")
-
-                if showExtra {
-                    MeasurementEditorStat(label: "Yağsız kütle", value: optionalText(leanMass), unit: "kg")
-                    MeasurementEditorStat(label: "Yağ kütlesi", value: optionalText(fatMass), unit: "kg")
-                }
-            }
-
-            Hairline()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Alan durumu").eyebrow()
-                MeasurementFieldStatus(label: "Tartı", filled: weight != nil)
-                if showExtra {
-                    MeasurementFieldStatus(label: "Yağ", filled: bodyFat != nil)
-                    MeasurementFieldStatus(label: "Bel", filled: waist != nil)
-                    MeasurementFieldStatus(label: "Göğüs", filled: chest != nil)
-                    MeasurementFieldStatus(label: "Boyun", filled: neck != nil)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            Text(Fmt.dateLong.string(from: date))
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
         }
-        .padding(Spacing.lg)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .buttonStyle(.plain)
+        .help("Tarihi değiştir")
+    }
+
+    /// ‹ 9 Haziran › | saat — kaçırılan günü girmek için. Çip içerik boyunda
+    /// sabittir (.fixedSize) — dar düzende metin asla harf harf kırılmaz.
+    private var openDateChip: some View {
+        HStack(spacing: 9) {
+            Button { stepDay(-1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.textTertiary)
+                    .frame(width: 14, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button { dateOpen = false } label: {
+                Text(Fmt.dayMonth.string(from: date))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Tarihi gizle")
+
+            Button { stepDay(1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(canStepForward ? Palette.textTertiary : Palette.textQuaternary.opacity(0.4))
+                    .frame(width: 14, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canStepForward)
+
+            Rectangle().fill(Palette.border).frame(width: 1, height: 12)
+
+            DatePicker("", selection: $date, in: ...Date(), displayedComponents: .hourAndMinute)
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .controlSize(.small)
+                .environment(\.locale, Self.trLocale)   // 24 saat (AM/PM değil)
+                .fixedSize()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Color.white.opacity(0.035))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Palette.accent.opacity(0.05))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1)
         )
+        .fixedSize()
     }
 
-    private var editorFooter: some View {
-        HStack(spacing: Spacing.md) {
-            if let validationMessage {
-                Label(validationMessage, systemImage: "exclamationmark.circle")
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.warning)
-                    .lineLimit(2)
-            } else {
-                Label(showExtra ? "Detaylı kayıt kaydedilecek." : "Hızlı tartı kaydedilecek.", systemImage: "checkmark.circle")
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.positive)
-            }
+    private var shortDayLabel: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Bugün" }
+        if cal.isDateInYesterday(date) { return "Dün" }
+        return Fmt.dayMonth.string(from: date)
+    }
 
-            Spacer(minLength: Spacing.md)
+    private var relativeDayHint: String {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: .now)).day ?? 0
+        switch days {
+        case 0:  return "bugünü giriyorsun"
+        case 1:  return "dünü giriyorsun"
+        default: return "\(days) gün öncesini giriyorsun"
+        }
+    }
 
-            if isEditing, onDelete != nil {
-                Button {
-                    confirmingDelete = true
-                } label: {
-                    Label("Sil", systemImage: "trash")
-                        .font(Typography.bodyBold)
-                        .padding(.horizontal, 13)
-                        .frame(height: 38)
+    private var canStepForward: Bool {
+        !Calendar.current.isDateInToday(date) && date < .now
+    }
+
+    private func stepDay(_ delta: Int) {
+        guard let stepped = Calendar.current.date(byAdding: .day, value: delta, to: date) else { return }
+        date = min(stepped, .now)
+    }
+
+    // MARK: - Alanlar
+
+    private func numberField(
+        label: String,
+        unit: String,
+        value: Binding<Double?>,
+        big: Bool = false,
+        required: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Text(label).eyebrow()
+                if required {
+                    Circle().fill(Palette.accent).frame(width: 4, height: 4)
                 }
-                .buttonStyle(MeasurementPressButtonStyle())
-                .foregroundStyle(Palette.negative)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Palette.negative.opacity(0.10))
+            }
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                TextField(
+                    "0,0",
+                    value: value,
+                    format: .number.precision(.fractionLength(0...2)).locale(Locale(identifier: "tr_TR"))
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .strokeBorder(Palette.negative.opacity(0.22), lineWidth: 0.5)
-                )
-            }
+                .textFieldStyle(.plain)
+                .font(.system(size: big ? 22 : 14, design: .monospaced))
+                .foregroundStyle(Palette.textPrimary)
+                .multilineTextAlignment(.leading)
 
-            Button("Vazgeç") {
-                dismiss()
+                Text(unit)
+                    .font(.system(size: big ? 12 : 10.5))
+                    .foregroundStyle(Palette.textQuaternary)
             }
-            .font(Typography.bodyBold)
-            .buttonStyle(.plain)
-            .foregroundStyle(Palette.textSecondary)
-            .padding(.horizontal, 12)
-            .frame(height: 38)
-
-            Button {
-                guard canSave else { return }
-                save()
-                dismiss()
-            } label: {
-                Label(saveButtonTitle, systemImage: showExtra ? "ruler" : "scalemass")
-                    .font(Typography.bodyBold)
-                    .padding(.horizontal, 15)
-                    .frame(height: 38)
-            }
-            .buttonStyle(MeasurementPressButtonStyle())
-            .foregroundStyle(canSave ? Palette.background.opacity(0.92) : Palette.textQuaternary)
+            .padding(.horizontal, big ? 16 : 14)
+            .padding(.vertical, big ? 12 : 9)
             .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(canSave ? Palette.accent : Palette.surfaceElevated)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(fieldFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(canSave ? Color.white.opacity(0.18) : Palette.border, lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(required ? Palette.accent.opacity(0.4) : Palette.border, lineWidth: 1)
             )
-            .disabled(!canSave)
-            .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.lg)
     }
 
-    private var editorBackground: some View {
-        ZStack(alignment: .topLeading) {
-            Palette.surface
-            LinearGradient(
-                colors: [
-                    (showExtra ? Palette.accent : Color.white).opacity(showExtra ? 0.14 : 0.055),
-                    Color.clear
+    private var detailFields: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 12),
+                    GridItem(.flexible(), spacing: 12)
                 ],
-                startPoint: .topLeading,
-                endPoint: .center
+                spacing: 12
+            ) {
+                numberField(label: "Bel", unit: "cm", value: $waist)
+                numberField(label: "Boyun", unit: "cm", value: $neck)
+                numberField(label: "Göğüs", unit: "cm", value: $chest)
+                numberField(label: "Boy", unit: "cm", value: $heightLocal)
+            }
+            .onChange(of: waist) { _, _ in syncAutoBodyFat() }
+            .onChange(of: neck) { _, _ in syncAutoBodyFat() }
+            .onChange(of: heightLocal) { _, _ in syncAutoBodyFat() }
+
+            bodyFatRow
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Not").eyebrow()
+                TextField("ör: sabah aç karnına, antrenman sonrası", text: $note)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(fieldFill)
             )
-            .allowsHitTesting(false)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: 1)
+            )
         }
     }
 
-    private var weightText: String {
-        guard let weight else { return "—" }
-        return Fmt.num(weight, digits: 1)
+    // MARK: - Yağ oranı (US Navy'den otomatik; kalemle manuel moda geçilir)
+
+    private var bodyFatRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("Yağ Oranı").eyebrow()
+                if !bodyFatManual {
+                    Text("oto · US Navy")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(Palette.macroCarbs)
+                }
+            }
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                if bodyFatManual {
+                    TextField(
+                        "0,0",
+                        value: $bodyFat,
+                        format: .number.precision(.fractionLength(0...2)).locale(Locale(identifier: "tr_TR"))
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(Palette.textPrimary)
+                    .focused($bodyFatFocused)
+                } else {
+                    Text(bodyFat.map { Fmt.num($0, digits: 1) } ?? "0,0")
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundStyle(bodyFat == nil ? Palette.textQuaternary : Palette.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text("%")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.textQuaternary)
+                Button {
+                    toggleBodyFatMode()
+                } label: {
+                    Image(systemName: bodyFatManual ? "arrow.uturn.backward" : "pencil")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(bodyFatManual ? "Otomatik hesaba dön" : "Elle düzenle")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(fieldFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        !bodyFatManual && bodyFat != nil ? Palette.macroCarbs.opacity(0.3) : Palette.border,
+                        lineWidth: 1
+                    )
+            )
+            Text("bel + boyun + boy girilince US Navy formülüyle otomatik hesaplanır")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+        }
     }
 
-    private func optionalText(_ value: Double?) -> String {
-        guard let value else { return "—" }
-        return Fmt.num(value, digits: 1)
+    private func toggleBodyFatMode() {
+        if bodyFatManual {
+            bodyFatManual = false
+            syncAutoBodyFat()
+        } else {
+            bodyFatManual = true
+            if bodyFat == nil { bodyFat = navyBodyFat }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { bodyFatFocused = true }
+        }
+    }
+
+    // MARK: - US Navy yağ oranı (erkek formülü; boy profilden gelir)
+
+    private var navyBodyFat: Double? {
+        guard let waist, let neck, waist > neck,
+              let h = heightLocal ?? profiles.first?.height, h > 0 else { return nil }
+        let bf = 495.0 / (1.0324 - 0.19077 * log10(waist - neck) + 0.15456 * log10(h)) - 450.0
+        guard bf.isFinite else { return nil }
+        return (min(max(bf, 2), 60) * 10).rounded() / 10
+    }
+
+    private func syncAutoBodyFat() {
+        guard !bodyFatManual else { return }
+        bodyFat = navyBodyFat
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Hairline()
+            HStack(spacing: 12) {
+                Text("↵ kaydet · esc vazgeç")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.textTertiary)
+                Spacer(minLength: Spacing.md)
+
+                if isEditing, onDelete != nil {
+                    Button {
+                        confirmingDelete = true
+                    } label: {
+                        Text("Sil")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Palette.negative)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Ölçümü sil")
+                }
+
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Vazgeç")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(.horizontal, 8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+
+                Button {
+                    guard canSave else { return }
+                    save()
+                    dismiss()
+                } label: {
+                    Text(saveButtonTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.btnFg)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.accent))
+                        .opacity(canSave ? 1 : 0.5)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(MeasurementPressButtonStyle())
+                .disabled(!canSave)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.top, 16)
+        }
     }
 
     private func save() {
@@ -541,6 +585,8 @@ struct MeasurementEditor: View {
         let savedWaist = showExtra ? waist : nil
         let savedChest = showExtra ? chest : nil
         let savedNeck = showExtra ? neck : nil
+        // Not her modda korunur — tartı modunda alan gizli ama mevcut not silinmez.
+        let savedNote = trimmedNote.isEmpty ? nil : trimmedNote
 
         switch mode {
         case .create:
@@ -551,7 +597,7 @@ struct MeasurementEditor: View {
                 waist: savedWaist,
                 chest: savedChest,
                 neck: savedNeck,
-                note: trimmedNote.isEmpty ? nil : trimmedNote
+                note: savedNote
             )
             onSave(m)
         case .edit(let m):
@@ -561,196 +607,8 @@ struct MeasurementEditor: View {
             m.waist = savedWaist
             m.chest = savedChest
             m.neck = savedNeck
-            m.note = trimmedNote.isEmpty ? nil : trimmedNote
+            m.note = savedNote
             onSave(m)
-        }
-    }
-}
-
-struct MeasurementEditorSection<Content: View>: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-    let content: Content
-
-    init(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.systemImage = systemImage
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(alignment: .top, spacing: Spacing.sm) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.white.opacity(0.045))
-                    )
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(Typography.bodyBold)
-                        .foregroundStyle(Palette.textPrimary)
-                    Text(subtitle)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            content
-        }
-        .padding(Spacing.lg)
-        .measurementPanel(cornerRadius: Radius.lg, fill: Palette.surface.opacity(0.62))
-    }
-}
-
-struct MeasurementEditorModeButton: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 9) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 24, height: 24)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(selected ? Palette.accent.opacity(0.16) : Color.white.opacity(0.045))
-                    )
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(Typography.bodyBold)
-                    Text(subtitle)
-                        .font(Typography.caption)
-                        .opacity(0.7)
-                }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(selected ? Palette.accent : Palette.textQuaternary)
-            }
-            .foregroundStyle(selected ? Palette.textPrimary : Palette.textSecondary)
-            .padding(.horizontal, 12)
-            .frame(height: 58)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .fill(selected ? Color.white.opacity(0.055) : Palette.surfaceElevated.opacity(0.72))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(selected ? Palette.accent.opacity(0.45) : Palette.border, lineWidth: 0.6)
-            )
-        }
-        .buttonStyle(MeasurementPressButtonStyle())
-    }
-}
-
-struct MeasurementEditorNumberField: View {
-    let label: String
-    let unit: String
-    @Binding var value: Double?
-    var placeholder: String
-    var required = false
-
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 4) {
-                Text(label).eyebrow()
-                if required {
-                    Circle()
-                        .fill(Palette.accent)
-                        .frame(width: 4, height: 4)
-                }
-            }
-
-            HStack(alignment: .lastTextBaseline, spacing: 6) {
-                TextField(
-                    placeholder,
-                    value: $value,
-                    format: .number.precision(.fractionLength(0...2)).locale(Locale(identifier: "tr_TR"))
-                )
-                .textFieldStyle(.plain)
-                .font(Typography.monoLarge)
-                .foregroundStyle(Palette.textPrimary)
-                .focused($focused)
-                .multilineTextAlignment(.leading)
-
-                Text(unit)
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(Palette.surfaceElevated)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(focused ? Palette.accent.opacity(0.45) : Palette.border, lineWidth: 0.6)
-            )
-        }
-    }
-}
-
-struct MeasurementEditorStat: View {
-    let label: String
-    let value: String
-    let unit: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).eyebrow()
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(value)
-                    .font(Typography.hero(25))
-                    .foregroundStyle(value == "—" ? Palette.textQuaternary : Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                Text(unit)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .opacity(value == "—" ? 0 : 1)
-                    .padding(.bottom, 4)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct MeasurementFieldStatus: View {
-    let label: String
-    let filled: Bool
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: filled ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(filled ? Palette.positive : Palette.textQuaternary)
-            Text(label)
-                .font(Typography.caption)
-                .foregroundStyle(filled ? Palette.textSecondary : Palette.textTertiary)
-            Spacer(minLength: 0)
         }
     }
 }

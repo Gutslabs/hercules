@@ -4,6 +4,7 @@ import SwiftData
 import AppKit
 #endif
 
+/// AI Sağlayıcı — Sistem kartının sol bölümü (kart kromu ProfileView.systemCard'da).
 struct AIProviderCard: View {
     @State private var provider: AIProvider = AIKeyStore.shared.provider
     @State private var model: String = AIKeyStore.shared.model
@@ -14,24 +15,22 @@ struct AIProviderCard: View {
     @State private var importSuccess: Bool = false       // ikon rengi için
     @State private var showLoginHelp: Bool = false       // yardım panelini aç/kapat
 
+    private let pillInk = Palette.btnFg
+    private let pillPaper = Palette.btnBg
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Palette.accent)
-                    Text("AI Sağlayıcı").eyebrow()
-                }
-                Spacer()
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("AI Sağlayıcı").eyebrow()
+                Spacer(minLength: Spacing.md)
                 Text(model)
-                    .font(Typography.caption)
+                    .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
 
-            HStack(spacing: Spacing.sm) {
+            HStack(spacing: 8) {
                 ForEach(AIProvider.selectable) { p in
                     Button {
                         provider = p
@@ -39,27 +38,26 @@ struct AIProviderCard: View {
                         model = AIKeyStore.shared.model
                         NotificationCenter.default.post(name: .aiClientChanged, object: nil)
                     } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: p.systemImage)
-                                .font(.system(size: 10, weight: .semibold))
-                            Text(p.label).font(Typography.body)
-                        }
-                        .foregroundStyle(provider == p ? Palette.textPrimary : Palette.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: Radius.sm - 2)
-                                .fill(provider == p ? Color.white.opacity(0.08) : Palette.surfaceElevated)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Radius.sm - 2)
-                                .strokeBorder(provider == p ? Palette.borderStrong : Palette.border, lineWidth: 0.5)
-                        )
+                        Text(p.label)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(provider == p ? pillInk : Palette.textSecondary)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(provider == p ? pillPaper : Color.clear)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(provider == p ? Color.clear : Palette.border, lineWidth: 1)
+                            )
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
+            .padding(.top, 13)
 
             if provider == .codex {
                 codexSection
@@ -67,15 +65,7 @@ struct AIProviderCard: View {
                 openRouterSection
             }
         }
-        .padding(Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
+        .padding(.init(top: 20, leading: 28, bottom: 18, trailing: 28))
         .onAppear {
             refreshCodexStatus()
             apiKey = AIKeyStore.shared.apiKey   // kayıtlı anahtarı alana yansıt
@@ -83,14 +73,14 @@ struct AIProviderCard: View {
     }
 
     private var openRouterSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "key")
                     .font(.system(size: 10))
                     .foregroundStyle(Palette.textTertiary)
                 SecureField("sk-or-...", text: $apiKey)
                     .textFieldStyle(.plain)
-                    .font(Typography.mono)
+                    .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(Palette.textPrimary)
                     .onChange(of: apiKey) { _, newValue in
                         AIKeyStore.shared.apiKey = newValue   // her değişiklikte sessizce kaydet (kayıp olmasın)
@@ -105,49 +95,70 @@ struct AIProviderCard: View {
                         .foregroundStyle(Palette.positive)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-            .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Palette.fieldFill))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+            .padding(.top, 14)
 
             Text("openrouter.ai/keys adresinden API key al, buraya yapıştır. Terminal gerekmez.")
-                .font(Typography.caption)
+                .font(.system(size: 10.5))
                 .foregroundStyle(Palette.textTertiary)
+                .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     @ViewBuilder
     private var codexSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            switch codexStatus {
-            case .noCodexCLI:
-                statusRow(icon: "exclamationmark.triangle", color: Palette.warning,
-                          title: "Codex CLI bulunamadı",
-                          detail: "Terminal'de: codex login")
-            case .ready(let acct):
-                HStack(spacing: 10) {
-                    statusRow(icon: "checkmark.circle.fill", color: Palette.positive,
-                              title: "Bağlandı",
-                              detail: acct.map { "Hesap: \($0.prefix(8))…" } ?? "Token hazır")
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                switch codexStatus {
+                case .noCodexCLI:
+                    Circle().fill(Palette.warning).frame(width: 5, height: 5)
+                    Text("Codex CLI bulunamadı")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("Terminal'de: codex login")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                case .ready(let acct):
+                    Circle().fill(Palette.positive).frame(width: 5, height: 5)
+                    Text("Bağlandı")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(acct.map { "\($0.prefix(8))…" } ?? "Token hazır")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
                     Button {
                         Task { await reimport() }
                     } label: {
                         Image(systemName: importing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(Palette.textSecondary)
-                            .frame(width: 26, height: 26)
-                            .background(Circle().fill(Palette.surfaceElevated))
-                            .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
+                            .frame(width: 20, height: 20)
+                            .background(Circle().strokeBorder(Palette.border, lineWidth: 1))
+                            .contentShape(Circle())
                             .symbolEffect(.rotate, value: importing)
                     }
                     .buttonStyle(.plain)
                     .disabled(importing)
                     .help("auth.json'dan token'ı yeniden yükle")
+                case .error(let m):
+                    Circle().fill(Palette.negative).frame(width: 5, height: 5)
+                    Text("Hata")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(m)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
                 }
-            case .error(let m):
-                statusRow(icon: "xmark.circle.fill", color: Palette.negative, title: "Hata", detail: m)
+                Spacer(minLength: 0)
             }
+            .padding(.top, 14)
 
             // Import sonucu (başarı/hata mesajı)
             if let msg = importResult {
@@ -155,7 +166,7 @@ struct AIProviderCard: View {
                     Image(systemName: importSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                         .font(.system(size: 10))
                     Text(msg)
-                        .font(Typography.caption)
+                        .font(.system(size: 10.5))
                         .lineLimit(2)
                 }
                 .foregroundStyle(importSuccess ? Palette.positive : Palette.warning)
@@ -165,15 +176,15 @@ struct AIProviderCard: View {
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) { showLoginHelp.toggle() }
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: showLoginHelp ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                    Text("Token expire oldu / 401 hatası alıyorsan")
-                        .font(Typography.caption)
-                }
-                .foregroundStyle(Palette.textTertiary)
+                Text("Token expire oldu / 401 hatası alıyorsan yeniden bağlan.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineSpacing(2)
+                    .multilineTextAlignment(.leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Yeniden bağlanma adımlarını göster")
 
             if showLoginHelp {
                 loginHelpPanel
@@ -228,8 +239,8 @@ struct AIProviderCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-        .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
     }
 
     private func helpStep(num: String, text: String) -> some View {
@@ -258,28 +269,6 @@ struct AIProviderCard: View {
         importResult = "Terminal aksiyonu iPhone tarafında kullanılmaz"
         importSuccess = false
         #endif
-    }
-
-    private func statusRow(icon: String, color: Color, title: String, detail: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textPrimary)
-                Text(detail)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-        .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
     }
 
     private func refreshCodexStatus() {

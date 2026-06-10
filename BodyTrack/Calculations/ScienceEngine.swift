@@ -259,6 +259,7 @@ enum ScienceEngine {
         let changePercent: Double     // ilk → son
         let trend: Trend
         let lastDate: Date
+        let history: [Double]         // günlük e1RM serisi (sparkline için, tarih sıralı)
         var id: String { name }
 
         /// ≥4 seans + düşüş trendi → yorgunluk birikmiş olabilir, deload mantıklı.
@@ -328,7 +329,8 @@ enum ScienceEngine {
                 bestE1RM: bestE1RM,
                 changePercent: change,
                 trend: trend,
-                lastDate: last.date
+                lastDate: last.date,
+                history: daily.map(\.e1rm)
             ))
         }
 
@@ -494,6 +496,8 @@ enum ScienceEngine {
         let target: String
         let tone: RateTone
         let note: String
+        /// 0…1 — karne satırındaki ince bar dolumu (metriğe göre normalize).
+        let progress: Double
         var id: String { title }
     }
 
@@ -520,7 +524,9 @@ enum ScienceEngine {
         calendar: Calendar = .current
     ) -> [ScoreItem] {
         var items: [ScoreItem] = []
-        let start = calendar.date(byAdding: .day, value: -days, to: now) ?? now
+        // Pencereyi gün hizasına çek: tam olarak `days` takvim gününü (bugün dahil) kapsasın.
+        // Aksi halde -days ham zaman damgası 15. (sınır) güne taşıp loggedDays > days yapar (örn. "%107").
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: now)) ?? now
 
         let foodsInRange = foods.filter { $0.date >= start && $0.date <= now }
         let loggedDays = Set(foodsInRange.map { calendar.startOfDay(for: $0.date) }).count
@@ -536,19 +542,28 @@ enum ScienceEngine {
                 value: "\(Fmt.num(perKg, digits: 1)) g/kg",
                 target: "≥1.6 g/kg (cut'ta ~2.0+)",
                 tone: tone,
-                note: "~1.6 g/kg çoğu kişide kas kazanımı platosudur (Morton 2018 meta); kalori açığında 2.0–2.4 g/kg daha koruyucu (Helms 2014). Ort. \(Fmt.int(avgP)) g/gün."
+                note: "~1.6 g/kg çoğu kişide kas kazanımı platosudur (Morton 2018 meta); kalori açığında 2.0–2.4 g/kg daha koruyucu (Helms 2014). Ort. \(Fmt.int(avgP)) g/gün.",
+                progress: min(1, max(0, perKg / 2.4))
             ))
         }
 
         // 2) Kilo trendi
         if let e = energy {
             let v = rateVerdict(percentPerWeek: e.ratePercentPerWeek, goal: goal)
+            let rate = e.ratePercentPerWeek
+            let rateProgress: Double
+            switch goal {
+            case .lose, .loseFast: rateProgress = min(1, max(0, -rate / 1.2))
+            case .gain, .gainFast: rateProgress = min(1, max(0, rate / 0.75))
+            case .maintain:        rateProgress = min(1, max(0, 1 - abs(rate) / 0.6))
+            }
             items.append(ScoreItem(
                 title: "Kilo trendi",
                 value: "\(Fmt.signed(e.ratePercentPerWeek, digits: 2))%/hafta",
                 target: goalRateTarget(goal),
                 tone: v.tone,
-                note: "\(v.label) — \(v.note)"
+                note: "\(v.label) — \(v.note)",
+                progress: rateProgress
             ))
         }
 
@@ -564,7 +579,8 @@ enum ScienceEngine {
                 value: "\(productive)/\(trained.count) kas verimli",
                 target: "MEV–MRV arası",
                 tone: tone,
-                note: "\(under) kas MEV altında, \(over) kas MRV üstünde. Hipertrofi için kas başına ~10+ set/hafta (Schoenfeld doz-yanıt)."
+                note: "\(under) kas MEV altında, \(over) kas MRV üstünde. Hipertrofi için kas başına ~10+ set/hafta (Schoenfeld doz-yanıt).",
+                progress: Double(productive) / Double(max(1, trained.count))
             ))
         }
 
@@ -579,7 +595,8 @@ enum ScienceEngine {
                 value: "\(Fmt.int(avg))/gün",
                 target: "≥8.000/gün",
                 tone: tone,
-                note: "Günlük ~7–8 bin adım mortalite riskini belirgin düşürür (Paluch 2022). NEAT, kalori açığının sessiz kaldıracıdır."
+                note: "Günlük ~7–8 bin adım mortalite riskini belirgin düşürür (Paluch 2022). NEAT, kalori açığının sessiz kaldıracıdır.",
+                progress: min(1, max(0, avg / 8000))
             ))
         }
 
@@ -591,7 +608,8 @@ enum ScienceEngine {
             value: "%\(Int((frac * 100).rounded()))",
             target: "≥%80",
             tone: adhTone,
-            note: "Son \(days) günde \(loggedDays) gün kayıtlı. Tutarlı loglama, ilerlemenin en güçlü davranışsal yordayıcısıdır."
+            note: "Son \(days) günde \(loggedDays) gün kayıtlı. Tutarlı loglama, ilerlemenin en güçlü davranışsal yordayıcısıdır.",
+            progress: min(1, max(0, frac))
         ))
 
         return items

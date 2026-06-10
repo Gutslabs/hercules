@@ -21,7 +21,7 @@ struct ProfileAvatar: View {
                         )
                     )
                 Circle()
-                    .strokeBorder(Color.white.opacity(active ? 0.18 : 0.08), lineWidth: 0.8)
+                    .strokeBorder(active ? Palette.borderStrong : Palette.border, lineWidth: 0.8)
                     .scaleEffect(active ? 1.04 : 0.98)
                 Text(initial)
                     .font(.system(size: 28, weight: .medium))
@@ -214,7 +214,7 @@ struct SexSwitch: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(sex == s ? Color.white.opacity(0.08) : Color.clear)
+                                .fill(sex == s ? Palette.track : Color.clear)
                         )
                 }
                 .buttonStyle(ProfilePressButtonStyle())

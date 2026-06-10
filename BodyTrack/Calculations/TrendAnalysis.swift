@@ -90,6 +90,47 @@ enum TrendAnalysis {
         )
     }
 
+    /// Trailing time-windowed moving average ("trend weight").
+    /// For each point, averages every sample within the preceding `windowDays`
+    /// (inclusive of the point itself). Windows by *date*, not by sample count,
+    /// so it stays correct when weigh-ins are irregular (some days skipped).
+    /// Returns one smoothed point per input point, preserving original dates —
+    /// this is what filters daily water-weight noise out of the weight flow.
+    static func movingAverage(_ points: [TrendPoint], windowDays: Double) -> [TrendPoint] {
+        guard windowDays > 0, points.count > 1 else { return points }
+        let sorted = points.sorted { $0.date < $1.date }
+        let window = windowDays * 86_400
+        var result: [TrendPoint] = []
+        result.reserveCapacity(sorted.count)
+        // Kayan-pencere toplamı: her noktada iç döngüyle yeniden toplamak yerine (O(n·w)),
+        // yeni noktayı ekleyip pencereden çıkanları düşerek toplamı O(1) güncelle → toplam O(n).
+        var start = 0
+        var runningSum = 0.0
+        for i in sorted.indices {
+            runningSum += sorted[i].value                    // pencere artık i'yi içeriyor
+            let cutoff = sorted[i].date.addingTimeInterval(-window)
+            while start < i && sorted[start].date < cutoff {
+                runningSum -= sorted[start].value            // pencereden düşen noktaları çıkar
+                start += 1
+            }
+            let avg = runningSum / Double(i - start + 1)
+            result.append(TrendPoint(date: sorted[i].date, value: avg))
+        }
+        return result
+    }
+
+    /// Latest value of the trailing `windowDays` moving average — the smoothed
+    /// reading anchored at the most recent weigh-in. nil when there is no data.
+    static func movingAverageNow(_ points: [TrendPoint], windowDays: Double) -> Double? {
+        guard !points.isEmpty else { return nil }
+        let sorted = points.sorted { $0.date < $1.date }
+        guard let last = sorted.last else { return nil }
+        let cutoff = last.date.addingTimeInterval(-windowDays * 86_400)
+        let recent = sorted.filter { $0.date >= cutoff }
+        guard !recent.isEmpty else { return last.value }
+        return recent.map(\.value).reduce(0, +) / Double(recent.count)
+    }
+
     static func goalBand(
         from points: [TrendPoint],
         target: Double?,
@@ -141,7 +182,8 @@ enum TrendAnalysis {
 
     static func daysSinceLast(_ measurements: [Measurement]) -> Int? {
         guard let last = measurements.map(\.date).max() else { return nil }
-        let days = Calendar.current.dateComponents([.day], from: last, to: .now).day ?? 0
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: last), to: cal.startOfDay(for: .now)).day ?? 0
         return max(0, days)
     }
 }

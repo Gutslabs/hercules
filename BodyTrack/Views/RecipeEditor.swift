@@ -182,7 +182,6 @@ struct RecipeEditor: View {
         }
         .background(Palette.background)
         .frame(width: 920, height: 760)
-        .preferredColorScheme(.dark)
     }
 
     private var trimmedTitle: String {
@@ -294,7 +293,7 @@ struct RecipeEditor: View {
                 }
                 .padding(Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Color.white.opacity(0.035)))
+                .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.fieldFill))
             } else {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Spacing.sm) {
                     ForEach(previewMetrics, id: \.label) { metric in

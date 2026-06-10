@@ -51,8 +51,6 @@ struct BodyTrackApp: App {
                 await BackupService.shared.autoSyncWithVault(into: ctx) // vault: pull-merge + push
                 FoodPresetSeed.upsertDefaults(ctx)
                 ShortcutHealthSyncService.shared.startAutoImport(into: ctx)
-                // Sabah açılışında (gizli LaunchAgent ya da normal) bugünün raporu yoksa üret.
-                CoachEngine.maybeRunDaily(ctx: ctx)
             }
             // 3) AppDelegate'e container'ı paylaş — quit'te yedek alacak
             #if os(macOS)
@@ -126,31 +124,19 @@ struct BodyTrackApp: App {
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static var sharedContainer: ModelContainer?
-    private var coachTimer: Timer?
 
-    /// Sabah 08:00 LaunchAgent'ı kur (app kapalıyken bile tetiklensin) + app açık
-    /// kalırsa 30 dk'da bir koç kontrolü (açık-ama-boşta kalma durumunu da kapsar).
+    /// Eski sabah-08:00 LaunchAgent'ı (varsa) diskten temizle. Koç özelliği kaldırıldı;
+    /// daha önce kurulmuş bir agent geride kalmasın diye her açılışta uninstall çağrılır.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // LaunchAgent (sabah uygulamayı kendisi açan) GEÇİCİ DEVRE DIŞI — çoklu-instance
-        // store çakışması riskini tamamen sıfırlamak için. Eski kurulmuş agent varsa kaldır.
-        // Tetikleme şimdilik foreground: açılış + öne gelme + 30 dk timer + Koç sayfası.
-        // Tek-instance koruması (init'te) ayrıca aktif. Güvenli olduğuna emin olunca
-        // `CoachLaunchAgent.installIfNeeded()` ile geri açılabilir.
         Task.detached { CoachLaunchAgent.uninstall() }
-        coachTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { _ in
-            Task { @MainActor in
-                if let ctx = AppDelegate.sharedContainer?.mainContext {
-                    CoachEngine.maybeRunDaily(ctx: ctx)
-                }
-            }
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        Task { @MainActor in
-            if let ctx = Self.sharedContainer?.mainContext {
-                _ = BackupService.shared.export(from: ctx)
-            }
+        // SENKRON çağrı — Task{} sadece main-actor kuyruğuna iş ekler; quit'te run loop
+        // bir daha dönmeden exit() çağrıldığı için o iş HİÇ çalışmaz (ölü kod). NSApplicationDelegate
+        // zaten @MainActor, BackupService de @MainActor + senkron export → doğrudan çağır.
+        if let ctx = Self.sharedContainer?.mainContext {
+            _ = BackupService.shared.export(from: ctx)
         }
     }
 
@@ -171,8 +157,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let ctx = Self.sharedContainer?.mainContext {
                 ShortcutHealthSyncService.shared.importIfAvailable(into: ctx)
                 await BackupService.shared.autoSyncWithVault(into: ctx)
-                // Veri tazelendi → bugünün koç raporu yoksa ve 08:00 geçtiyse otomatik üret.
-                CoachEngine.maybeRunDaily(ctx: ctx)
             }
         }
     }

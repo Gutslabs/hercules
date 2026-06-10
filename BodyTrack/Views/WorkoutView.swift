@@ -18,6 +18,13 @@ struct WorkoutView: View {
     @State private var highlightedProgramWeekday: Int? = nil
     @State private var sessionPendingDelete: WorkoutSession?
 
+    private static let workoutTerms: [(term: String, detail: String)] = [
+        ("RIR", "Reps in reserve. Set bitince tankta kaç temiz tekrar kaldı demek. RIR 2 = iki tekrar daha çıkarırdın."),
+        ("4×6–10", "4 set yap. Her sette hedef tekrar aralığı 6 ile 10. Tüm setlerde üst banda yaklaşırsan ağırlık artır."),
+        ("Rest 2–3 dk", "Setler arası dinlenme. Ana liftlerde performans düşmesin diye daha uzun, izolasyonda daha kısa olabilir."),
+        ("Progression", "Zamanla yük, tekrar, set veya teknik kalite artırma planı. Programın gelişim kuralı burada yazıyor.")
+    ]
+
     /// Exact log dict: startOfDay → log (her gün için doğrudan kayıt).
     private var exactLogByDay: [Date: WorkoutLog] {
         let cal = Calendar.current
@@ -69,47 +76,78 @@ struct WorkoutView: View {
         let exact = exactLogByDay
         let tplsByWeekday = templateLogByWeekday
         return GeometryReader { geometry in
-            let contentWidth = geometry.size.width
-            let compact = contentWidth < 980
-            let expansive = contentWidth >= 1500
+            if let editorSession = editingProgramSession {
+                // Sayfa-içi program günü editörü (popup değil) — geri ile geri dönülür.
+                WorkoutProgramSessionEditor(
+                    session: editorSession,
+                    onDone: { ctx.saveOrReport(); editingProgramSession = nil },
+                    onCancel: { editingProgramSession = nil }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+            let compact = geometry.size.width < 1080
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: compact ? Spacing.lg : Spacing.xl) {
+                    VStack(alignment: .leading, spacing: 16) {
                         header(compact: compact)
-                        workoutCalendarSection(exact: exact, templatesByWeekday: tplsByWeekday) { date in
-                            focusProgramDay(for: date, proxy: proxy)
+                        tempoStrip(exact: exact, templatesByWeekday: tplsByWeekday, compact: compact)
+
+                        if compact {
+                            VStack(alignment: .leading, spacing: 16) {
+                                calendarCard(exact: exact) { date in
+                                    focusProgramDay(for: date, proxy: proxy)
+                                }
+                                nextSessionCard
+                                termsCard
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 16) {
+                                calendarCard(exact: exact) { date in
+                                    focusProgramDay(for: date, proxy: proxy)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                VStack(spacing: 16) {
+                                    nextSessionCard
+                                    termsCard
+                                        .frame(maxHeight: .infinity)
+                                }
+                                .frame(width: 420)
+                                .frame(maxHeight: .infinity)
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
                         }
-                        activeProgramSection(compact: compact, expansive: expansive)
+
+                        programSection(compact: compact)
                             .id("active-program")
-                        workoutTermsSection(compact: compact)
-                        statsStrip(exact: exact, templatesByWeekday: tplsByWeekday, compact: compact)
-                        Spacer(minLength: 24)
                     }
+                    .padding(.horizontal, compact ? 20 : 40)
+                    .padding(.vertical, compact ? 24 : 32)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, compact ? Spacing.lg : (expansive ? 44 : Spacing.xxl))
-                    .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
                 }
+            }
             }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    let eff = effectiveLog(for: selectedDay)
-                    if let exact = eff.log, !eff.isTemplate {
-                        editing = exact
-                    } else {
-                        creatingForDate = selectedDay
-                        creatingPrefill = eff.log  // template log varsa prefill
+            if editingProgramSession == nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        let eff = effectiveLog(for: selectedDay)
+                        if let exact = eff.log, !eff.isTemplate {
+                            editing = exact
+                        } else {
+                            creatingForDate = selectedDay
+                            creatingPrefill = eff.log  // template log varsa prefill
+                        }
+                    } label: {
+                        Label("Yeni Seans", systemImage: "plus")
                     }
-                } label: {
-                    Label("Yeni Seans", systemImage: "plus")
+                    .keyboardShortcut("n", modifiers: .command)
+                    .help("Bu güne antrenman ekle (⌘N) — kayıt varsa düzenle, yoksa template'ten oluştur")
                 }
-                .keyboardShortcut("n", modifiers: .command)
-                .help("Bu güne antrenman ekle (⌘N) — kayıt varsa düzenle, yoksa template'ten oluştur")
             }
         }
-        .background(Palette.background.ignoresSafeArea())
+        .background(DashboardBackground().ignoresSafeArea())
         .sheet(item: $editing) { log in
             WorkoutLogEditor(mode: .edit(log)) { _ in
                 ctx.saveOrReport()
@@ -135,12 +173,6 @@ struct WorkoutView: View {
             ) { log in
                 ctx.insert(log)
                 ctx.saveOrReport()
-            }
-        }
-        .sheet(item: $editingProgramSession) { session in
-            WorkoutProgramSessionEditor(session: session) {
-                ctx.saveOrReport()
-                editingProgramSession = nil
             }
         }
         .sheet(isPresented: $showingArchives) {
@@ -170,133 +202,381 @@ struct WorkoutView: View {
         }
     }
 
-    // MARK: Header
+    // MARK: - Header
 
+    @ViewBuilder
     private func header(compact: Bool) -> some View {
-        Group {
-            if compact {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    headerCopy(maxTextWidth: nil)
-                    headerSignals(compact: true)
+        if compact {
+            VStack(alignment: .leading, spacing: 8) {
+                headerTitle
+                headerSignals
+            }
+        } else {
+            HStack(alignment: .bottom) {
+                headerTitle
+                Spacer()
+                headerSignals
+            }
+        }
+    }
+
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Antrenman").eyebrow()
+            Text("Seans Takvimi")
+                .font(.system(size: 22, weight: .bold))
+                .tracking(-0.2)
+                .foregroundStyle(Palette.textPrimary)
+            Text("Günlük log, aktif program ve teknik notlar tek yerde. Takvimden güne dokun, program kartına ak.")
+                .font(Typography.caption)
+                .foregroundStyle(Palette.textQuaternary)
+                .frame(maxWidth: 560, alignment: .leading)
+                .padding(.top, 2)
+        }
+    }
+
+    private var headerSignals: some View {
+        HStack(spacing: 18) {
+            HStack(spacing: 7) {
+                Circle().fill(Palette.positive).frame(width: 6, height: 6)
+                Text("Aktif").eyebrow()
+                Text("\(activeProgramWeekdays.count) gün")
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            HStack(spacing: 7) {
+                Text("Arşiv").eyebrow()
+                Text("\(archivedPrograms.count) plan")
+                    .font(Typography.bodyBold)
+                    .foregroundStyle(Palette.textPrimary)
+            }
+        }
+    }
+
+    // MARK: - Tempo strip
+
+    private func tempoStrip(
+        exact: [Date: WorkoutLog],
+        templatesByWeekday: [Int: WorkoutLog],
+        compact: Bool
+    ) -> some View {
+        let cal = Calendar.current
+        let now = Date()
+        var weekCal = cal
+        weekCal.firstWeekday = 2
+        let weekStart = weekCal.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+        let weekEnd = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
+        let monthStart = cal.dateInterval(of: .month, for: now)?.start ?? now
+        let thirtyAgo = cal.date(byAdding: .day, value: -30, to: now) ?? now
+
+        // Tek pass — son 30 günü dolaş, week/month range içine düşenleri ayrı topla.
+        var weekSessions = 0, weekMin = 0
+        var weekKcal: Double = 0
+        var monthSessions = 0, monthMin = 0
+        var last30Sess = 0
+
+        var date = cal.startOfDay(for: thirtyAgo)
+        while date < weekEnd {
+            let eff = effectiveLog(for: date, exact: exact, templates: templatesByWeekday)
+            if let log = eff.log {
+                last30Sess += 1
+                if date >= weekStart {
+                    weekSessions += 1
+                    weekMin += log.durationMinutes
+                    weekKcal += log.estimatedCalories
                 }
-            } else {
-                HStack(alignment: .bottom, spacing: Spacing.xxxl) {
-                    headerCopy(maxTextWidth: 560)
-                    Spacer(minLength: Spacing.xxxl)
-                    headerSignals(compact: false)
+                if date >= monthStart {
+                    monthSessions += 1
+                    monthMin += log.durationMinutes
                 }
             }
+            guard let next = cal.date(byAdding: .day, value: 1, to: date) else { break }
+            date = next
+        }
+
+        let cells: [(label: String, value: String, unit: String, sub: String)] = [
+            ("Bu Hafta", "\(weekSessions)", "seans", "\(weekMin) dk · \(Fmt.int(weekKcal)) kcal"),
+            ("Bu Ay", "\(monthSessions)", "seans", "\(monthMin) dk ay başından beri"),
+            ("Son 30 Gün", "\(last30Sess)", "seans", String(format: "%.1f seans/hafta", Double(last30Sess) / (30.0 / 7.0))),
+            ("Kayıt", "\(logs.count)", "log", "\(uniqueWeekdaysWithLog) gün/hafta temeli")
+        ]
+
+        return Group {
+            if compact {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 18) {
+                    ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                        tempoCell(cell)
+                    }
+                }
+            } else {
+                HStack(spacing: 0) {
+                    ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(Palette.border)
+                                .frame(width: 0.5, height: 44)
+                                .padding(.trailing, 24)
+                        }
+                        tempoCell(cell)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .dashboardCard(radius: 14)
+    }
+
+    private func tempoCell(_ cell: (label: String, value: String, unit: String, sub: String)) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(cell.label).eyebrow()
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(cell.value)
+                    .font(.system(size: 24, weight: .bold))
+                    .monospacedDigit()
+                    .tracking(-0.4)
+                    .foregroundStyle(Palette.textPrimary)
+                    .contentTransition(.numericText())
+                Text(cell.unit)
+                    .font(.system(size: 11.5, weight: .regular))
+                    .foregroundStyle(Palette.textQuaternary)
+            }
+            Text(cell.sub)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(Palette.textQuaternary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func headerCopy(maxTextWidth: CGFloat?) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Antrenman").eyebrow()
-            Text("Seans Takvimi")
-                .font(Typography.display(42))
-                .foregroundStyle(Palette.textPrimary)
-            Text("Günlük log, aktif program ve teknik notlar tek yerde. Takvimden güne dokun, program kartına ak.")
-                .font(Typography.body)
-                .foregroundStyle(Palette.textSecondary)
-                .frame(maxWidth: maxTextWidth, alignment: .leading)
-        }
+    /// Haftanın kaç farklı gününde bir log var (template tabanı = haftalık tempo).
+    private var uniqueWeekdaysWithLog: Int {
+        let cal = Calendar.current
+        let weekdays = Set(logs.map { cal.component(.weekday, from: $0.date) })
+        return weekdays.count
     }
 
-    private func headerSignals(compact: Bool) -> some View {
-        HStack(spacing: 0) {
-            WorkoutHeaderSignal(
-                icon: "calendar",
-                label: "Bu ay",
-                value: "\(logsInCurrentMonth.count)",
-                detail: "seans"
-            )
-            WorkoutHeaderDivider()
-            WorkoutHeaderSignal(
-                icon: "list.clipboard",
-                label: "Aktif",
-                value: "\(activeProgramWeekdays.count)",
-                detail: "gün"
-            )
-            WorkoutHeaderDivider()
-            WorkoutHeaderSignal(
-                icon: "archivebox",
-                label: "Arşiv",
-                value: "\(archivedPrograms.count)",
-                detail: "plan"
-            )
-        }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.md)
-        .frame(maxWidth: compact ? .infinity : 430, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface.opacity(0.72))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
-        )
-    }
+    // MARK: - Takvim
 
-    private func workoutCalendarSection(
+    private func calendarCard(
         exact: [Date: WorkoutLog],
-        templatesByWeekday: [Int: WorkoutLog],
         onSelectProgramDay: @escaping (Date) -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            monthNavBar
-            calendarGrid(exact: exact, templatesByWeekday: templatesByWeekday, onSelectProgramDay: onSelectProgramDay)
+        let cal = Calendar.current
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                navChevron("chevron.left") { jumpMonth(by: -1) }
+                Text(Self.monthTitleFormatter.string(from: currentMonth))
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Palette.textPrimary)
+                navChevron("chevron.right") { jumpMonth(by: 1) }
+                Text("\(logsInCurrentMonth.count) seans yapıldı · ✓ loglandı")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+                Spacer()
+                Button {
+                    let today = cal.startOfDay(for: .now)
+                    currentMonth = Self.startOfMonth(.now)
+                    selectedDay = today
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle().fill(Palette.accent).frame(width: 5, height: 5)
+                        Text("Bugün")
+                    }
+                }
+                .buttonStyle(WorkoutMiniButtonStyle())
+                .help("Bugüne dön")
+            }
+            .padding(.bottom, 14)
+
+            LazyVGrid(columns: cols, spacing: 6) {
+                ForEach(Self.weekdayHeaders, id: \.self) { wd in
+                    Text(wd).eyebrow()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 9)
+                }
+            }
+            .padding(.bottom, 6)
+
+            LazyVGrid(columns: cols, spacing: 6) {
+                ForEach(monthGridDays(), id: \.self) { date in
+                    let weekday = cal.component(.weekday, from: date)
+                    let session = templates.first(where: { $0.weekday == weekday })
+                    WorkoutDayCell(
+                        date: date,
+                        inMonth: cal.isDate(date, equalTo: currentMonth, toGranularity: .month),
+                        isToday: cal.isDateInToday(date),
+                        isSelected: cal.isDate(date, inSameDayAs: selectedDay),
+                        logged: exact[cal.startOfDay(for: date)] != nil,
+                        programName: session?.name,
+                        programMinutes: session?.durationMinutes,
+                        programColor: programColor(weekday)
+                    ) {
+                        selectedDay = cal.startOfDay(for: date)
+                        if !cal.isDate(date, equalTo: currentMonth, toGranularity: .month) {
+                            currentMonth = Self.startOfMonth(date)
+                        }
+                        onSelectProgramDay(date)
+                    }
+                }
+            }
         }
-        .padding(Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .fill(Palette.surface.opacity(0.72))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
-        )
+        .padding(.horizontal, 26)
+        .padding(.vertical, 22)
+        .dashboardCard()
     }
 
-    private func activeProgramSection(compact: Bool, expansive: Bool) -> some View {
+    private func navChevron(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.textTertiary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(WorkoutIconButtonStyle())
+    }
+
+    // MARK: - Sıradaki seans
+
+    private var nextSessionCard: some View {
+        let next = nextProgramOccurrence()
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Sıradaki Seans").eyebrow()
+                Spacer()
+                if let next {
+                    Text(relativeTag(next.offset))
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Palette.textQuaternary)
+                }
+            }
+            if let next {
+                HStack(spacing: 10) {
+                    Circle().fill(programColor(next.session.weekday)).frame(width: 6, height: 6)
+                    Text(next.session.name)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                }
+                .padding(.top, 10)
+                Text("\(Self.nextSessionFormatter.string(from: next.date)) · \(next.session.durationMinutes) dk · \(next.session.sortedTemplateExercises.count) hareket")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+                    .padding(.top, 4)
+            } else {
+                Text("Aktif program günü yok. Bir güne plan ekleyerek başla.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.top, 10)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 26)
+        .padding(.vertical, 20)
+        .dashboardCard()
+    }
+
+    private func nextProgramOccurrence() -> (session: WorkoutSession, date: Date, offset: Int)? {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let exact = exactLogByDay
+        for offset in 0..<7 {
+            guard let day = cal.date(byAdding: .day, value: offset, to: today) else { continue }
+            let wd = cal.component(.weekday, from: day)
+            guard let session = templates.first(where: { $0.weekday == wd }),
+                  isVisibleProgramSession(session) else { continue }
+            // Bugünün seansı zaten loglandıysa bir sonrakine bak.
+            if offset == 0, exact[day] != nil { continue }
+            return (session, day, offset)
+        }
+        return nil
+    }
+
+    private func relativeTag(_ offset: Int) -> String {
+        switch offset {
+        case 0: return "bugün"
+        case 1: return "yarın"
+        default: return "\(offset) gün sonra"
+        }
+    }
+
+    // MARK: - Terimler
+
+    private var termsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Terimler").eyebrow()
+                Text("AI plan yazarken aynı dili kullansın diye kısa referans.")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+                    .lineLimit(2)
+            }
+            .padding(.bottom, 4)
+
+            ForEach(Array(Self.workoutTerms.enumerated()), id: \.offset) { index, term in
+                VStack(alignment: .leading, spacing: 0) {
+                    if index > 0 { Hairline() }
+                    HStack(alignment: .firstTextBaseline, spacing: 14) {
+                        Text(term.term)
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .foregroundStyle(Palette.accent)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Palette.accent.opacity(0.09))
+                            )
+                            .fixedSize()
+                        Text(term.detail)
+                            .font(.system(size: 11.5, weight: .regular))
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 11)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 26)
+        .padding(.vertical, 20)
+        .dashboardCard()
+    }
+
+    // MARK: - Aktif program
+
+    private func programSection(compact: Bool) -> some View {
         let programWeekdays = activeProgramWeekdays
         let activeDays = programWeekdays.compactMap { weekday in templates.first(where: { $0.weekday == weekday }) }
-        let totalExercises = activeDays.reduce(0) { $0 + $1.templateExercises.count }
+        let totalExercises = activeDays.reduce(0) { $0 + $1.templateExercises.count } + planOverrides.count
         let totalMinutes = activeDays.reduce(0) { $0 + $1.durationMinutes }
         let totalCalories = activeDays.reduce(0) { $0 + $1.estimatedCalories }
-        let maxColumns = compact ? 1 : (expansive ? 3 : 2)
-        let columnCount = max(1, min(programWeekdays.count, maxColumns))
+        let columnCount = compact ? 1 : max(1, min(3, programWeekdays.count))
         let columns = Array(
-            repeating: GridItem(.flexible(minimum: compact ? 240 : 280), spacing: Spacing.md, alignment: .top),
+            repeating: GridItem(.flexible(), spacing: 16, alignment: .top),
             count: columnCount
         )
 
-        return VStack(alignment: .leading, spacing: Spacing.lg) {
+        return VStack(alignment: .leading, spacing: 12) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: Spacing.md) {
-                    activeProgramTitle(
-                        dayCount: programWeekdays.count,
-                        exerciseCount: totalExercises + planOverrides.count,
-                        totalMinutes: totalMinutes
-                    )
-
+                HStack(alignment: .lastTextBaseline, spacing: 14) {
+                    programHeaderTitle(dayCount: programWeekdays.count, exerciseCount: totalExercises, totalMinutes: totalMinutes)
                     Spacer()
-
-                    activeProgramSummary(totalMinutes: totalMinutes, totalCalories: totalCalories)
-                    activeProgramActions(hasProgram: !programWeekdays.isEmpty)
+                    programMetaCells(totalMinutes: totalMinutes, totalCalories: totalCalories)
+                    programActions(hasProgram: !programWeekdays.isEmpty)
                 }
-
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    activeProgramTitle(
-                        dayCount: programWeekdays.count,
-                        exerciseCount: totalExercises + planOverrides.count,
-                        totalMinutes: totalMinutes
-                    )
-                    HStack(alignment: .center, spacing: Spacing.md) {
-                        activeProgramSummary(totalMinutes: totalMinutes, totalCalories: totalCalories)
-                        Spacer(minLength: Spacing.md)
-                        activeProgramActions(hasProgram: !programWeekdays.isEmpty)
+                VStack(alignment: .leading, spacing: 10) {
+                    programHeaderTitle(dayCount: programWeekdays.count, exerciseCount: totalExercises, totalMinutes: totalMinutes)
+                    HStack(spacing: 14) {
+                        programMetaCells(totalMinutes: totalMinutes, totalCalories: totalCalories)
+                        Spacer(minLength: 8)
+                        programActions(hasProgram: !programWeekdays.isEmpty)
                     }
                 }
             }
@@ -306,18 +586,16 @@ struct WorkoutView: View {
                     .font(Typography.body)
                     .foregroundStyle(Palette.textTertiary)
                     .frame(maxWidth: .infinity, minHeight: 92, alignment: .center)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                            .fill(Palette.surfaceElevated.opacity(0.45))
-                    )
+                    .dashboardCard()
             } else {
-                LazyVGrid(columns: columns, spacing: Spacing.md) {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                     ForEach(programWeekdays, id: \.self) { weekday in
                         WorkoutProgramDayCard(
                             weekday: weekday,
                             session: templates.first(where: { $0.weekday == weekday }),
                             legacyOverrides: planOverrides.filter { $0.weekday == weekday },
-                            isHighlighted: highlightedProgramWeekday == weekday
+                            isHighlighted: highlightedProgramWeekday == weekday,
+                            accent: programColor(weekday)
                         ) {
                             editProgramSession(weekday)
                         } onDelete: { session in
@@ -328,65 +606,60 @@ struct WorkoutView: View {
                 }
             }
         }
-        .padding(Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .fill(Palette.surface.opacity(0.74))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.6)
-        )
     }
 
-    private func activeProgramTitle(dayCount: Int, exerciseCount: Int, totalMinutes: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func programHeaderTitle(dayCount: Int, exerciseCount: Int, totalMinutes: Int) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
             Text("Aktif Program").eyebrow()
-            Text("Haftalık reçete")
-                .font(Typography.title)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Haftalık reçete")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("\(dayCount) gün · \(exerciseCount) hareket · \(totalMinutes) dk/hafta")
+                    .font(Typography.caption)
+                    .foregroundStyle(Palette.textQuaternary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+    }
+
+    private func programMetaCells(totalMinutes: Int, totalCalories: Double) -> some View {
+        HStack(spacing: 14) {
+            programMetaCell("Süre", "\(totalMinutes) dk")
+            programMetaCell("Yakım", "\(Fmt.int(totalCalories)) kcal")
+            programMetaCell("AI", "\(planOverrides.count) ekleme")
+        }
+    }
+
+    private func programMetaCell(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label).eyebrow()
+            Text(value)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
                 .foregroundStyle(Palette.textPrimary)
-            Text("\(dayCount) gün · \(exerciseCount) hareket · \(totalMinutes) dk/hafta")
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
         }
     }
 
-    private func activeProgramSummary(totalMinutes: Int, totalCalories: Double) -> some View {
-        HStack(spacing: 0) {
-            ProgramSummaryDatum(label: "Süre", value: "\(totalMinutes)", unit: "dk")
-            WorkoutHeaderDivider(height: 30)
-            ProgramSummaryDatum(label: "Yakım", value: "\(Fmt.int(totalCalories))", unit: "kcal")
-            WorkoutHeaderDivider(height: 30)
-            ProgramSummaryDatum(label: "AI", value: "\(planOverrides.count)", unit: "ekleme")
+    private func programActions(hasProgram: Bool) -> some View {
+        HStack(spacing: 8) {
+            Button("Arşivle") { archiveActiveProgram() }
+                .buttonStyle(WorkoutMiniButtonStyle())
+                .disabled(!hasProgram)
+                .help("Aktif programı arşive kaldır")
+            Button("Arşiv") { showingArchives = true }
+                .buttonStyle(WorkoutMiniButtonStyle())
+                .disabled(archivedPrograms.isEmpty)
+                .help("Arşivlenmiş programları aç")
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surfaceElevated.opacity(0.46))
-        )
     }
 
-    private func activeProgramActions(hasProgram: Bool) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Button {
-                archiveActiveProgram()
-            } label: {
-                Label("Arşivle", systemImage: "archivebox")
-            }
-            .buttonStyle(WorkoutMiniButtonStyle())
-            .disabled(!hasProgram)
-
-            Button {
-                showingArchives = true
-            } label: {
-                Label("Arşiv", systemImage: "clock.arrow.circlepath")
-            }
-            .buttonStyle(WorkoutMiniButtonStyle())
-            .disabled(archivedPrograms.isEmpty)
-        }
+    /// Program günü rengi — gün sırasına göre sabit palet (Salı mercan, Perşembe adaçayı, Cumartesi amber).
+    private func programColor(_ weekday: Int) -> Color {
+        let palette: [Color] = [Palette.accent, Palette.positive, Palette.warning, Color(red: 0.62, green: 0.71, blue: 0.92)]
+        guard let idx = activeProgramWeekdays.firstIndex(of: weekday) else { return Palette.textSecondary }
+        return palette[idx % palette.count]
     }
 
     private var activeProgramWeekdays: [Int] {
@@ -426,43 +699,6 @@ struct WorkoutView: View {
                 highlightedProgramWeekday = nil
             }
         }
-    }
-
-    private func workoutTermsSection(compact: Bool) -> some View {
-        let gridMinimum: CGFloat = compact ? 230 : 280
-
-        return VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Terimler").eyebrow()
-                    Text("Programı okuma sözlüğü")
-                        .font(Typography.titleSmall)
-                        .foregroundStyle(Palette.textPrimary)
-                }
-                Spacer()
-                Text("AI plan yazarken aynı dili kullansın diye kısa referans.")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
-            LazyVGrid(columns: [
-                GridItem(.adaptive(minimum: gridMinimum), spacing: Spacing.md)
-            ], spacing: Spacing.md) {
-                WorkoutTermCard(term: "RIR", detail: "Reps in reserve. Set bitince tankta kaç temiz tekrar kaldı demek. RIR 2 = iki tekrar daha çıkarırdın.")
-                WorkoutTermCard(term: "4×6-10", detail: "4 set yap. Her sette hedef tekrar aralığı 6 ile 10. Tüm setlerde üst banda yaklaşırsan ağırlık artır.")
-                WorkoutTermCard(term: "Rest 2-3 dk", detail: "Setler arası dinlenme. Ana liftlerde performans düşmesin diye daha uzun, izolasyonda daha kısa olabilir.")
-                WorkoutTermCard(term: "Progression", detail: "Zamanla yük, tekrar, set veya teknik kalite artırma planı. Programın gelişim kuralı burada yazıyor.")
-            }
-        }
-        .padding(Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .fill(Palette.surface.opacity(0.68))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.55)
-        )
     }
 
     private func editProgramSession(_ weekday: Int) {
@@ -577,504 +813,7 @@ struct WorkoutView: View {
         return weight == weight.rounded() ? "@ \(Int(weight)) kg" : "@ \(String(format: "%.1f", weight)) kg"
     }
 
-    // MARK: Stats strip
-
-    private func statsStrip(
-        exact: [Date: WorkoutLog],
-        templatesByWeekday: [Int: WorkoutLog],
-        compact: Bool
-    ) -> some View {
-        let cal = Calendar.current
-        let now = Date()
-        var weekCal = cal
-        weekCal.firstWeekday = 2
-        let weekStart = weekCal.dateInterval(of: .weekOfYear, for: now)?.start ?? now
-        let weekEnd = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
-        let monthStart = cal.dateInterval(of: .month, for: now)?.start ?? now
-        let thirtyAgo = cal.date(byAdding: .day, value: -30, to: now) ?? now
-
-        // Tek pass — son 30 günü dolaş, week/month range içine düşenleri ayrı topla.
-        var weekSessions = 0, weekMin = 0
-        var weekKcal: Double = 0
-        var monthSessions = 0, monthMin = 0
-        var last30Sess = 0
-
-        var date = cal.startOfDay(for: thirtyAgo)
-        while date < weekEnd {
-            let eff = effectiveLog(for: date, exact: exact, templates: templatesByWeekday)
-            if let log = eff.log {
-                last30Sess += 1
-                if date >= weekStart {
-                    weekSessions += 1
-                    weekMin += log.durationMinutes
-                    weekKcal += log.estimatedCalories
-                }
-                if date >= monthStart {
-                    monthSessions += 1
-                    monthMin += log.durationMinutes
-                }
-            }
-            guard let next = cal.date(byAdding: .day, value: 1, to: date) else { break }
-            date = next
-        }
-
-        return VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Tempo").eyebrow()
-                    Text("Gerçek seans ritmi")
-                        .font(Typography.titleSmall)
-                        .foregroundStyle(Palette.textPrimary)
-                }
-                Spacer()
-                Text(String(format: "son 30 gün %.1f seans/hafta", Double(last30Sess) / (30.0 / 7.0)))
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
-            Hairline()
-
-            if compact {
-                VStack(spacing: Spacing.md) {
-                    statDatum(
-                        eyebrow: "Bu Hafta",
-                        primary: "\(weekSessions)",
-                        unit: "seans",
-                        secondary: "\(weekMin) dk · \(Fmt.int(weekKcal)) kcal"
-                    )
-                    Hairline()
-                    statDatum(
-                        eyebrow: "Bu Ay",
-                        primary: "\(monthSessions)",
-                        unit: "seans",
-                        secondary: "\(monthMin) dk ay başından beri"
-                    )
-                    Hairline()
-                    statDatum(
-                        eyebrow: "Son 30 Gün",
-                        primary: "\(last30Sess)",
-                        unit: "seans",
-                        secondary: String(format: "%.1f /hafta", Double(last30Sess) / (30.0 / 7.0))
-                    )
-                    Hairline()
-                    statDatum(
-                        eyebrow: "Kayıt",
-                        primary: "\(logs.count)",
-                        unit: "log",
-                        secondary: "\(uniqueWeekdaysWithLog) gün/hafta temeli"
-                    )
-                }
-            } else {
-                HStack(spacing: 0) {
-                    statDatum(
-                        eyebrow: "Bu Hafta",
-                        primary: "\(weekSessions)",
-                        unit: "seans",
-                        secondary: "\(weekMin) dk · \(Fmt.int(weekKcal)) kcal"
-                    )
-                    WorkoutHeaderDivider(height: 42)
-                    statDatum(
-                        eyebrow: "Bu Ay",
-                        primary: "\(monthSessions)",
-                        unit: "seans",
-                        secondary: "\(monthMin) dk ay başından beri"
-                    )
-                    WorkoutHeaderDivider(height: 42)
-                    statDatum(
-                        eyebrow: "Son 30 Gün",
-                        primary: "\(last30Sess)",
-                        unit: "seans",
-                        secondary: String(format: "%.1f /hafta", Double(last30Sess) / (30.0 / 7.0))
-                    )
-                    WorkoutHeaderDivider(height: 42)
-                    statDatum(
-                        eyebrow: "Kayıt",
-                        primary: "\(logs.count)",
-                        unit: "log",
-                        secondary: "\(uniqueWeekdaysWithLog) gün/hafta temeli"
-                    )
-                }
-            }
-        }
-        .padding(Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .fill(Palette.surface.opacity(0.68))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-                .strokeBorder(Palette.borderStrong, lineWidth: 0.55)
-        )
-    }
-
-    /// Haftanın kaç farklı gününde bir log var (template tabanı = haftalık tempo).
-    private var uniqueWeekdaysWithLog: Int {
-        let cal = Calendar.current
-        let weekdays = Set(logs.map { cal.component(.weekday, from: $0.date) })
-        return weekdays.count
-    }
-
-    private func statDatum(eyebrow: String, primary: String, unit: String, secondary: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(eyebrow.uppercased()).eyebrow()
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(primary)
-                    .font(Typography.hero(24))
-                    .foregroundStyle(Palette.textPrimary)
-                    .contentTransition(.numericText())
-                    .animation(.snappy, value: primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text(unit)
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-            }
-            Text(secondary)
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: Month nav
-
-    private var monthNavBar: some View {
-        HStack(spacing: Spacing.md) {
-            navButton(icon: "chevron.left") { jumpMonth(by: -1) }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(Self.monthTitleFormatter.string(from: currentMonth))
-                    .font(Typography.title)
-                    .foregroundStyle(Palette.textPrimary)
-                Text("\(logsInCurrentMonth.count) seans bu ay")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-            navButton(icon: "chevron.right") { jumpMonth(by: 1) }
-
-            Spacer()
-
-            Button {
-                let today = Calendar.current.startOfDay(for: .now)
-                currentMonth = Self.startOfMonth(.now)
-                selectedDay = today
-            } label: {
-                Label("Bugün", systemImage: "scope")
-            }
-            .buttonStyle(WorkoutMiniButtonStyle())
-        }
-    }
-
-    private func navButton(icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Palette.textSecondary)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Palette.surface)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: 0.5)
-                )
-        }
-        .buttonStyle(WorkoutIconButtonStyle())
-    }
-
-    // MARK: Grid
-
-    private func calendarGrid(
-        exact: [Date: WorkoutLog],
-        templatesByWeekday: [Int: WorkoutLog],
-        onSelectProgramDay: @escaping (Date) -> Void
-    ) -> some View {
-        let cols = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
-        let cal = Calendar.current
-        return VStack(spacing: 6) {
-            LazyVGrid(columns: cols, spacing: 6) {
-                ForEach(Self.weekdayHeaders, id: \.self) { wd in
-                    Text(wd)
-                        .font(Typography.label)
-                        .tracking(0.8)
-                        .foregroundStyle(Palette.textQuaternary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                }
-            }
-            LazyVGrid(columns: cols, spacing: 6) {
-                ForEach(monthGridDays(), id: \.self) { date in
-                    let eff = effectiveLog(for: date, exact: exact, templates: templatesByWeekday)
-                    WorkoutDayCell(
-                        date: date,
-                        inMonth: cal.isDate(date, equalTo: currentMonth, toGranularity: .month),
-                        isToday: cal.isDateInToday(date),
-                        isSelected: cal.isDate(date, inSameDayAs: selectedDay),
-                        log: eff.log,
-                        isTemplate: eff.isTemplate,
-                        scheduleHint: templateName(for: date),
-                        overrideCount: overrides(for: date).count
-                    ) {
-                        selectedDay = cal.startOfDay(for: date)
-                        if !cal.isDate(date, equalTo: currentMonth, toGranularity: .month) {
-                            currentMonth = Self.startOfMonth(date)
-                        }
-                        onSelectProgramDay(date)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: Selected day detail
-
-    private func selectedDayDetail(
-        exact: [Date: WorkoutLog],
-        templatesByWeekday: [Int: WorkoutLog]
-    ) -> some View {
-        let eff = effectiveLog(for: selectedDay, exact: exact, templates: templatesByWeekday)
-        let dayOverrides = overrides(for: selectedDay)
-        let plannedSession = programSession(for: selectedDay)
-        return Card(padding: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(Self.fullDayFormatter.string(from: selectedDay))
-                        .font(Typography.title)
-                        .foregroundStyle(Palette.textPrimary)
-                    if Calendar.current.isDateInToday(selectedDay) {
-                        PillTag(text: "Bugün", tint: Palette.accent)
-                    }
-                    if eff.isTemplate {
-                        PillTag(text: "Plan", tint: Palette.textSecondary)
-                    }
-                    Spacer()
-                    if let l = eff.log {
-                        Text("\(l.durationMinutes) dk · \(Fmt.int(l.estimatedCalories)) kcal")
-                            .font(Typography.mono)
-                            .foregroundStyle(Palette.textSecondary)
-                    }
-                }
-
-                if let log = eff.log {
-                    HStack(spacing: 6) {
-                        Image(systemName: eff.isTemplate ? "repeat" : "dumbbell.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(eff.isTemplate ? Palette.textSecondary : Palette.accent)
-                        Text(log.name.isEmpty ? "İsimsiz Antrenman" : log.name)
-                            .font(Typography.bodyBold)
-                            .foregroundStyle(Palette.textPrimary)
-                        Spacer()
-                        if eff.isTemplate {
-                            Button {
-                                // Template'i bu güne özel olarak değiştir → yeni log (prefilled)
-                                creatingForDate = selectedDay
-                                creatingPrefill = log
-                            } label: {
-                                Label("Bu güne özel düzenle", systemImage: "pencil")
-                                    .font(Typography.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        } else {
-                            Button { editing = log } label: {
-                                Label("Düzenle", systemImage: "pencil")
-                                    .font(Typography.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-
-                    if eff.isTemplate {
-                        HStack(spacing: 5) {
-                            Image(systemName: "info.circle")
-                                .font(.system(size: 9))
-                            Text("Bu, son \(weekdayName(of: selectedDay)) antrenmanından kopyalandı. Aynısını yapacaksan ekstra giriş gerekmiyor.")
-                                .font(Typography.caption)
-                        }
-                        .foregroundStyle(Palette.textTertiary)
-                        .padding(.vertical, 4)
-                    }
-
-                    if !log.exercises.isEmpty {
-                        Hairline()
-                        let sorted = log.exercises.sorted { $0.order < $1.order }
-                        VStack(spacing: 6) {
-                            // enumerated → index'i lookup yerine doğrudan al (force-unwrap yok)
-                            ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, ex in
-                                HStack(spacing: Spacing.md) {
-                                    Text("\(idx + 1).")
-                                        .font(Typography.mono)
-                                        .foregroundStyle(Palette.textQuaternary)
-                                        .frame(width: 20, alignment: .leading)
-                                    Text(ex.name)
-                                        .font(Typography.body)
-                                        .foregroundStyle(Palette.textPrimary)
-                                    Spacer()
-                                    Text(ex.summary)
-                                        .font(Typography.mono)
-                                        .foregroundStyle(Palette.textSecondary)
-                                }
-                            }
-                        }
-                    }
-
-                    if !dayOverrides.isEmpty {
-                        Hairline()
-                        overrideExercises(dayOverrides)
-                    }
-
-                    if let note = log.notes, !note.isEmpty {
-                        Hairline()
-                        Text(note)
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } else if let plannedSession {
-                    HStack(spacing: 6) {
-                        Image(systemName: "list.clipboard")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.accent)
-                        Text(plannedSession.name)
-                            .font(Typography.bodyBold)
-                            .foregroundStyle(Palette.textPrimary)
-                        Spacer()
-                        Button {
-                            editProgramSession(plannedSession.weekday)
-                        } label: {
-                            Label("Programı düzenle", systemImage: "pencil")
-                                .font(Typography.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        Button {
-                            creatingForDate = selectedDay
-                            creatingPrefill = nil
-                        } label: {
-                            Label("Seans ekle", systemImage: "plus")
-                                .font(Typography.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                    if let focus = plannedSession.focus, !focus.isEmpty {
-                        Text(focus)
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textSecondary)
-                    }
-                    let exercises = plannedSession.sortedTemplateExercises
-                    if !exercises.isEmpty {
-                        Hairline()
-                        VStack(spacing: 6) {
-                            ForEach(exercises) { ex in
-                                HStack(spacing: Spacing.md) {
-                                    Text("\(ex.order + 1).")
-                                        .font(Typography.mono)
-                                        .foregroundStyle(Palette.textQuaternary)
-                                        .frame(width: 20, alignment: .leading)
-                                    Text(ex.name)
-                                        .font(Typography.body)
-                                        .foregroundStyle(Palette.textPrimary)
-                                    Spacer()
-                                    Text(ex.prescriptionText)
-                                        .font(Typography.mono)
-                                        .foregroundStyle(Palette.textSecondary)
-                                }
-                            }
-                        }
-                    }
-                    if let progression = plannedSession.progression, !progression.isEmpty {
-                        Hairline()
-                        Text(progression)
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "moon.zzz.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.textTertiary)
-                        Text("Bu gün için seans yok.")
-                            .font(Typography.body)
-                            .foregroundStyle(Palette.textTertiary)
-                        if let tplName = templateName(for: selectedDay) {
-                            Text("(Plan: \(tplName))")
-                                .font(Typography.caption)
-                                .foregroundStyle(Palette.textQuaternary)
-                        }
-                        Spacer()
-                        Button {
-                            creatingForDate = selectedDay
-                            creatingPrefill = nil
-                        } label: {
-                            Label("Seans ekle", systemImage: "plus")
-                                .font(Typography.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                    if !dayOverrides.isEmpty {
-                        Hairline()
-                        overrideExercises(dayOverrides)
-                    }
-                }
-            }
-        }
-    }
-
-    private func overrideExercises(_ overrides: [WorkoutPlanOverride]) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Palette.positive)
-                Text("AI plan eklemeleri")
-                    .font(Typography.captionBold)
-                    .foregroundStyle(Palette.textSecondary)
-            }
-            ForEach(overrides) { item in
-                HStack(spacing: Spacing.md) {
-                    Text("+")
-                        .font(Typography.mono)
-                        .foregroundStyle(Palette.positive)
-                        .frame(width: 20, alignment: .leading)
-                    Text(item.exerciseName)
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.textPrimary)
-                    Spacer()
-                    Text(item.prescriptionText)
-                        .font(Typography.mono)
-                        .foregroundStyle(Palette.textSecondary)
-                    Button {
-                        ctx.delete(item)
-                        ctx.saveOrReport()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("AI eklemesini sil")
-                }
-            }
-        }
-    }
-
-    private func weekdayName(of date: Date) -> String {
-        let weekday = Calendar.current.component(.weekday, from: date)
-        let names = ["", "Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
-        guard weekday >= 1 && weekday <= 7 else { return "" }
-        return names[weekday]
-    }
-
-    // MARK: Helpers
+    // MARK: - Helpers
 
     private var logsInCurrentMonth: [WorkoutLog] {
         let cal = Calendar.current
@@ -1090,11 +829,6 @@ struct WorkoutView: View {
     private func templateName(for day: Date) -> String? {
         let weekday = Calendar.current.component(.weekday, from: day)
         return templates.first(where: { $0.weekday == weekday })?.name
-    }
-
-    private func programSession(for day: Date) -> WorkoutSession? {
-        let weekday = Calendar.current.component(.weekday, from: day)
-        return templates.first(where: { $0.weekday == weekday })
     }
 
     private func suggestedName(for day: Date) -> String {
@@ -1132,10 +866,10 @@ struct WorkoutView: View {
         return f
     }()
 
-    fileprivate static let fullDayFormatter: DateFormatter = {
+    fileprivate static let nextSessionFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "d MMMM EEEE"
+        f.dateFormat = "EEEE d MMMM"
         return f
     }()
 

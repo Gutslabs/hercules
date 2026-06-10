@@ -4,6 +4,7 @@ import SwiftData
 import AppKit
 #endif
 
+/// Yedekleme — Sistem kartının sağ bölümü (kart kromu ProfileView.systemCard'da).
 struct BackupCard: View {
     @Environment(\.modelContext) private var ctx
     @State private var lastBackup: Date? = nil
@@ -16,160 +17,118 @@ struct BackupCard: View {
     @State private var showVaultRestoreConfirm = false
     @State private var importing = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "externaldrive.badge.checkmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Palette.accent)
-                    Text("Yedekleme").eyebrow()
-                }
-                Spacer()
-                if let date = lastBackup {
-                    Text("Son: \(Fmt.dateLong.string(from: date))")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                } else {
-                    Text("Henüz yedek yok")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.warning)
-                        .lineLimit(1)
-                }
-            }
+    private var systemsHealthy: Bool {
+        BackupService.shared.iCloudMirrorAvailable && vaultConfigured
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.textTertiary)
-                    Text(backupLocationText)
-                        .font(Typography.mono)
+    private var systemsStatusText: String {
+        let mirror = BackupService.shared.iCloudMirrorAvailable ? "iCloud mirror aktif" : "iCloud mirror yok"
+        let vault = vaultConfigured ? "vault aktif" : "vault seçilmedi"
+        return "\(mirror) · \(vault)"
+    }
+
+    private var lastBackupText: String {
+        guard let date = lastBackup else { return "Henüz yedek yok" }
+        var text = "Son: \(Fmt.dateLong.string(from: date))"
+        if let size = backupSize { text += " · \(formatSize(size))" }
+        return text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text("Yedekleme").eyebrow()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(systemsHealthy ? Palette.positive : Palette.warning)
+                        .frame(width: 5, height: 5)
+                    Text(systemsStatusText)
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Palette.textSecondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
-                    if let size = backupSize {
-                        Text("· \(formatSize(size))")
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                    Spacer(minLength: 0)
+                        .minimumScaleFactor(0.8)
                 }
-
-                HStack(spacing: 6) {
-                    Image(systemName: BackupService.shared.iCloudMirrorAvailable ? "icloud" : "icloud.slash")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(BackupService.shared.iCloudMirrorAvailable ? "iCloud Drive mirror aktif" : "iCloud Drive klasörü bulunamadı")
-                        .font(Typography.captionBold)
-                    if BackupService.shared.iCloudBackupExists {
-                        Text("· yedek var")
-                            .font(Typography.caption)
-                    }
-                }
-                .foregroundStyle(BackupService.shared.iCloudMirrorAvailable ? Palette.positive : Palette.textTertiary)
-
-                vaultStatusBlock
-
-                Text("Ölçümler, antrenmanlar, takvim, tarifler, profil, Hakkında, chat geçmişi, memory, research cache ve presetler bu sisteme girer. Restore öncesi otomatik safety backup alınır; vault yazarken çakışma yakalanırsa eski dosya conflicts klasörüne kopyalanır.")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 10)
+                Spacer(minLength: Spacing.md)
+                Text(lastBackupText)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(lastBackup == nil ? Palette.warning : Palette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
 
-            Button(action: syncNow) {
-                HStack(spacing: 7) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 11, weight: .semibold))
+            Text(backupLocationText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.top, 12)
+            Text(BackupService.shared.vaultDisplayPath)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.top, 4)
+                .help(vaultConfigured
+                      ? "Vault klasör yapısı: manifest.json, data/, support/, backups/, conflicts/. iPhone'da aynı klasör seçilince bu snapshot okunur."
+                      : "Henüz vault klasörü seçilmedi — Klasör butonuyla seç.")
+
+            Text("Ölçümler, antrenmanlar, takvim, tarifler, profil, Hakkımda, chat geçmişi, memory ve presetler bu sisteme girer. Restore öncesi otomatik safety backup alınır; çakışma yakalanırsa eski dosya conflicts klasörüne kopyalanır.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Palette.textTertiary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 9)
+
+            ChatHintFlow(spacing: 8) {
+                Button(action: syncNow) {
                     Text("Şimdi Senkronize Et")
-                        .font(Typography.captionBold)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Palette.btnFg)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Palette.accent))
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(importing)
-            .help("Mobil/diğer cihazların verisini çek + kendi verini yaz (iki yönlü)")
+                .buttonStyle(.plain)
+                .disabled(importing)
+                .help("Mobil/diğer cihazların verisini çek + kendi verini yaz (iki yönlü)")
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 118), spacing: 8, alignment: .leading)],
-                alignment: .leading,
-                spacing: 8
-            ) {
-                Button(action: backupNow) {
-                    backupActionLabel("Yedekle", systemImage: "arrow.up.doc")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .keyboardShortcut("b", modifiers: [.command, .shift])
-                .help("Şimdi yedekle (⌘⇧B)")
+                ghostButton("Yedekle", action: backupNow)
+                    .keyboardShortcut("b", modifiers: [.command, .shift])
+                    .help("Şimdi yedekle (⌘⇧B)")
 
-                Button(action: revealInFinder) {
-                    backupActionLabel("Finder", systemImage: "magnifyingglass")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(!BackupService.shared.backupExists)
-                .help("Yedek klasörünü Finder'da göster")
+                ghostButton("Finder", disabled: !BackupService.shared.backupExists, action: revealInFinder)
+                    .help("Yedek klasörünü Finder'da göster")
 
-                Button(action: selectVaultFolder) {
-                    backupActionLabel("Klasör", systemImage: "folder.badge.gearshape")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(vaultConfigured ? "Vault klasörünü değiştir" : "Veri klasörü seç")
+                ghostButton("Klasör", action: selectVaultFolder)
+                    .help(vaultConfigured ? "Vault klasörünü değiştir" : "Veri klasörü seç")
 
-                Button(action: exportVaultNow) {
-                    backupActionLabel("Vault Yaz", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(!vaultConfigured)
-                .help("Vault klasörüne yaz")
+                ghostButton("Vault Yaz", disabled: !vaultConfigured, action: exportVaultNow)
+                    .help("Vault klasörüne yaz")
 
-                Button(role: .destructive) {
+                ghostButton("Geri Al", disabled: !BackupService.shared.backupExists || importing) {
                     showRestoreConfirm = true
-                } label: {
-                    backupActionLabel("Geri Al", systemImage: "arrow.down.doc")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(Palette.warning)
-                .disabled(!BackupService.shared.backupExists || importing)
                 .help("Local yedekten geri yükle")
 
-                Button(role: .destructive) {
+                ghostButton("Vault Al", disabled: !vaultBackupExists || importing) {
                     showVaultRestoreConfirm = true
-                } label: {
-                    backupActionLabel("Vault Al", systemImage: "square.and.arrow.down")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(Palette.warning)
-                .disabled(!vaultBackupExists || importing)
                 .help("Vault snapshot'ını içeri al")
             }
+            .padding(.top, 13)
 
             if let msg = statusMessage {
                 Text(msg)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.positive)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(msg.hasPrefix("✓") ? Palette.positive : Palette.warning)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
             }
         }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .fill(Palette.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
+        .padding(.init(top: 20, leading: 28, bottom: 18, trailing: 28))
         .onAppear { refreshInfo() }
         .alert("Geri Yükle?", isPresented: $showRestoreConfirm) {
             Button("İptal", role: .cancel) { }
@@ -185,63 +144,21 @@ struct BackupCard: View {
         }
     }
 
-    private var vaultStatusBlock: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 7) {
-                Image(systemName: vaultConfigured ? "externaldrive.connected.to.line.below" : "externaldrive.badge.questionmark")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(vaultConfigured ? "Dosya tabanlı vault aktif" : "Dosya tabanlı vault seçilmedi")
-                    .font(Typography.captionBold)
-                if let vaultLastSync {
-                    Text("· \(Fmt.dateLong.string(from: vaultLastSync))")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                }
-            }
-            .foregroundStyle(vaultConfigured ? Palette.positive : Palette.warning)
-
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.textTertiary)
-                Text(BackupService.shared.vaultDisplayPath)
-                    .font(Typography.mono)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 0)
-            }
-
-            if vaultConfigured {
-                Text("Klasör yapısı: manifest.json, data/hercules-backup.json, support/, backups/, conflicts/. iPhone tarafında aynı klasör seçildiğinde bu snapshot okunacak.")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Palette.surfaceElevated.opacity(0.75))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
-    }
-
-    private func backupActionLabel(_ title: String, systemImage: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .semibold))
+    private func ghostButton(_ title: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Text(title)
-                .font(Typography.captionBold)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(disabled ? Palette.textQuaternary : Palette.textSecondary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Palette.border, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .buttonStyle(.plain)
+        .disabled(disabled)
     }
 
     private func backupNow() {
@@ -323,11 +240,16 @@ struct BackupCard: View {
         importing = true
         Task { @MainActor in
             // Tam iki-yönlü merge senkron (pull-merge + push), bloklamayan.
-            await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
+            let syncError = await BackupService.shared.syncWithVaultNonBlocking(into: ctx)
             BackupService.shared.restoreFromICloudIfNewer(into: ctx) // legacy iCloud mirror (gated)
             FoodPresetSeed.upsertDefaults(ctx)
             _ = BackupService.shared.export(from: ctx)                // yerel yedek
-            statusMessage = "✓ " + BackupService.shared.syncDiagnostics(ctx: ctx)
+            // Push başarısızsa sahte "✓" gösterme — gerçek hatayı bildir.
+            if let syncError {
+                statusMessage = "Senkron hatası: \(syncError.localizedDescription)"
+            } else {
+                statusMessage = "✓ " + BackupService.shared.syncDiagnostics(ctx: ctx)
+            }
             refreshInfo()
             importing = false
         }

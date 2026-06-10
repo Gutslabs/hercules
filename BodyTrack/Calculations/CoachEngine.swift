@@ -69,34 +69,38 @@ enum CoachEngine {
     /// Açılışta / öne gelince / 30 dk timer'da çağrılır — hem 08:00 analizini hem
     /// 10:00 tarifini gerektiğinde üretir.
     static func maybeRunDaily(ctx: ModelContext) {
-        maybeRunDailyReport(ctx: ctx)
-        maybeRunDailyRecipe(ctx: ctx)
+        let now = Date()
+        // Uygunluğu SENKRON hesapla, denemeleri burada damgala, sonra TEK task'ta
+        // sırayla çalıştır. Böylece rapor ve tarif paylaşılan isRunning üzerinde
+        // çakışmaz (ikinci üretim, birincinin defer'i flag'i sıfırladıktan sonra
+        // başlar) ve tarif throttle'ı boşa yanmaz.
+        let runReport = shouldRunReport(now: now, ctx: ctx)
+        let runRecipe = shouldRunRecipe(now: now, ctx: ctx)
+        if runReport { lastReportAttempt = now }
+        if runRecipe { lastRecipeAttempt = now }
+        guard runReport || runRecipe else { return }
+        Task { @MainActor in
+            if runReport { _ = try? await generateDailyReport(ctx: ctx) }
+            if runRecipe { _ = try? await generateDailyRecipe(ctx: ctx) }
+        }
     }
 
     /// 08:00 sonrası, bugünün ANALİZİ yoksa üret (saatte 1 deneme).
-    static func maybeRunDailyReport(ctx: ModelContext) {
-        guard !isRunning else { return }
-        let now = Date()
-        guard Calendar.current.component(.hour, from: now) >= 8 else { return }
-        guard existingReport(for: startOfDay(now), ctx: ctx) == nil else { return }
-        if let last = lastReportAttempt, now.timeIntervalSince(last) < 3600 { return }
-        lastReportAttempt = now
-        Task { @MainActor in
-            do { _ = try await generateDailyReport(ctx: ctx) } catch { }
-        }
+    private static func shouldRunReport(now: Date, ctx: ModelContext) -> Bool {
+        guard !isRunning else { return false }
+        guard Calendar.current.component(.hour, from: now) >= 8 else { return false }
+        guard existingReport(for: startOfDay(now), ctx: ctx) == nil else { return false }
+        if let last = lastReportAttempt, now.timeIntervalSince(last) < 3600 { return false }
+        return true
     }
 
     /// 10:00 sonrası, bugünün TARİFİ yoksa üret (saatte 1 deneme).
-    static func maybeRunDailyRecipe(ctx: ModelContext) {
-        guard !isRunning else { return }
-        let now = Date()
-        guard Calendar.current.component(.hour, from: now) >= 10 else { return }
-        guard existingRecipe(for: startOfDay(now), ctx: ctx) == nil else { return }
-        if let last = lastRecipeAttempt, now.timeIntervalSince(last) < 3600 { return }
-        lastRecipeAttempt = now
-        Task { @MainActor in
-            do { _ = try await generateDailyRecipe(ctx: ctx) } catch { }
-        }
+    private static func shouldRunRecipe(now: Date, ctx: ModelContext) -> Bool {
+        guard !isRunning else { return false }
+        guard Calendar.current.component(.hour, from: now) >= 10 else { return false }
+        guard existingRecipe(for: startOfDay(now), ctx: ctx) == nil else { return false }
+        if let last = lastRecipeAttempt, now.timeIntervalSince(last) < 3600 { return false }
+        return true
     }
 
     // MARK: - Üretim
@@ -294,7 +298,7 @@ enum CoachEngine {
 
     /// `.coachRecipe` varsayılanı — "Bugün <tarih>. " öneki koddan eklenir; yemek günlüğü +
     /// kayıtlı tarifler bağlam olarak gelir. Admin ▸ System'den düzenlenebilir.
-    static let recipeInstructionsDefault = """
+    nonisolated static let recipeInstructionsDefault = """
     Bana BUGÜN için YÜKSEK PROTEİNLİ bir BOWL tarifi öner.
 
     ÇOK ÖNEMLİ KURALLAR:
@@ -310,7 +314,7 @@ enum CoachEngine {
     /// `.coachReport` varsayılanı (ana analiz direktifi). "Bugün <tarih>. " öneki + sonuna
     /// bilimsel-dayanak direktifi, açık takip maddeleri, önceki rapor ve makine-okunur takip
     /// formatı koddan otomatik eklenir. Admin ▸ System'den düzenlenebilir.
-    static let reportInstructionsDefault = """
+    nonisolated static let reportInstructionsDefault = """
     Sen benim kişisel fitness/beslenme koçumsun ve her sabah bana o günkü durumu DETAYLI bir koç analizi olarak veriyorsun. @Ölçümler @Antrenman @Beslenme verilerimin HEPSİNE bak.
 
     Bana UZUN, somut ve samimi-ama-net bir analiz yaz (gerçek sayılarla):
@@ -328,7 +332,7 @@ enum CoachEngine {
         let df = DateFormatter()
         df.locale = Locale(identifier: "tr_TR")
         df.dateFormat = "d MMMM yyyy EEEE"
-        return "Bugün \(df.string(from: today)). " + PromptStore.shared.text(.coachRecipe)
+        return "Bugün \(df.string(from: today)). " + recipeInstructionsDefault
     }
 
     // MARK: - Prompt
@@ -339,7 +343,7 @@ enum CoachEngine {
         df.dateFormat = "d MMMM yyyy EEEE"
         let dateStr = df.string(from: today)
 
-        var p = "Bugün \(dateStr). " + PromptStore.shared.text(.coachReport)
+        var p = "Bugün \(dateStr). " + reportInstructionsDefault
 
         p += """
 
@@ -478,8 +482,15 @@ enum CoachEngine {
         let measurements = (try? ctx.fetch(FetchDescriptor<Measurement>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
         let weight = measurements.compactMap(\.weight).first
         let weekAgo = cal.date(byAdding: .day, value: -7, to: .now) ?? .now
-        let pastWeight = measurements.first(where: { $0.date <= weekAgo })?.weight
-        let weeklyDelta: Double? = (weight != nil && pastWeight != nil) ? (weight! - pastWeight!) : nil
+        // Kıyas ölçümünün AĞIRLIĞI olmalı (çevre-only check-in'leri atla) ve çok
+        // eski olmamalı; yoksa 3 haftalık değişimi "Haftalık" diye sunarız.
+        let comparison = measurements.first(where: { $0.date <= weekAgo && $0.weight != nil })
+        let weeklyDelta: Double? = {
+            guard let weight, let comparison, let pastWeight = comparison.weight else { return nil }
+            let span = cal.dateComponents([.day], from: comparison.date, to: .now).day ?? 7
+            guard span <= 14 else { return nil }   // bayat kıyas: çok haftalık değişimi "Haftalık" gibi gösterme
+            return weight - pastWeight
+        }()
 
         let foods = (try? ctx.fetch(FetchDescriptor<FoodEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
         let cutoff14 = cal.date(byAdding: .day, value: -14, to: .now) ?? .now
