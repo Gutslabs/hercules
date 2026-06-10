@@ -236,10 +236,12 @@ final class ChatStore {
             return messages.lastIndex(where: { $0.id == assistantId })
         }
 
-        var pendingStreamText = ""
-        var lastStreamFlush = Date.distantPast
-        let streamFlushInterval: TimeInterval = 0.14
-        let streamFlushCharacterBudget = 120
+        // Typewriter: model token'ları (genelde kelime parçaları) buffer'a yazılır;
+        // ayrı bir döngü buffer'ı SABİT HIZLA harf harf açar → gerçek daktilo hissi.
+        // Model bizden çok ileri giderse (buffer büyürse) kademeli hızlanır, geri kalmaz.
+        var pendingStreamText = ""   // modelden gelen tam birikmiş hedef metin
+        var revealed = 0             // şu an gösterilen karakter sayısı
+        var streamComplete = false   // ağ akışı bitti mi (kuyruğu boşalt)
 
         func setAssistantTextWithoutAnimation(_ value: String) {
             guard let idx = assistantIdx(), messages[idx].text != value else { return }
@@ -250,27 +252,30 @@ final class ChatStore {
             }
         }
 
-        func flushStreamText(force: Bool = false) {
-            guard !pendingStreamText.isEmpty, let idx = assistantIdx() else { return }
-            let now = Date()
-            let currentLength = pendingStreamText.count
-            let characterBudget: Int
-            let interval: TimeInterval
-            if currentLength > 3_000 {
-                characterBudget = 260
-                interval = 0.24
-            } else if currentLength > 1_200 {
-                characterBudget = 180
-                interval = 0.18
-            } else {
-                characterBudget = streamFlushCharacterBudget
-                interval = streamFlushInterval
+        /// Tek tick — gösterilen prefix'i hedefe doğru ilerletir. Yakınken yavaş
+        /// (daktilo), çok geride kalınca hızlanır. Açılacak metin kaldıysa true.
+        func advanceTypewriter() -> Bool {
+            let target = pendingStreamText.count
+            guard revealed < target else { return false }
+            let behind = target - revealed
+            let step: Int
+            if behind > 600 { step = max(12, behind / 24) }
+            else if behind > 200 { step = 6 }
+            else if behind > 60 { step = 3 }
+            else { step = streamComplete ? 4 : 2 }
+            revealed = min(target, revealed + step)
+            // prefix(count) Character bazlı — emoji/birleşik karakter güvenli.
+            setAssistantTextWithoutAnimation(String(pendingStreamText.prefix(revealed)))
+            return revealed < target
+        }
+
+        // Akış boyunca ~16ms'de bir tick'leyen daktilo görevi.
+        let typer = Task { @MainActor in
+            while !Task.isCancelled {
+                let more = advanceTypewriter()
+                if !more && streamComplete { break }
+                try? await Task.sleep(nanoseconds: 16_000_000)
             }
-            let grewEnough = currentLength - messages[idx].text.count >= characterBudget
-            let waitedEnough = now.timeIntervalSince(lastStreamFlush) >= interval
-            guard force || grewEnough || waitedEnough else { return }
-            setAssistantTextWithoutAnimation(pendingStreamText)
-            lastStreamFlush = now
         }
 
         do {
@@ -282,12 +287,10 @@ final class ChatStore {
                     self?.searchingFor = q
                 },
                 onMessageUpdate: { partial in
-                    pendingStreamText = partial
-                    flushStreamText()
+                    pendingStreamText = partial   // hedefi güncelle; daktilo kendi hızıyla açar
                 }
             )
             try Task.checkCancellation()   // "Dur"a basıldıysa sonucu uygulama
-            flushStreamText(force: true)
             let rawAssistantText = result.message.isEmpty
                 ? (result.name ?? "—")
                 : result.message
@@ -295,6 +298,10 @@ final class ChatStore {
             let assistantText = recipeSearchSatisfied
                 ? rawAssistantText
                 : "Kanka tarif konusunda kaynaksız cevap vermeyi kapattım. Web araması tetiklenmediği için tarif üretmedim; tekrar denediğinde kaynaklı tarif arayacağım."
+            // Daktilonun nihai metni harf harf bitirmesini bekle, sonra kartı tamamla.
+            pendingStreamText = assistantText
+            streamComplete = true
+            await typer.value
             if let idx = assistantIdx() {
                 setAssistantTextWithoutAnimation(assistantText)
                 messages[idx].food = (recipeSearchSatisfied && result.isFood) ? result : nil
@@ -307,9 +314,10 @@ final class ChatStore {
             syncCurrentConversation(titleSeed: text)
             agentRouter.absorbConversation(userText: text, assistantText: assistantText)
         } catch {
+            typer.cancel()   // daktiloyu durdur; gerisini doğrudan yaz
             if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
-                // Kullanıcı "Dur"a bastı — kısmi metni koru, hata gösterme
-                flushStreamText(force: true)
+                // Kullanıcı "Dur"a bastı — o ana kadar gelen tam kısmi metni göster
+                setAssistantTextWithoutAnimation(pendingStreamText)
                 if let idx = assistantIdx(), messages[idx].text.isEmpty {
                     setAssistantTextWithoutAnimation("⏹︎ Durduruldu")
                 }
