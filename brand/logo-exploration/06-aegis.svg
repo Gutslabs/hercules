@@ -1,0 +1,9 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Hercules Aegis logo</title>
+  <desc id="desc">A soft shield carries an upward performance path, representing durable and private guidance.</desc>
+  <path d="M50 16 L78 28 V49 C78 67 67 78 50 84 C33 78 22 67 22 49 V28 Z"
+        fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M33 59 L44 48 L54 56 L68 39"
+        fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="68" cy="39" r="5" fill="currentColor"/>
+</svg>

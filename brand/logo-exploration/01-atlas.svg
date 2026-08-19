@@ -1,0 +1,9 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Hercules Atlas logo</title>
+  <desc id="desc">Two grounded pillars joined by a rising bridge, forming an abstract letter H.</desc>
+  <g fill="currentColor">
+    <rect x="21" y="18" width="16" height="64" rx="8"/>
+    <rect x="63" y="18" width="16" height="64" rx="8"/>
+  </g>
+  <path d="M31 59 C43 59 51 49 69 45" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round"/>
+</svg>

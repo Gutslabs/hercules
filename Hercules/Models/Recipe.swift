@@ -1,0 +1,129 @@
+import Foundation
+import SwiftData
+
+enum RecipeCategory: String, Codable, CaseIterable, Identifiable, Sendable {
+    case breakfast, dinner, dessert
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .breakfast: return "Kahvaltı"
+        case .dinner: return "Akşam Yemeği"
+        case .dessert: return "Tatlı"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .breakfast: return "sun.max.fill"
+        case .dinner: return "moon.fill"
+        case .dessert: return "birthday.cake.fill"
+        }
+    }
+}
+
+@Model
+final class Recipe {
+    var title: String = ""
+    var urlString: String = ""
+    /// Doğrudan `Codable` enum saklamak CloudKit entegrasyonunda legacy keyed-unarchive
+    /// uyarısı üretiyor. Eski "category" alanını yerinde koruyarak ham değer sakla.
+    @Attribute(originalName: "category") var categoryRaw: String = RecipeCategory.dinner.rawValue
+    var isFavorite: Bool = false
+    var summary: String?
+    var ingredientsText: String?
+    var instructionsText: String?
+    var servings: Int?
+    var prepMinutes: Int?
+    var calories: Double?
+    var protein: Double?
+    var carbs: Double?
+    var fat: Double?
+    var createdAt: Date = Date.now
+    /// Kaydın son değişiklik zamanı.
+    var updatedAt: Date = Date.now
+
+    init(
+        title: String,
+        urlString: String,
+        category: RecipeCategory,
+        isFavorite: Bool = false,
+        summary: String? = nil,
+        ingredientsText: String? = nil,
+        instructionsText: String? = nil,
+        servings: Int? = nil,
+        prepMinutes: Int? = nil,
+        calories: Double? = nil,
+        protein: Double? = nil,
+        carbs: Double? = nil,
+        fat: Double? = nil,
+        createdAt: Date = .now
+    ) {
+        self.title = title
+        self.urlString = urlString
+        self.categoryRaw = category.rawValue
+        self.isFavorite = isFavorite
+        self.summary = summary
+        self.ingredientsText = ingredientsText
+        self.instructionsText = instructionsText
+        self.servings = servings
+        self.prepMinutes = prepMinutes
+        self.calories = calories
+        self.protein = protein
+        self.carbs = carbs
+        self.fat = fat
+        self.createdAt = createdAt
+    }
+
+    var category: RecipeCategory {
+        get { RecipeCategory(rawValue: categoryRaw) ?? .dinner }
+        set { categoryRaw = newValue.rawValue }
+    }
+
+    var url: URL? {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
+
+    var hasDetail: Bool {
+        [summary, ingredientsText, instructionsText].contains { value in
+            !(value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
+    }
+}
+
+/// Tarif videosu — sadece isim + video linki. Detay/makro yok, unutmamak için
+/// isimlendirilmiş bir link rafı. Recipe'ten ayrı tutulur ki tarif kütüphanesi
+/// (malzeme/yapılış/makro) karışmasın. Recipe gibi SwiftData/CloudKit ile saklanır.
+@Model
+final class RecipeVideo {
+    var title: String = ""
+    var urlString: String = ""
+    var createdAt: Date = Date.now
+    /// Kaydın son değişiklik zamanı.
+    var updatedAt: Date = Date.now
+
+    init(
+        title: String,
+        urlString: String,
+        createdAt: Date = .now
+    ) {
+        self.title = title
+        self.urlString = urlString
+        self.createdAt = createdAt
+    }
+
+    var url: URL? {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
+
+    /// "youtube.com", "instagram.com" gibi — linkin nereden geldiğini gösterir.
+    var sourceHost: String? {
+        guard let host = url?.host else { return nil }
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+}

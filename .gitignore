@@ -48,3 +48,17 @@ codex_auth.json
 *.sqlite-wal
 hercules_backup*.json
 HerculesBackup*.json
+
+# On-device TTS model (sherpa-onnx Piper dfki) — büyük (79MB) + CC-BY-NC-SA (ticari-yasak), repoya konmuyor.
+# Taze clone sonrası: scripts/fetch-tts-model.sh ile indir.
+Hercules/Resources/tts/
+
+# sherpa-onnx vendored xcframework'ler (~347MB ikili) — repoya konmuyor.
+# Taze clone sonrası: scripts/setup-sherpa.sh ile indir. (vendor/SherpaOnnx/ paketi tracked kalır.)
+vendor/sherpa/
+
+# Geçici proje-düzenleme script'leri (xcodeproj mutasyonu)
+scripts/_*.rb
+
+# Kod kapsama artefaktı (xcodebuild bırakıyor)
+*.profraw

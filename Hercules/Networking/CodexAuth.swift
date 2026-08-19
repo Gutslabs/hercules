@@ -1,0 +1,291 @@
+import Foundation
+
+enum CodexAuthError: LocalizedError {
+    case noAuthFile
+    case invalidAuthFile(String)
+    case refreshFailed(Int, String)
+    case noRefreshToken
+    case noAccountId
+
+    var errorDescription: String? {
+        switch self {
+        case .noAuthFile:
+            return "Codex auth dosyası bulunamadı. Önce Codex CLI'da `codex login` yap."
+        case .invalidAuthFile(let s): return "Codex auth dosyası bozuk: \(s)"
+        case .refreshFailed(let code, let msg): return "Token yenileme HTTP \(code): \(msg)"
+        case .noRefreshToken: return "Refresh token yok. `codex login` ile yeniden giriş yap."
+        case .noAccountId: return "Token içinde ChatGPT account ID yok."
+        }
+    }
+}
+
+struct CodexTokens: Codable {
+    var access_token: String
+    var refresh_token: String?
+    var id_token: String?
+    var account_id: String?
+
+    /// JWT'den ChatGPT account ID'sini çıkar (Cloudflare header için gerekli).
+    var chatGPTAccountId: String? {
+        if let acct = account_id, !acct.isEmpty { return acct }
+        return Self.extractAccountId(from: access_token)
+    }
+
+    /// JWT exp claim'inden expire zamanı.
+    var expiry: Date? {
+        Self.extractExpiry(from: access_token)
+    }
+
+    var isExpiringSoon: Bool {
+        guard let exp = expiry else { return false }
+        return exp.timeIntervalSinceNow < 60  // 1 dk içinde dolacaksa yenile
+    }
+
+    static func extractClaims(from jwt: String) -> [String: Any]? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var payload = String(parts[1])
+        // base64url padding
+        while payload.count % 4 != 0 { payload += "=" }
+        // base64url -> base64
+        payload = payload
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        guard let data = Data(base64Encoded: payload),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj
+    }
+
+    static func extractAccountId(from jwt: String) -> String? {
+        guard let claims = extractClaims(from: jwt) else { return nil }
+        if let auth = claims["https://api.openai.com/auth"] as? [String: Any],
+           let acct = auth["chatgpt_account_id"] as? String,
+           !acct.isEmpty {
+            return acct
+        }
+        return nil
+    }
+
+    static func extractExpiry(from jwt: String) -> Date? {
+        guard let claims = extractClaims(from: jwt),
+              let exp = claims["exp"] as? Double
+        else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+}
+
+private struct AuthFileRoot: Codable {
+    var auth_mode: String?
+    var tokens: CodexTokens?
+    var last_refresh: String?
+    var OPENAI_API_KEY: String?
+}
+
+private struct RefreshResponse: Codable {
+    var access_token: String?
+    var refresh_token: String?
+    var id_token: String?
+    var expires_in: Int?
+    var error: String?
+    var error_description: String?
+}
+
+/// ~/.codex/auth.json okur, gerekirse yeniler ve kendi store'umuzda tutar.
+@MainActor
+final class CodexAuth {
+    static let shared = CodexAuth()
+
+    private let oauthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+    private let oauthTokenURL = URL(string: "https://auth.openai.com/oauth/token")!
+
+    /// Uçuştaki tek refresh — eşzamanlı çağrılar aynı (rotasyona giren) refresh
+    /// token'ı paralel POST etmesin diye in-flight yenilemeyi tekilleştirir.
+    private var refreshTask: Task<CodexTokens, Error>?
+
+    /// Token'lar Keychain'de tutulur (düz-metin dosya + yedeklere sızma riski yok).
+    private static let keychainService = "hercules.codex"
+    private static let keychainAccount = "tokens"
+
+    /// Eski düz-metin token dosyası konumu. Token'lar artık Keychain'de tutulur;
+    /// bu yol yalnızca eski kurulumlardan Keychain'e taşıma (migration) için kullanılır.
+    private var herculesStoreURL: URL {
+        let fm = FileManager.default
+        #if os(macOS)
+        let fallback = fm.homeDirectoryForCurrentUser
+        #else
+        let fallback = URL(fileURLWithPath: NSHomeDirectory())
+        #endif
+        let support = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)) ?? fallback
+        let dir = support.appendingPathComponent("Hercules", isDirectory: true)
+        if !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("codex_auth.json")
+    }
+
+    private var codexCLIAuthURL: URL {
+        #if os(macOS)
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/auth.json")
+        #else
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/auth.json")
+        #endif
+    }
+
+    /// Codex CLI'ın auth.json'ından geçerli bir token var mı?
+    var codexCLIInstalled: Bool {
+        FileManager.default.fileExists(atPath: codexCLIAuthURL.path)
+    }
+
+    /// Hercules'in kendi store'unda (Keychain veya eski dosya) token var mı?
+    var hasHerculesTokens: Bool {
+        if AIKeyStore.readKeychainPassword(service: Self.keychainService, account: Self.keychainAccount) != nil {
+            return true
+        }
+        return FileManager.default.fileExists(atPath: herculesStoreURL.path)
+    }
+
+    /// Geçerli erişim token'ı al — gerektiğinde otomatik yenile.
+    /// İlk defa çağrılırsa Codex CLI'dan import et.
+    func ensureFreshToken() async throws -> CodexTokens {
+        let tokens = try loadTokens()
+        guard tokens.isExpiringSoon else { return tokens }
+        // Zaten uçuşta bir yenileme varsa ona katıl (rotasyona giren refresh
+        // token'ı paralel POST etme). Kontrol+atama main actor üzerinde
+        // senkron olduğu için aynı anda en fazla bir yenileme uçuşta olabilir.
+        if let inFlight = refreshTask {
+            return try await inFlight.value
+        }
+        let task = Task { try await self.refresh(tokens) }
+        refreshTask = task
+        defer { refreshTask = nil }
+        return try await task.value
+    }
+
+    /// 401 sonrası koşulsuz yenileme — ensureFreshToken ile AYNI tekilleştirme
+    /// üzerinden. Doğrudan `refresh(_:)` çağırmak in-flight dedup'u atlıyordu:
+    /// iki eşzamanlı istek aynı (rotasyonlu) refresh token'ı paralel POST edince
+    /// OpenAI token ailesini geçersiz kılıyor ve kullanıcı kalıcı olarak
+    /// "codex login"e düşüyordu.
+    func forceRefresh(previous: CodexTokens?) async throws -> CodexTokens {
+        if let inFlight = refreshTask {
+            return try await inFlight.value
+        }
+        let current = try loadTokens()
+        // Başka bir istek bizim 401 yediğimiz token'ı çoktan çevirdiyse ağa çıkma.
+        if let previous, current.access_token != previous.access_token {
+            return current
+        }
+        let task = Task { try await self.refresh(current) }
+        refreshTask = task
+        defer { refreshTask = nil }
+        return try await task.value
+    }
+
+    /// Codex CLI'dan ilk seferlik import (Hercules store'una kopyala).
+    @discardableResult
+    func importFromCodexCLI() throws -> CodexTokens {
+        guard FileManager.default.fileExists(atPath: codexCLIAuthURL.path) else {
+            throw CodexAuthError.noAuthFile
+        }
+        let data = try Data(contentsOf: codexCLIAuthURL)
+        let root = try JSONDecoder().decode(AuthFileRoot.self, from: data)
+        guard let t = root.tokens, !t.access_token.isEmpty else {
+            throw CodexAuthError.invalidAuthFile("tokens.access_token yok")
+        }
+        try saveTokens(t)
+        return t
+    }
+
+    /// Token oku: önce Keychain, sonra eski düz-metin dosya (taşı + sil), sonra Codex CLI import.
+    func loadTokens() throws -> CodexTokens {
+        // 1) Keychain — yeni, güvenli konum
+        if let json = AIKeyStore.readKeychainPassword(service: Self.keychainService, account: Self.keychainAccount),
+           let data = json.data(using: .utf8),
+           let tokens = try? JSONDecoder().decode(CodexTokens.self, from: data) {
+            return tokens
+        }
+        // 2) Eski düz-metin dosyası → Keychain'e taşı, dosyayı sil
+        if FileManager.default.fileExists(atPath: herculesStoreURL.path) {
+            let data = try Data(contentsOf: herculesStoreURL)
+            let tokens = try JSONDecoder().decode(CodexTokens.self, from: data)
+            try? saveTokens(tokens)   // Keychain'e yazar + eski dosyayı temizler
+            return tokens
+        }
+        // 3) İlk kullanım — Codex CLI'dan import dene
+        return try importFromCodexCLI()
+    }
+
+    func saveTokens(_ tokens: CodexTokens) throws {
+        let data = try JSONEncoder().encode(tokens)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw CodexAuthError.invalidAuthFile("token encode edilemedi")
+        }
+        guard AIKeyStore.writeKeychainPassword(json, service: Self.keychainService, account: Self.keychainAccount) else {
+            throw CodexAuthError.invalidAuthFile("token Keychain'e yazılamadı")
+        }
+        // Eski düz-metin dosyası varsa temizle (yedeklere/iCloud'a sızmasın).
+        if FileManager.default.fileExists(atPath: herculesStoreURL.path) {
+            try? FileManager.default.removeItem(at: herculesStoreURL)
+        }
+    }
+
+    /// Token'ı refresh endpoint'ine post ederek yenile.
+    func refresh(_ tokens: CodexTokens) async throws -> CodexTokens {
+        guard let refreshToken = tokens.refresh_token, !refreshToken.isEmpty else {
+            throw CodexAuthError.noRefreshToken
+        }
+
+        var req = URLRequest(url: oauthTokenURL)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let body: [String: String] = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": oauthClientID,
+            "scope": "openid profile email offline_access"
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let http = resp as? HTTPURLResponse
+        let status = http?.statusCode ?? -1
+
+        let decoded = (try? JSONDecoder().decode(RefreshResponse.self, from: data)) ?? RefreshResponse()
+        if status < 200 || status >= 300 || decoded.access_token == nil {
+            let msg = decoded.error_description ?? decoded.error ?? String(data: data, encoding: .utf8) ?? "?"
+            throw CodexAuthError.refreshFailed(status, msg)
+        }
+
+        var updated = tokens
+        updated.access_token = decoded.access_token!
+        if let nrt = decoded.refresh_token, !nrt.isEmpty {
+            updated.refresh_token = nrt  // OpenAI rotates refresh tokens
+        }
+        if let nid = decoded.id_token, !nid.isEmpty {
+            updated.id_token = nid
+        }
+        try saveTokens(updated)
+        return updated
+    }
+
+    /// Codex bağlantı durumu — UI için.
+    enum Status {
+        case noCodexCLI                    // ~/.codex/auth.json yok
+        case ready(account: String?)       // Hazır, çağrı yapılabilir
+        case error(String)
+    }
+
+    func currentStatus() -> Status {
+        if !codexCLIInstalled && !hasHerculesTokens {
+            return .noCodexCLI
+        }
+        do {
+            let t = try loadTokens()
+            return .ready(account: t.chatGPTAccountId)
+        } catch {
+            return .error(error.localizedDescription)
+        }
+    }
+}

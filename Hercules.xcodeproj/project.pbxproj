@@ -1,0 +1,1215 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		039B8A4EAFE2BAC1BF6129C2 /* AnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */; };
+		0C7EE31B46E6619D6DF30A70 /* SheetChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEF1DCE7BE1D7A3D6E8ED091 /* SheetChrome.swift */; };
+		122548964C67C3708F322AB5 /* ProgressPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */; };
+		14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69080015CD65428F38FBE30D /* CoachEngine.swift */; };
+		14F0E98865BA017B52C041DB /* ProgressPhotosView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E389ED335EE23DC04F102A /* ProgressPhotosView.swift */; };
+		153AD86991809C6942FAD775 /* InstagramImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BC032C788C2D2EB3E167A1 /* InstagramImportView.swift */; };
+		21ACCC5E562012AD95D5208D /* InstagramSavedReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF430471CD13582E9A46A802 /* InstagramSavedReader.swift */; };
+		267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35726FCF0FBDC3D66BE44300 /* CoachView.swift */; };
+		3B829260EF51EF2249000B6A /* InstagramPostScraper.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAA8E80E5F28F4F36E9FB459 /* InstagramPostScraper.swift */; };
+		3F064015E934098D47C4B292 /* CoachOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B52CD3B50D07842A2D8B0D3 /* CoachOrb.swift */; };
+		47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */; };
+		4DAB83858007EDAADF3847E0 /* FeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */; };
+		53811325F79FACCC79BB57BE /* AgentThinkingGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */; };
+		73ED73F714BD97E42AD679CB /* IlerlemeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F96D7091A3C7577FDACEA1F /* IlerlemeView.swift */; };
+		75E12D5F0E82164A8F2BD91F /* ScienceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160926E15F1C6C72BED8B379 /* ScienceEngine.swift */; };
+		7B43615900A045FA31E98D9E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 03DF8B87B93D87BB849E13ED /* AppIcon.icon */; };
+		7FB3E9AFB4ABE3499B22603B /* MemoryCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 394F05242FA02C2B34A51A42 /* MemoryCover.swift */; };
+		85486C8CE6B3C0505C77A9A8 /* FeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */; };
+		8C40856532782361B5BF4D39 /* CoachReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECE97950CA296909313971EE /* CoachReport.swift */; };
+		99562198716286A2FC976567 /* MobileAttachSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F5188C4C0F9AF02660E1C4 /* MobileAttachSurface.swift */; };
+		9CB9FDE57048C677F3E55C60 /* MemoryDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F30B6C89E0F152301D1F2D9 /* MemoryDigest.swift */; };
+		A24E00000000000000000040 /* HerculesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000021 /* HerculesApp.swift */; };
+		A24E00000000000000000041 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000022 /* ContentView.swift */; };
+		A24E00000000000000000042 /* Measurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000023 /* Measurement.swift */; };
+		A24E00000000000000000043 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000024 /* UserProfile.swift */; };
+		A24E00000000000000000044 /* CalorieCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000025 /* CalorieCalculator.swift */; };
+		A24E00000000000000000045 /* TrendAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000026 /* TrendAnalysis.swift */; };
+		A24E00000000000000000046 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000027 /* Colors.swift */; };
+		A24E00000000000000000047 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000028 /* Typography.swift */; };
+		A24E00000000000000000048 /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000029 /* Formatters.swift */; };
+		A24E00000000000000000049 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002A /* DashboardView.swift */; };
+		A24E0000000000000000004A /* MeasurementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002B /* MeasurementsView.swift */; };
+		A24E0000000000000000004B /* ChartsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002C /* ChartsView.swift */; };
+		A24E0000000000000000004D /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002E /* ProfileView.swift */; };
+		A24E0000000000000000004E /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002F /* Card.swift */; };
+		A24E0000000000000000004F /* MetricChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000030 /* MetricChart.swift */; };
+		A24E00000000000000000051 /* InputField.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000032 /* InputField.swift */; };
+		A24E00000000000000000052 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000033 /* Assets.xcassets */; };
+		A24E00000000000000000053 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000034 /* Preview Assets.xcassets */; };
+		A24E00000000000000000054 /* Recipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000036 /* Recipe.swift */; };
+		A24E00000000000000000055 /* RecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000037 /* RecipesView.swift */; };
+		A24E00000000000000000056 /* FoodEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000038 /* FoodEntry.swift */; };
+		A24E00000000000000000057 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000039 /* OpenRouterClient.swift */; };
+		A24E00000000000000000058 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003A /* ChatStore.swift */; };
+		A24E00000000000000000059 /* ChatChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003B /* ChatChrome.swift */; };
+		A24E0000000000000000005A /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003C /* AIProvider.swift */; };
+		A24E0000000000000000005B /* CodexAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003D /* CodexAuth.swift */; };
+		A24E0000000000000000005C /* CodexClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003E /* CodexClient.swift */; };
+		A24E0000000000000000005D /* WorkoutSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003F /* WorkoutSession.swift */; };
+		A24E00000000000000000060 /* StepEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000072 /* StepEntry.swift */; };
+		A24E00000000000000000062 /* MonthlyGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000074 /* MonthlyGoal.swift */; };
+		A24E00000000000000000063 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000075 /* CalendarView.swift */; };
+		A24E00000000000000000066 /* UserContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000078 /* UserContextSnapshot.swift */; };
+		A24E00000000000000000067 /* CalorieStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000079 /* CalorieStats.swift */; };
+		A24E00000000000000000068 /* WorkoutLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000007A /* WorkoutLog.swift */; };
+		A24E00000000000000000069 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000007B /* WorkoutView.swift */; };
+		A24E0000000000000000006A /* AgentSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000080 /* AgentSkill.swift */; };
+		A24E0000000000000000006B /* LocalMemoryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000081 /* LocalMemoryProvider.swift */; };
+		A24E0000000000000000006C /* PubMedResearchSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000082 /* PubMedResearchSkill.swift */; };
+		A24E0000000000000000006D /* FoodLookupSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000083 /* FoodLookupSkill.swift */; };
+		A24E0000000000000000006E /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000084 /* MemoryView.swift */; };
+		A24E0000000000000000006F /* ResearchLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000085 /* ResearchLibrary.swift */; };
+		A24E00000000000000000086 /* FoodPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000087 /* FoodPreset.swift */; };
+		A24E00000000000000000088 /* CoachIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000089 /* CoachIntelligence.swift */; };
+		A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000008B /* AgentDataSnapshot.swift */; };
+		A24E00000000000000000094 /* SeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000093 /* SeedData.swift */; };
+		A24E000000000000000000A0 /* HerculesMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000091 /* HerculesMobileApp.swift */; };
+		A24E000000000000000000A1 /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000092 /* MobileRootView.swift */; };
+		A24E000000000000000000A2 /* SeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000093 /* SeedData.swift */; };
+		A24E000000000000000000A3 /* Measurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000023 /* Measurement.swift */; };
+		A24E000000000000000000A4 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000024 /* UserProfile.swift */; };
+		A24E000000000000000000A5 /* Recipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000036 /* Recipe.swift */; };
+		A24E000000000000000000A6 /* FoodEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000038 /* FoodEntry.swift */; };
+		A24E000000000000000000A7 /* FoodPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000087 /* FoodPreset.swift */; };
+		A24E000000000000000000A8 /* WorkoutSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003F /* WorkoutSession.swift */; };
+		A24E000000000000000000A9 /* StepEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000072 /* StepEntry.swift */; };
+		A24E000000000000000000AA /* MonthlyGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000074 /* MonthlyGoal.swift */; };
+		A24E000000000000000000AC /* WorkoutLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000007A /* WorkoutLog.swift */; };
+		A24E000000000000000000AD /* CalorieCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000025 /* CalorieCalculator.swift */; };
+		A24E000000000000000000AE /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000027 /* Colors.swift */; };
+		A24E000000000000000000AF /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000028 /* Typography.swift */; };
+		A24E000000000000000000B0 /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000029 /* Formatters.swift */; };
+		A24E000000000000000000B2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000033 /* Assets.xcassets */; };
+		A24E000000000000000000B3 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A24E000000000000000000B4 /* LaunchScreen.storyboard */; };
+		A24E000000000000000000D4 /* HealthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000070 /* HealthService.swift */; };
+		A24E000000000000000000D5 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000071 /* HealthKit.framework */; };
+		A24E0000000000000000EE03 /* Embeddings in Frameworks */ = {isa = PBXBuildFile; productRef = A24E0000000000000000EE02 /* Embeddings */; };
+		A24E0000000000000000EE06 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = A24E0000000000000000EE05 /* Hub */; };
+		A24E0000000000000000EE10 /* AgentMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE11 /* AgentMemory.swift */; };
+		A24E0000000000000000EE12 /* MemoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE13 /* MemoryManager.swift */; };
+		A24E0000000000000000EE14 /* EmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE15 /* EmbeddingService.swift */; };
+		A24E0000000000000000EE20 /* ProfileSupportingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE21 /* ProfileSupportingViews.swift */; };
+		A24E0000000000000000EE24 /* HealthKitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE25 /* HealthKitCard.swift */; };
+		A24E0000000000000000EE26 /* AIProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE27 /* AIProviderCard.swift */; };
+		A24E0000000000000000EE28 /* CloudSyncCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE29 /* CloudSyncCard.swift */; };
+		A24E0000000000000000EE30 /* BottomCenterChatDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE31 /* BottomCenterChatDock.swift */; };
+		A24E0000000000000000EE32 /* ChatComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE33 /* ChatComponents.swift */; };
+		A24E0000000000000000EE34 /* WorkoutProgramViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE35 /* WorkoutProgramViews.swift */; };
+		A24E0000000000000000EE36 /* WorkoutLogEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE37 /* WorkoutLogEditor.swift */; };
+		A24E0000000000000000EE38 /* RecipeCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE39 /* RecipeCards.swift */; };
+		A24E0000000000000000EE3A /* RecipeDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE3B /* RecipeDetailSheet.swift */; };
+		A24E0000000000000000EE3C /* RecipeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE3D /* RecipeEditor.swift */; };
+		A24E0000000000000000EE40 /* MeasurementsSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE41 /* MeasurementsSupport.swift */; };
+		A24E0000000000000000EE42 /* MeasurementEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE43 /* MeasurementEditor.swift */; };
+		A24E0000000000000000EE44 /* CalendarDayViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE45 /* CalendarDayViews.swift */; };
+		A24E0000000000000000EE46 /* CalendarSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE47 /* CalendarSheets.swift */; };
+		A24E0000000000000000EE48 /* DashboardComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE49 /* DashboardComponents.swift */; };
+		A24E0000000000000000EE4A /* ChartsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE4B /* ChartsComponents.swift */; };
+		A24E0000000000000000EE4C /* ContentSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE4D /* ContentSidebar.swift */; };
+		A24E0000000000000000EE4E /* ContentPromptTips.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE4F /* ContentPromptTips.swift */; };
+		A24E0000000000000000EE50 /* AgentSkills.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE51 /* AgentSkills.swift */; };
+		A24E0000000000000000EE52 /* NutritionDataProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE53 /* NutritionDataProvider.swift */; };
+		A24E0000000000000000EE54 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE56 /* AIModels.swift */; };
+		A24E0000000000000000EE55 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE56 /* AIModels.swift */; };
+		A24E0000000000000000EE5A /* ChatStoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5B /* ChatStoreModels.swift */; };
+		A24E0000000000000000EE5C /* UserContextMention.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5D /* UserContextMention.swift */; };
+		A24E0000000000000000EE5E /* MobileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5F /* MobileComponents.swift */; };
+		A24E0000000000000000EE60 /* PersistenceSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE62 /* PersistenceSupport.swift */; };
+		A24E0000000000000000EE61 /* PersistenceSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE62 /* PersistenceSupport.swift */; };
+		A9560AE426EE0116CD6FC068 /* MetricComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3C440E84561367BB0D5EEC /* MetricComponents.swift */; };
+		B001A0000000000000000001 /* HerculesMemoryArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A0000000000000000002 /* HerculesMemoryArchive.swift */; };
+		B001A0000000000000000003 /* HerculesMemoryArchiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A0000000000000000004 /* HerculesMemoryArchiveTests.swift */; };
+		C0A110000000000000000001 /* HerculesIslandBridge in Frameworks */ = {isa = PBXBuildFile; productRef = C0A110000000000000000003 /* HerculesIslandBridge */; };
+		C114BD597A36E197304F2F89 /* ProgressPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */; };
+		C54E03018F515D2A98FAEA6A /* LucideKit in Frameworks */ = {isa = PBXBuildFile; productRef = 03734D439E9978A22102DDF3 /* LucideKit */; };
+		C6F9E94FA26608AD2A38CF1E /* MetricComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3C440E84561367BB0D5EEC /* MetricComponents.swift */; };
+		DF2D6EA1D9DF6D242AF0A9CE /* RecipeExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80620641D342A5C9D39D13D3 /* RecipeExtractor.swift */; };
+		E4830F58DFD5D75A7E83AE6E /* LucideKit in Frameworks */ = {isa = PBXBuildFile; productRef = F01EAB4664D2EBD5DD701F60 /* LucideKit */; };
+		E9BF3D22FC56821C2AEDFB2C /* AgentThinkingGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */; };
+		F10000000000000000000001 /* HerculesCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000004 /* HerculesCoreTests.swift */; };
+		F20000000000000000000001 /* RemoteAITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* RemoteAITransport.swift */; };
+		F20000000000000000000002 /* RemoteAITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* RemoteAITransport.swift */; };
+		F20000000000000000000003 /* MobileAIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* MobileAIChatView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F10000000000000000000014 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A24E00000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A24E0000000000000000000B;
+			remoteInfo = Hercules;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		03DF8B87B93D87BB849E13ED /* AppIcon.icon */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		160926E15F1C6C72BED8B379 /* ScienceEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceEngine.swift; sourceTree = "<group>"; };
+		1B52CD3B50D07842A2D8B0D3 /* CoachOrb.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachOrb.swift; sourceTree = "<group>"; };
+		2F30B6C89E0F152301D1F2D9 /* MemoryDigest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryDigest.swift; sourceTree = "<group>"; };
+		35726FCF0FBDC3D66BE44300 /* CoachView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
+		394F05242FA02C2B34A51A42 /* MemoryCover.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryCover.swift; sourceTree = "<group>"; };
+		3F3C440E84561367BB0D5EEC /* MetricComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MetricComponents.swift; sourceTree = "<group>"; };
+		47BC032C788C2D2EB3E167A1 /* InstagramImportView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InstagramImportView.swift; sourceTree = "<group>"; };
+		4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnalysisView.swift; sourceTree = "<group>"; };
+		69080015CD65428F38FBE30D /* CoachEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachEngine.swift; sourceTree = "<group>"; };
+		6F96D7091A3C7577FDACEA1F /* IlerlemeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IlerlemeView.swift; sourceTree = "<group>"; };
+		80620641D342A5C9D39D13D3 /* RecipeExtractor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecipeExtractor.swift; sourceTree = "<group>"; };
+		9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FeedStore.swift; sourceTree = "<group>"; };
+		A24E00000000000000000020 /* Hercules.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hercules.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A24E00000000000000000021 /* HerculesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesApp.swift; sourceTree = "<group>"; };
+		A24E00000000000000000022 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A24E00000000000000000023 /* Measurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Measurement.swift; sourceTree = "<group>"; };
+		A24E00000000000000000024 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
+		A24E00000000000000000025 /* CalorieCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalorieCalculator.swift; sourceTree = "<group>"; };
+		A24E00000000000000000026 /* TrendAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendAnalysis.swift; sourceTree = "<group>"; };
+		A24E00000000000000000027 /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
+		A24E00000000000000000028 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
+		A24E00000000000000000029 /* Formatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatters.swift; sourceTree = "<group>"; };
+		A24E0000000000000000002A /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000002B /* MeasurementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementsView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000002C /* ChartsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartsView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000002E /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		A24E0000000000000000002F /* Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Card.swift; sourceTree = "<group>"; };
+		A24E00000000000000000030 /* MetricChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricChart.swift; sourceTree = "<group>"; };
+		A24E00000000000000000032 /* InputField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputField.swift; sourceTree = "<group>"; };
+		A24E00000000000000000033 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A24E00000000000000000034 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		A24E00000000000000000035 /* Hercules.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Hercules.entitlements; sourceTree = "<group>"; };
+		A24E00000000000000000036 /* Recipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recipe.swift; sourceTree = "<group>"; };
+		A24E00000000000000000037 /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
+		A24E00000000000000000038 /* FoodEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodEntry.swift; sourceTree = "<group>"; };
+		A24E00000000000000000039 /* OpenRouterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterClient.swift; sourceTree = "<group>"; };
+		A24E0000000000000000003A /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
+		A24E0000000000000000003B /* ChatChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatChrome.swift; sourceTree = "<group>"; };
+		A24E0000000000000000003C /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
+		A24E0000000000000000003D /* CodexAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAuth.swift; sourceTree = "<group>"; };
+		A24E0000000000000000003E /* CodexClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexClient.swift; sourceTree = "<group>"; };
+		A24E0000000000000000003F /* WorkoutSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSession.swift; sourceTree = "<group>"; };
+		A24E00000000000000000070 /* HealthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthService.swift; sourceTree = "<group>"; };
+		A24E00000000000000000071 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
+		A24E00000000000000000072 /* StepEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepEntry.swift; sourceTree = "<group>"; };
+		A24E00000000000000000074 /* MonthlyGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthlyGoal.swift; sourceTree = "<group>"; };
+		A24E00000000000000000075 /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
+		A24E00000000000000000078 /* UserContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextSnapshot.swift; sourceTree = "<group>"; };
+		A24E00000000000000000079 /* CalorieStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalorieStats.swift; sourceTree = "<group>"; };
+		A24E0000000000000000007A /* WorkoutLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLog.swift; sourceTree = "<group>"; };
+		A24E0000000000000000007B /* WorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutView.swift; sourceTree = "<group>"; };
+		A24E00000000000000000080 /* AgentSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSkill.swift; sourceTree = "<group>"; };
+		A24E00000000000000000081 /* LocalMemoryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMemoryProvider.swift; sourceTree = "<group>"; };
+		A24E00000000000000000082 /* PubMedResearchSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubMedResearchSkill.swift; sourceTree = "<group>"; };
+		A24E00000000000000000083 /* FoodLookupSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLookupSkill.swift; sourceTree = "<group>"; };
+		A24E00000000000000000084 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
+		A24E00000000000000000085 /* ResearchLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchLibrary.swift; sourceTree = "<group>"; };
+		A24E00000000000000000087 /* FoodPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodPreset.swift; sourceTree = "<group>"; };
+		A24E00000000000000000089 /* CoachIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachIntelligence.swift; sourceTree = "<group>"; };
+		A24E0000000000000000008B /* AgentDataSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDataSnapshot.swift; sourceTree = "<group>"; };
+		A24E00000000000000000090 /* HerculesMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HerculesMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A24E00000000000000000091 /* HerculesMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesMobileApp.swift; sourceTree = "<group>"; };
+		A24E00000000000000000092 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
+		A24E00000000000000000093 /* SeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedData.swift; sourceTree = "<group>"; };
+		A24E000000000000000000B4 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A24E0000000000000000EE11 /* AgentMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMemory.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE13 /* MemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryManager.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE15 /* EmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingService.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE21 /* ProfileSupportingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSupportingViews.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE25 /* HealthKitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitCard.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE27 /* AIProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderCard.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE29 /* CloudSyncCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncCard.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE31 /* BottomCenterChatDock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomCenterChatDock.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE33 /* ChatComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatComponents.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE35 /* WorkoutProgramViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgramViews.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE37 /* WorkoutLogEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLogEditor.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE39 /* RecipeCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeCards.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE3B /* RecipeDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailSheet.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE3D /* RecipeEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeEditor.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE41 /* MeasurementsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementsSupport.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE43 /* MeasurementEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementEditor.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE45 /* CalendarDayViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarDayViews.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE47 /* CalendarSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSheets.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE49 /* DashboardComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardComponents.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE4B /* ChartsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartsComponents.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE4D /* ContentSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentSidebar.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE4F /* ContentPromptTips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPromptTips.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE51 /* AgentSkills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSkills.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE53 /* NutritionDataProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionDataProvider.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE56 /* AIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModels.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE5B /* ChatStoreModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStoreModels.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE5D /* UserContextMention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextMention.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE5F /* MobileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileComponents.swift; sourceTree = "<group>"; };
+		A24E0000000000000000EE62 /* PersistenceSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceSupport.swift; sourceTree = "<group>"; };
+		AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentThinkingGlyph.swift; sourceTree = "<group>"; };
+		B001A0000000000000000002 /* HerculesMemoryArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesMemoryArchive.swift; sourceTree = "<group>"; };
+		B001A0000000000000000004 /* HerculesMemoryArchiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesMemoryArchiveTests.swift; sourceTree = "<group>"; };
+		B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatPageView.swift; sourceTree = "<group>"; };
+		BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressPhoto.swift; sourceTree = "<group>"; };
+		D4F5188C4C0F9AF02660E1C4 /* MobileAttachSurface.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAttachSurface.swift; sourceTree = "<group>"; };
+		D5E389ED335EE23DC04F102A /* ProgressPhotosView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressPhotosView.swift; sourceTree = "<group>"; };
+		EAA8E80E5F28F4F36E9FB459 /* InstagramPostScraper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InstagramPostScraper.swift; sourceTree = "<group>"; };
+		ECE97950CA296909313971EE /* CoachReport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachReport.swift; sourceTree = "<group>"; };
+		EEF1DCE7BE1D7A3D6E8ED091 /* SheetChrome.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SheetChrome.swift; sourceTree = "<group>"; };
+		F10000000000000000000003 /* HerculesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HerculesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F10000000000000000000004 /* HerculesCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesCoreTests.swift; sourceTree = "<group>"; };
+		F10000000000000000000020 /* HerculesMobile-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "HerculesMobile-Info.plist"; sourceTree = "<group>"; };
+		F20000000000000000000004 /* RemoteAITransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAITransport.swift; sourceTree = "<group>"; };
+		F20000000000000000000005 /* MobileAIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAIChatView.swift; sourceTree = "<group>"; };
+		FF430471CD13582E9A46A802 /* InstagramSavedReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InstagramSavedReader.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A24E0000000000000000000D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0A110000000000000000001 /* HerculesIslandBridge in Frameworks */,
+				A24E0000000000000000EE03 /* Embeddings in Frameworks */,
+				A24E0000000000000000EE06 /* Hub in Frameworks */,
+				E4830F58DFD5D75A7E83AE6E /* LucideKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A24E000000000000000000C2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A24E000000000000000000D5 /* HealthKit.framework in Frameworks */,
+				C54E03018F515D2A98FAEA6A /* LucideKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F10000000000000000000011 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A24E00000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000004 /* Hercules */,
+				F10000000000000000000005 /* HerculesTests */,
+				A24E00000000000000000003 /* Products */,
+				A24E000000000000000000F2 /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		A24E00000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000020 /* Hercules.app */,
+				A24E00000000000000000090 /* HerculesMobile.app */,
+				F10000000000000000000003 /* HerculesTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A24E00000000000000000004 /* Hercules */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000021 /* HerculesApp.swift */,
+				A24E00000000000000000091 /* HerculesMobileApp.swift */,
+				A24E00000000000000000022 /* ContentView.swift */,
+				A24E00000000000000000092 /* MobileRootView.swift */,
+				F20000000000000000000005 /* MobileAIChatView.swift */,
+				A24E0000000000000000EE5F /* MobileComponents.swift */,
+				A24E00000000000000000093 /* SeedData.swift */,
+				A24E000000000000000000B4 /* LaunchScreen.storyboard */,
+				A24E00000000000000000005 /* Models */,
+				A24E00000000000000000006 /* Calculations */,
+				A24E000000000000000000F1 /* Networking */,
+				A24E00000000000000000007 /* Theme */,
+				A24E00000000000000000008 /* Views */,
+				A24E00000000000000000033 /* Assets.xcassets */,
+				A24E00000000000000000035 /* Hercules.entitlements */,
+				F10000000000000000000020 /* HerculesMobile-Info.plist */,
+				A24E0000000000000000000A /* Preview Content */,
+				D4F5188C4C0F9AF02660E1C4 /* MobileAttachSurface.swift */,
+				03DF8B87B93D87BB849E13ED /* AppIcon.icon */,
+			);
+			path = Hercules;
+			sourceTree = "<group>";
+		};
+		A24E00000000000000000005 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000023 /* Measurement.swift */,
+				A24E00000000000000000024 /* UserProfile.swift */,
+				A24E00000000000000000036 /* Recipe.swift */,
+				A24E00000000000000000038 /* FoodEntry.swift */,
+				A24E00000000000000000087 /* FoodPreset.swift */,
+				A24E0000000000000000003F /* WorkoutSession.swift */,
+				A24E00000000000000000072 /* StepEntry.swift */,
+				A24E00000000000000000074 /* MonthlyGoal.swift */,
+				A24E0000000000000000007A /* WorkoutLog.swift */,
+				ECE97950CA296909313971EE /* CoachReport.swift */,
+				BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A24E00000000000000000006 /* Calculations */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000025 /* CalorieCalculator.swift */,
+				A24E00000000000000000026 /* TrendAnalysis.swift */,
+				A24E0000000000000000003A /* ChatStore.swift */,
+				A24E0000000000000000EE5B /* ChatStoreModels.swift */,
+				A24E00000000000000000078 /* UserContextSnapshot.swift */,
+				A24E0000000000000000EE5D /* UserContextMention.swift */,
+				A24E00000000000000000079 /* CalorieStats.swift */,
+				A24E0000000000000000008B /* AgentDataSnapshot.swift */,
+				A24E00000000000000000080 /* AgentSkill.swift */,
+				A24E0000000000000000EE51 /* AgentSkills.swift */,
+				A24E0000000000000000EE53 /* NutritionDataProvider.swift */,
+				A24E00000000000000000081 /* LocalMemoryProvider.swift */,
+				B001A0000000000000000002 /* HerculesMemoryArchive.swift */,
+				A24E0000000000000000EE11 /* AgentMemory.swift */,
+				A24E0000000000000000EE13 /* MemoryManager.swift */,
+				A24E0000000000000000EE62 /* PersistenceSupport.swift */,
+				A24E0000000000000000EE15 /* EmbeddingService.swift */,
+				A24E00000000000000000082 /* PubMedResearchSkill.swift */,
+				A24E00000000000000000083 /* FoodLookupSkill.swift */,
+				A24E00000000000000000085 /* ResearchLibrary.swift */,
+				A24E00000000000000000089 /* CoachIntelligence.swift */,
+				69080015CD65428F38FBE30D /* CoachEngine.swift */,
+				160926E15F1C6C72BED8B379 /* ScienceEngine.swift */,
+				9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */,
+				394F05242FA02C2B34A51A42 /* MemoryCover.swift */,
+				2F30B6C89E0F152301D1F2D9 /* MemoryDigest.swift */,
+			);
+			path = Calculations;
+			sourceTree = "<group>";
+		};
+		A24E00000000000000000007 /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000027 /* Colors.swift */,
+				A24E00000000000000000028 /* Typography.swift */,
+				A24E00000000000000000029 /* Formatters.swift */,
+				AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */,
+				3F3C440E84561367BB0D5EEC /* MetricComponents.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		A24E00000000000000000008 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A24E0000000000000000002A /* DashboardView.swift */,
+				A24E0000000000000000002B /* MeasurementsView.swift */,
+				A24E0000000000000000002C /* ChartsView.swift */,
+				A24E00000000000000000075 /* CalendarView.swift */,
+				A24E0000000000000000007B /* WorkoutView.swift */,
+				A24E00000000000000000037 /* RecipesView.swift */,
+				A24E0000000000000000EE35 /* WorkoutProgramViews.swift */,
+				A24E0000000000000000EE37 /* WorkoutLogEditor.swift */,
+				A24E0000000000000000EE39 /* RecipeCards.swift */,
+				A24E0000000000000000EE3B /* RecipeDetailSheet.swift */,
+				A24E0000000000000000EE3D /* RecipeEditor.swift */,
+				A24E00000000000000000084 /* MemoryView.swift */,
+				A24E0000000000000000002E /* ProfileView.swift */,
+				A24E0000000000000000EE41 /* MeasurementsSupport.swift */,
+				A24E0000000000000000EE43 /* MeasurementEditor.swift */,
+				A24E0000000000000000EE45 /* CalendarDayViews.swift */,
+				A24E0000000000000000EE47 /* CalendarSheets.swift */,
+				A24E0000000000000000EE49 /* DashboardComponents.swift */,
+				A24E0000000000000000EE4B /* ChartsComponents.swift */,
+				A24E0000000000000000EE4D /* ContentSidebar.swift */,
+				A24E0000000000000000EE4F /* ContentPromptTips.swift */,
+				A24E0000000000000000EE21 /* ProfileSupportingViews.swift */,
+				A24E0000000000000000EE25 /* HealthKitCard.swift */,
+				A24E0000000000000000EE27 /* AIProviderCard.swift */,
+				A24E0000000000000000EE29 /* CloudSyncCard.swift */,
+				A24E00000000000000000009 /* Components */,
+				35726FCF0FBDC3D66BE44300 /* CoachView.swift */,
+				B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */,
+				4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */,
+				6F96D7091A3C7577FDACEA1F /* IlerlemeView.swift */,
+				D5E389ED335EE23DC04F102A /* ProgressPhotosView.swift */,
+				47BC032C788C2D2EB3E167A1 /* InstagramImportView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A24E00000000000000000009 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				A24E0000000000000000002F /* Card.swift */,
+				A24E00000000000000000030 /* MetricChart.swift */,
+				A24E00000000000000000032 /* InputField.swift */,
+				A24E0000000000000000003B /* ChatChrome.swift */,
+				A24E0000000000000000EE31 /* BottomCenterChatDock.swift */,
+				A24E0000000000000000EE33 /* ChatComponents.swift */,
+				EEF1DCE7BE1D7A3D6E8ED091 /* SheetChrome.swift */,
+				1B52CD3B50D07842A2D8B0D3 /* CoachOrb.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		A24E0000000000000000000A /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000034 /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		A24E000000000000000000F1 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000039 /* OpenRouterClient.swift */,
+				A24E0000000000000000EE56 /* AIModels.swift */,
+				A24E0000000000000000003C /* AIProvider.swift */,
+				A24E0000000000000000003D /* CodexAuth.swift */,
+				A24E0000000000000000003E /* CodexClient.swift */,
+				F20000000000000000000004 /* RemoteAITransport.swift */,
+				A24E00000000000000000070 /* HealthService.swift */,
+				EAA8E80E5F28F4F36E9FB459 /* InstagramPostScraper.swift */,
+				80620641D342A5C9D39D13D3 /* RecipeExtractor.swift */,
+				FF430471CD13582E9A46A802 /* InstagramSavedReader.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		A24E000000000000000000F2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A24E00000000000000000071 /* HealthKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		F10000000000000000000005 /* HerculesTests */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000004 /* HerculesCoreTests.swift */,
+				B001A0000000000000000004 /* HerculesMemoryArchiveTests.swift */,
+			);
+			path = HerculesTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A24E0000000000000000000B /* Hercules */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A24E00000000000000000010 /* Build configuration list for PBXNativeTarget "Hercules" */;
+			buildPhases = (
+				A24E0000000000000000000C /* Sources */,
+				A24E0000000000000000000D /* Frameworks */,
+				A24E0000000000000000000E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Hercules;
+			packageProductDependencies = (
+				C0A110000000000000000003 /* HerculesIslandBridge */,
+				A24E0000000000000000EE02 /* Embeddings */,
+				A24E0000000000000000EE05 /* Hub */,
+				F01EAB4664D2EBD5DD701F60 /* LucideKit */,
+			);
+			productName = Hercules;
+			productReference = A24E00000000000000000020 /* Hercules.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A24E000000000000000000C0 /* HerculesMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A24E000000000000000000C4 /* Build configuration list for PBXNativeTarget "HerculesMobile" */;
+			buildPhases = (
+				A24E000000000000000000C1 /* Sources */,
+				A24E000000000000000000C2 /* Frameworks */,
+				A24E000000000000000000C3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HerculesMobile;
+			packageProductDependencies = (
+				03734D439E9978A22102DDF3 /* LucideKit */,
+			);
+			productName = HerculesMobile;
+			productReference = A24E00000000000000000090 /* HerculesMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F10000000000000000000010 /* HerculesTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000000000000000000016 /* Build configuration list for PBXNativeTarget "HerculesTests" */;
+			buildPhases = (
+				F10000000000000000000012 /* Sources */,
+				F10000000000000000000011 /* Frameworks */,
+				F10000000000000000000013 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F10000000000000000000015 /* PBXTargetDependency */,
+			);
+			name = HerculesTests;
+			productName = HerculesTests;
+			productReference = F10000000000000000000003 /* HerculesTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A24E00000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 2650;
+				TargetAttributes = {
+					A24E0000000000000000000B = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					A24E000000000000000000C0 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					F10000000000000000000010 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = A24E0000000000000000000B;
+					};
+				};
+			};
+			buildConfigurationList = A24E0000000000000000000F /* Build configuration list for PBXProject "Hercules" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				tr,
+			);
+			mainGroup = A24E00000000000000000002;
+			packageReferences = (
+				C0A110000000000000000002 /* XCLocalSwiftPackageReference "HerculesIslandBridge" */,
+				A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */,
+				A24E0000000000000000EE04 /* XCRemoteSwiftPackageReference "swift-transformers" */,
+				F66D736132D373A0F4704B4D /* XCLocalSwiftPackageReference "LucideKit" */,
+			);
+			productRefGroup = A24E00000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A24E0000000000000000000B /* Hercules */,
+				A24E000000000000000000C0 /* HerculesMobile */,
+				F10000000000000000000010 /* HerculesTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A24E0000000000000000000E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A24E00000000000000000053 /* Preview Assets.xcassets in Resources */,
+				A24E00000000000000000052 /* Assets.xcassets in Resources */,
+				7B43615900A045FA31E98D9E /* AppIcon.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A24E000000000000000000C3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A24E000000000000000000B3 /* LaunchScreen.storyboard in Resources */,
+				A24E000000000000000000B2 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F10000000000000000000013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A24E0000000000000000000C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A24E00000000000000000040 /* HerculesApp.swift in Sources */,
+				A24E00000000000000000041 /* ContentView.swift in Sources */,
+				A24E00000000000000000042 /* Measurement.swift in Sources */,
+				A24E00000000000000000043 /* UserProfile.swift in Sources */,
+				A24E00000000000000000044 /* CalorieCalculator.swift in Sources */,
+				A24E00000000000000000045 /* TrendAnalysis.swift in Sources */,
+				A24E00000000000000000046 /* Colors.swift in Sources */,
+				A24E00000000000000000047 /* Typography.swift in Sources */,
+				A24E00000000000000000048 /* Formatters.swift in Sources */,
+				A24E00000000000000000049 /* DashboardView.swift in Sources */,
+				A24E0000000000000000004A /* MeasurementsView.swift in Sources */,
+				A24E0000000000000000004B /* ChartsView.swift in Sources */,
+				A24E0000000000000000004D /* ProfileView.swift in Sources */,
+				A24E0000000000000000EE40 /* MeasurementsSupport.swift in Sources */,
+				A24E0000000000000000EE42 /* MeasurementEditor.swift in Sources */,
+				A24E0000000000000000EE44 /* CalendarDayViews.swift in Sources */,
+				A24E0000000000000000EE46 /* CalendarSheets.swift in Sources */,
+				A24E0000000000000000EE48 /* DashboardComponents.swift in Sources */,
+				A24E0000000000000000EE4A /* ChartsComponents.swift in Sources */,
+				A24E0000000000000000EE4C /* ContentSidebar.swift in Sources */,
+				A24E0000000000000000EE4E /* ContentPromptTips.swift in Sources */,
+				A24E0000000000000000EE20 /* ProfileSupportingViews.swift in Sources */,
+				A24E0000000000000000EE24 /* HealthKitCard.swift in Sources */,
+				A24E0000000000000000EE26 /* AIProviderCard.swift in Sources */,
+				A24E0000000000000000EE28 /* CloudSyncCard.swift in Sources */,
+				A24E0000000000000000004E /* Card.swift in Sources */,
+				A24E0000000000000000004F /* MetricChart.swift in Sources */,
+				A24E00000000000000000051 /* InputField.swift in Sources */,
+				A24E00000000000000000054 /* Recipe.swift in Sources */,
+				A24E00000000000000000055 /* RecipesView.swift in Sources */,
+				A24E00000000000000000056 /* FoodEntry.swift in Sources */,
+				A24E00000000000000000086 /* FoodPreset.swift in Sources */,
+				A24E00000000000000000057 /* OpenRouterClient.swift in Sources */,
+				F20000000000000000000001 /* RemoteAITransport.swift in Sources */,
+				A24E0000000000000000EE54 /* AIModels.swift in Sources */,
+				A24E00000000000000000058 /* ChatStore.swift in Sources */,
+				A24E0000000000000000EE5A /* ChatStoreModels.swift in Sources */,
+				A24E0000000000000000EE5C /* UserContextMention.swift in Sources */,
+				A24E00000000000000000059 /* ChatChrome.swift in Sources */,
+				A24E0000000000000000EE30 /* BottomCenterChatDock.swift in Sources */,
+				A24E0000000000000000EE32 /* ChatComponents.swift in Sources */,
+				A24E0000000000000000EE34 /* WorkoutProgramViews.swift in Sources */,
+				A24E0000000000000000EE36 /* WorkoutLogEditor.swift in Sources */,
+				A24E0000000000000000EE38 /* RecipeCards.swift in Sources */,
+				A24E0000000000000000EE3A /* RecipeDetailSheet.swift in Sources */,
+				A24E0000000000000000EE3C /* RecipeEditor.swift in Sources */,
+				A24E0000000000000000005A /* AIProvider.swift in Sources */,
+				A24E0000000000000000005B /* CodexAuth.swift in Sources */,
+				A24E0000000000000000005C /* CodexClient.swift in Sources */,
+				A24E0000000000000000005D /* WorkoutSession.swift in Sources */,
+				A24E00000000000000000060 /* StepEntry.swift in Sources */,
+				A24E00000000000000000062 /* MonthlyGoal.swift in Sources */,
+				A24E00000000000000000063 /* CalendarView.swift in Sources */,
+				A24E00000000000000000066 /* UserContextSnapshot.swift in Sources */,
+				A24E00000000000000000067 /* CalorieStats.swift in Sources */,
+				A24E00000000000000000068 /* WorkoutLog.swift in Sources */,
+				A24E00000000000000000069 /* WorkoutView.swift in Sources */,
+				A24E0000000000000000006A /* AgentSkill.swift in Sources */,
+				A24E0000000000000000EE50 /* AgentSkills.swift in Sources */,
+				A24E0000000000000000EE52 /* NutritionDataProvider.swift in Sources */,
+				A24E0000000000000000006B /* LocalMemoryProvider.swift in Sources */,
+				A24E0000000000000000EE10 /* AgentMemory.swift in Sources */,
+				A24E0000000000000000EE12 /* MemoryManager.swift in Sources */,
+				A24E0000000000000000EE60 /* PersistenceSupport.swift in Sources */,
+				A24E0000000000000000EE14 /* EmbeddingService.swift in Sources */,
+				A24E0000000000000000006C /* PubMedResearchSkill.swift in Sources */,
+				A24E0000000000000000006D /* FoodLookupSkill.swift in Sources */,
+				A24E0000000000000000006E /* MemoryView.swift in Sources */,
+				A24E0000000000000000006F /* ResearchLibrary.swift in Sources */,
+				A24E00000000000000000088 /* CoachIntelligence.swift in Sources */,
+				A24E0000000000000000008A /* AgentDataSnapshot.swift in Sources */,
+				A24E00000000000000000094 /* SeedData.swift in Sources */,
+				8C40856532782361B5BF4D39 /* CoachReport.swift in Sources */,
+				14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */,
+				267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */,
+				47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */,
+				75E12D5F0E82164A8F2BD91F /* ScienceEngine.swift in Sources */,
+				039B8A4EAFE2BAC1BF6129C2 /* AnalysisView.swift in Sources */,
+				85486C8CE6B3C0505C77A9A8 /* FeedStore.swift in Sources */,
+				73ED73F714BD97E42AD679CB /* IlerlemeView.swift in Sources */,
+				122548964C67C3708F322AB5 /* ProgressPhoto.swift in Sources */,
+				14F0E98865BA017B52C041DB /* ProgressPhotosView.swift in Sources */,
+				E9BF3D22FC56821C2AEDFB2C /* AgentThinkingGlyph.swift in Sources */,
+				A9560AE426EE0116CD6FC068 /* MetricComponents.swift in Sources */,
+				3B829260EF51EF2249000B6A /* InstagramPostScraper.swift in Sources */,
+				DF2D6EA1D9DF6D242AF0A9CE /* RecipeExtractor.swift in Sources */,
+				21ACCC5E562012AD95D5208D /* InstagramSavedReader.swift in Sources */,
+				153AD86991809C6942FAD775 /* InstagramImportView.swift in Sources */,
+				0C7EE31B46E6619D6DF30A70 /* SheetChrome.swift in Sources */,
+				7FB3E9AFB4ABE3499B22603B /* MemoryCover.swift in Sources */,
+				9CB9FDE57048C677F3E55C60 /* MemoryDigest.swift in Sources */,
+				B001A0000000000000000001 /* HerculesMemoryArchive.swift in Sources */,
+				3F064015E934098D47C4B292 /* CoachOrb.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A24E000000000000000000C1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A24E000000000000000000A0 /* HerculesMobileApp.swift in Sources */,
+				A24E000000000000000000A1 /* MobileRootView.swift in Sources */,
+				F20000000000000000000003 /* MobileAIChatView.swift in Sources */,
+				A24E0000000000000000EE5E /* MobileComponents.swift in Sources */,
+				A24E000000000000000000A2 /* SeedData.swift in Sources */,
+				A24E000000000000000000A3 /* Measurement.swift in Sources */,
+				A24E000000000000000000A4 /* UserProfile.swift in Sources */,
+				A24E000000000000000000A5 /* Recipe.swift in Sources */,
+				A24E000000000000000000A6 /* FoodEntry.swift in Sources */,
+				A24E000000000000000000A7 /* FoodPreset.swift in Sources */,
+				A24E000000000000000000A8 /* WorkoutSession.swift in Sources */,
+				A24E000000000000000000A9 /* StepEntry.swift in Sources */,
+				A24E000000000000000000AA /* MonthlyGoal.swift in Sources */,
+				A24E000000000000000000AC /* WorkoutLog.swift in Sources */,
+				A24E000000000000000000AD /* CalorieCalculator.swift in Sources */,
+				A24E000000000000000000AE /* Colors.swift in Sources */,
+				A24E000000000000000000AF /* Typography.swift in Sources */,
+				A24E000000000000000000B0 /* Formatters.swift in Sources */,
+				F20000000000000000000002 /* RemoteAITransport.swift in Sources */,
+				A24E0000000000000000EE55 /* AIModels.swift in Sources */,
+				A24E0000000000000000EE61 /* PersistenceSupport.swift in Sources */,
+				A24E000000000000000000D4 /* HealthService.swift in Sources */,
+				4DAB83858007EDAADF3847E0 /* FeedStore.swift in Sources */,
+				C114BD597A36E197304F2F89 /* ProgressPhoto.swift in Sources */,
+				53811325F79FACCC79BB57BE /* AgentThinkingGlyph.swift in Sources */,
+				99562198716286A2FC976567 /* MobileAttachSurface.swift in Sources */,
+				C6F9E94FA26608AD2A38CF1E /* MetricComponents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F10000000000000000000012 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F10000000000000000000001 /* HerculesCoreTests.swift in Sources */,
+				B001A0000000000000000003 /* HerculesMemoryArchiveTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F10000000000000000000015 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A24E0000000000000000000B /* Hercules */;
+			targetProxy = F10000000000000000000014 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A24E00000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = ACY2F2P77T;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A24E00000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = ACY2F2P77T;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A24E00000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Hercules/Hercules.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Hercules/Preview Content\"";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				ICLOUD_CONTAINER_ENVIRONMENT = Development;
+				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samorai.hercules;
+				PRODUCT_NAME = Hercules;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A24E00000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Hercules/Hercules.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Hercules/Preview Content\"";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				ICLOUD_CONTAINER_ENVIRONMENT = Production;
+				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samorai.hercules;
+				PRODUCT_NAME = Hercules;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A24E000000000000000000C5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Hercules/HerculesMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Hercules/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				ICLOUD_CONTAINER_ENVIRONMENT = Development;
+				INFOPLIST_FILE = "Hercules/HerculesMobile-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemek ve ürünlerin fotoğrafını çekip Koç'a göndererek kalori/makro hesaplatman için kamera kullanılır.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hercules günlük adım sayını ve yürüme mesafeni okuyup aktivite özetini günceller.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Sohbete fotoğraf eklerken son çekimlerini doğrudan yazı alanının içinde gösterebilmek için fotoğraf kütüphanen okunur.";
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samorai.hercules.mobile;
+				PRODUCT_NAME = HerculesMobile;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A24E000000000000000000C6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Hercules/HerculesMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Hercules/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				ICLOUD_CONTAINER_ENVIRONMENT = Production;
+				INFOPLIST_FILE = "Hercules/HerculesMobile-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemek ve ürünlerin fotoğrafını çekip Koç'a göndererek kalori/makro hesaplatman için kamera kullanılır.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hercules günlük adım sayını ve yürüme mesafeni okuyup aktivite özetini günceller.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Sohbete fotoğraf eklerken son çekimlerini doğrudan yazı alanının içinde gösterebilmek için fotoğraf kütüphanen okunur.";
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samorai.hercules.mobile;
+				PRODUCT_NAME = HerculesMobile;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		F10000000000000000000017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ACY2F2P77T;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samorai.hercules.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hercules.app/Contents/MacOS/Hercules";
+			};
+			name = Debug;
+		};
+		F10000000000000000000018 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ACY2F2P77T;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samorai.hercules.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hercules.app/Contents/MacOS/Hercules";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A24E0000000000000000000F /* Build configuration list for PBXProject "Hercules" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A24E00000000000000000011 /* Debug */,
+				A24E00000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A24E00000000000000000010 /* Build configuration list for PBXNativeTarget "Hercules" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A24E00000000000000000013 /* Debug */,
+				A24E00000000000000000014 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A24E000000000000000000C4 /* Build configuration list for PBXNativeTarget "HerculesMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A24E000000000000000000C5 /* Debug */,
+				A24E000000000000000000C6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000000000000000000016 /* Build configuration list for PBXNativeTarget "HerculesTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000000000000000000017 /* Debug */,
+				F10000000000000000000018 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C0A110000000000000000002 /* XCLocalSwiftPackageReference "HerculesIslandBridge" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = HerculesIslandBridge;
+		};
+		F66D736132D373A0F4704B4D /* XCLocalSwiftPackageReference "LucideKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LucideKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jkrukowski/swift-embeddings.git";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.0.28;
+			};
+		};
+		A24E0000000000000000EE04 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.3.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		03734D439E9978A22102DDF3 /* LucideKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66D736132D373A0F4704B4D /* XCLocalSwiftPackageReference "LucideKit" */;
+			productName = LucideKit;
+		};
+		A24E0000000000000000EE02 /* Embeddings */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */;
+			productName = Embeddings;
+		};
+		A24E0000000000000000EE05 /* Hub */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A24E0000000000000000EE04 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Hub;
+		};
+		C0A110000000000000000003 /* HerculesIslandBridge */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0A110000000000000000002 /* XCLocalSwiftPackageReference "HerculesIslandBridge" */;
+			productName = HerculesIslandBridge;
+		};
+		F01EAB4664D2EBD5DD701F60 /* LucideKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66D736132D373A0F4704B4D /* XCLocalSwiftPackageReference "LucideKit" */;
+			productName = LucideKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A24E00000000000000000001 /* Project object */;
+}

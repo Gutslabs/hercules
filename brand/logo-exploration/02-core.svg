@@ -1,0 +1,11 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Hercules Core logo</title>
+  <desc id="desc">A compact circular core with a rounded H cut from its center.</desc>
+  <defs>
+    <mask id="core-cut">
+      <circle cx="50" cy="50" r="35" fill="white"/>
+      <path d="M37 33 V67 M63 33 V67 M37 50 H63" fill="none" stroke="black" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <circle cx="50" cy="50" r="35" fill="currentColor" mask="url(#core-cut)"/>
+</svg>

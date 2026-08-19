@@ -16,16 +16,75 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
+      - name: Require signing secrets
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.MAC_BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MAC_P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.MAC_PROVISION_PROFILE_BASE64 }}
+          PROVISIONING_PROFILE_NAME: ${{ secrets.MAC_PROVISIONING_PROFILE_NAME }}
+          CODE_SIGN_IDENTITY: ${{ secrets.MAC_CODE_SIGN_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MAC_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$BUILD_CERTIFICATE_BASE64"
+          test -n "$P12_PASSWORD"
+          test -n "$BUILD_PROVISION_PROFILE_BASE64"
+          test -n "$PROVISIONING_PROFILE_NAME"
+          test -n "$CODE_SIGN_IDENTITY"
+          test -n "$KEYCHAIN_PASSWORD"
+
+      - name: Install signing certificate and profile
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.MAC_BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MAC_P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.MAC_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MAC_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERTIFICATE_PATH="$RUNNER_TEMP/hercules-signing.p12"
+          PROFILE_PATH="$RUNNER_TEMP/hercules.provisionprofile"
+          KEYCHAIN_PATH="$RUNNER_TEMP/hercules-signing.keychain-db"
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/hercules.provisionprofile"
+          mkdir -p "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/hercules.provisionprofile"
+
       - name: Build Hercules
+        env:
+          PROVISIONING_PROFILE_NAME: ${{ secrets.MAC_PROVISIONING_PROFILE_NAME }}
+          CODE_SIGN_IDENTITY: ${{ secrets.MAC_CODE_SIGN_IDENTITY }}
         run: |
           set -euo pipefail
           xcodebuild \
-            -project BodyTrack.xcodeproj \
-            -scheme BodyTrack \
+            -project Hercules.xcodeproj \
+            -scheme Hercules \
             -configuration Release \
             -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=ACY2F2P77T \
+            CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" \
+            APS_ENVIRONMENT=production \
+            ICLOUD_CONTAINER_ENVIRONMENT=Production \
             build
+
+      - name: Verify CloudKit signature
+        run: |
+          set -euo pipefail
+          APP="build/DerivedData/Build/Products/Release/Hercules.app"
+          codesign --verify --deep --strict "$APP"
+          codesign -d --entitlements :- "$APP" > "$RUNNER_TEMP/hercules-entitlements.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-environment' "$RUNNER_TEMP/hercules-entitlements.plist")" = "Production"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.aps-environment' "$RUNNER_TEMP/hercules-entitlements.plist")" = "production"
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers' "$RUNNER_TEMP/hercules-entitlements.plist" | grep -q "iCloud.com.samorai.hercules"
 
       - name: Create DMG
         run: |
@@ -47,3 +106,7 @@ jobs:
         with:
           name: Hercules.dmg
           path: build/Hercules.dmg
+
+      - name: Remove temporary keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/hercules-signing.keychain-db" || true

@@ -1,0 +1,10 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Hercules Atlas app icon</title>
+  <desc id="desc">An ivory Atlas H mark centered on the Hercules ink background.</desc>
+  <rect width="1024" height="1024" fill="#26241F"/>
+  <g transform="translate(98 98) scale(8.28)" fill="#F2EFE8">
+    <rect x="21" y="18" width="16" height="64" rx="8"/>
+    <rect x="63" y="18" width="16" height="64" rx="8"/>
+    <path d="M31 59 C43 59 51 49 69 45" fill="none" stroke="#F2EFE8" stroke-width="14" stroke-linecap="round"/>
+  </g>
+</svg>

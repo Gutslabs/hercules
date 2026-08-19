@@ -10,7 +10,8 @@ Hercules is a SwiftUI + SwiftData fitness tracking app for macOS and iOS. It tra
 - Workout templates, workout logs, and program archive support
 - Recipe library with macro metadata
 - AI coaching context built from local app data
-- Local backup and optional vault/iCloud-style sync helpers
+- Native CloudKit sync between macOS and iOS
+- Apple Health step and walking-distance import on iPhone
 
 ## Requirements
 
@@ -20,28 +21,46 @@ Hercules is a SwiftUI + SwiftData fitness tracking app for macOS and iOS. It tra
 
 ## Build
 
-Open `BodyTrack.xcodeproj` in Xcode and run one of the schemes:
+Open `Hercules.xcodeproj` in Xcode and run one of the schemes:
 
-- `BodyTrack` for macOS
+- `Hercules` for macOS
 - `HerculesMobile` for iOS
 
-The repository intentionally leaves the Apple development team blank. To run a signed macOS build from Xcode, select your own team in Signing & Capabilities. For a source-only command-line check, disable signing as shown below.
+CloudKit requires a real signed build. The project is configured for the Hercules Apple Developer team; if you fork it, select your own team and iCloud container in Signing & Capabilities.
 
-Command-line macOS build:
+Signed macOS development build and install:
 
 ```sh
-xcodebuild -project BodyTrack.xcodeproj -scheme BodyTrack -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+./scripts/mac-build-install.sh Debug
 ```
+
+Debug builds use the CloudKit Development environment. Release/CI builds use Production and must carry a distribution certificate plus a provisioning profile; the DMG workflow refuses to publish an unsigned app.
 
 Command-line iOS Simulator build:
 
 ```sh
-xcodebuild -project BodyTrack.xcodeproj -scheme HerculesMobile -configuration Debug -destination 'generic/platform=iOS Simulator' build
+xcodebuild -project Hercules.xcodeproj -scheme HerculesMobile -configuration Debug -destination 'generic/platform=iOS Simulator' build
 ```
 
 ## AI Keys And Local Data
 
 API keys and tokens are not stored in the repository. Hercules reads AI credentials from local user storage such as Keychain, UserDefaults migration paths, or local Codex auth files. App databases, backups, DMGs, signing files, and local agent settings are ignored by `.gitignore`.
+
+## iPhone AI Over Tailscale
+
+The iOS app never needs a Codex login, OpenRouter key, or gateway key. Its AI chat and food estimator requests go to the Mac app over Tailscale HTTPS; the Mac uses its currently selected Hercules AI provider and enriches chat with the local Hercules data snapshot.
+
+The Mac server binds only to `127.0.0.1:8765`. Tailscale Serve exposes it at `/hercules-ai`, and every remote request is checked against the Tailscale user allowlist in `~/Library/Application Support/Hercules/remote-ai.plist`.
+
+After installing the signed Mac app, configure the route once:
+
+```sh
+chmod +x scripts/tailscale-cli.sh scripts/configure-remote-ai.sh
+./scripts/mac-build-install.sh Debug
+./scripts/configure-remote-ai.sh
+```
+
+Both devices must be logged into the permitted tailnet. Hercules launches at login and is silently checked once a minute so the endpoint recovers after an app exit or crash. The configuration script adds only `/hercules-ai`; it deliberately preserves other Tailscale Serve handlers such as the MintOps/Robinhood root route.
 
 ## Notes
 

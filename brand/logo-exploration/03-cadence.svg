@@ -1,0 +1,17 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Hercules Cadence logo</title>
+  <desc id="desc">A modular dot-matrix H built from rounded measurement cells.</desc>
+  <defs>
+    <rect id="cadence-cell" width="14" height="10" rx="5" fill="currentColor"/>
+  </defs>
+  <g>
+    <use href="#cadence-cell" x="20" y="20"/>
+    <use href="#cadence-cell" x="20" y="45"/>
+    <use href="#cadence-cell" x="20" y="70"/>
+    <use href="#cadence-cell" x="66" y="20"/>
+    <use href="#cadence-cell" x="66" y="45"/>
+    <use href="#cadence-cell" x="66" y="70"/>
+    <use href="#cadence-cell" x="35" y="45"/>
+    <use href="#cadence-cell" x="51" y="45"/>
+  </g>
+</svg>
