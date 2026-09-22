@@ -211,6 +211,9 @@ final class InstagramImportModel {
     }
 }
 
+/// Instagram'dan içe aktarma penceresi — tasarım: tuval ▸ Pencereler · Beslenme (az yazı). Oturum ve
+/// tarama aşamasında ayarlar + gömülü Instagram; işlerken büyük sayaç, her gönderi için bir çizgi
+/// ve satır satır sonuç (kaydedildi ✓, tarif değil ○, hata ●, IG'de kaldı uyarısı).
 struct InstagramImportView: View {
     @Environment(\.modelContext) private var ctx
     @Environment(\.dismiss) private var dismiss
@@ -220,26 +223,55 @@ struct InstagramImportView: View {
     @State private var task: Task<Void, Never>?
 
     var body: some View {
-        SheetChrome(
-            eyebrow: "Tarifler",
-            title: "Instagram'dan İçe Aktar",
-            subtitle: model.errorText ?? (model.status.isEmpty
-                ? "Her gönderi tek tek işlenir: tarifse kütüphaneye eklenir ve Instagram kaydı kaldırılır."
-                : model.status),
-            size: .full,
-            // İçerik kendi kaydırmasını yönetiyor (tarayıcı + sonuç listesi).
-            scrollsContent: false,
-            onClose: { task?.cancel(); dismiss() }
-        ) {
+        SadeSheet(title: "Instagram'dan içe aktar",
+                  subtitle: model.handle.isEmpty ? nil : "@\(model.handle)",
+                  onClose: { task?.cancel(); dismiss() }) {
+            VStack(alignment: .leading, spacing: 0) {
+                switch model.phase {
+                case .session, .scanning:
+                    settingsRow
+                        .padding(.horizontal, 28)
+                        .padding(.top, 18)
+                    if let error = model.errorText {
+                        SadeNote(text: error, color: Palette.negative)
+                            .padding(.horizontal, 28)
+                            .padding(.top, 12)
+                    }
+                    InstagramWebView(webView: model.webView)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Palette.textPrimary.opacity(0.08), lineWidth: 1))
+                        .padding(.horizontal, 28)
+                        .padding(.top, 16)
+                        .padding(.bottom, 22)
+                case .working, .finished:
+                    progressBlock
+                        .padding(.horizontal, 28)
+                        .padding(.top, 22)
+                    resultList
+                        .padding(.top, 14)
+                }
+            }
+        } footerLeading: {
+            if model.isBusy {
+                ProgressView().controlSize(.small)
+                    .help(model.status)
+            }
+        } footerTrailing: {
+            SadeButton(title: model.isBusy ? "Durdur" : "Kapat") {
+                task?.cancel()
+                if !model.isBusy { dismiss() }
+            }
             switch model.phase {
             case .session, .scanning:
-                browserPane
-            case .working, .finished:
-                resultPane
+                SadeButton(title: "Kaydedilenleri tara", role: .primary, enabled: !model.isBusy, bindsKey: false) { startScan() }
+            case .working:
+                SadeButton(title: "İşleniyor…", role: .primary, enabled: false, bindsKey: false) {}
+            case .finished:
+                SadeButton(title: "Tekrar tara", role: .primary, enabled: !model.isBusy, bindsKey: false) { startScan() }
             }
-        } footer: {
-            footerContent
         }
+        .frame(width: 960, height: 760)
         .onAppear {
             model.knownShortcodes = Self.shortcodes(in: recipes)
             task = Task { await model.checkSession() }
@@ -247,215 +279,225 @@ struct InstagramImportView: View {
         .onDisappear { task?.cancel() }
     }
 
-    // MARK: - Bölümler
+    private func startScan() {
+        task = Task {
+            if await model.scan() { await model.runImport(into: ctx) }
+        }
+    }
 
-    private var browserPane: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
+    // MARK: - Ayarlar (oturum · tarama)
+
+    private var settingsRow: some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            SadeField(label: "Kullanıcı") {
                 Text("@")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textQuaternary)
-                TextField("instagram kullanıcı adın", text: $model.handle)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Palette.textTertiary)
+                TextField("", text: $model.handle, prompt: Text("kullanıcı adın").foregroundStyle(Palette.textTertiary))
                     .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+            }
+            .frame(width: 220)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("En fazla")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.textTertiary)
+                Menu {
+                    ForEach([50, 150, 400, 1000], id: \.self) { limit in
+                        Button("\(limit)") { model.scanLimit = limit }
+                    }
+                } label: {
+                    Text("\(model.scanLimit)")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.horizontal, 12)
+                .frame(width: 110, height: 38, alignment: .leading)
+                .overlay(alignment: .trailing) {
+                    Lucide(sf: "chevron.down", size: 11)
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.trailing, 12)
+                        .allowsHitTesting(false)
+                }
+                .sadeBox(radius: 10)
+            }
+            SadeCheckRow(title: "IG'den çıkar", isOn: $model.unsaveAfterImport,
+                         help: "Kütüphaneye giren gönderinin Instagram kaydı kaldırılsın")
+            Spacer(minLength: 8)
+            if !model.status.isEmpty {
+                Text(model.status)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(Palette.textPrimary)
-                    .frame(maxWidth: 180)
-                Text("· en fazla")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textQuaternary)
-                Picker("", selection: $model.scanLimit) {
-                    Text("50").tag(50)
-                    Text("150").tag(150)
-                    Text("400").tag(400)
-                    Text("1000").tag(1000)
-                }
-                .labelsHidden()
-                .frame(width: 88)
-                Toggle("Aktarılanı Instagram'dan çıkar", isOn: $model.unsaveAfterImport)
-                    .toggleStyle(.checkbox)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textSecondary)
-                Spacer()
-                Text("\(model.knownShortcodes.count) kayıt kütüphanede")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textQuaternary)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .padding(.bottom, 11)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
-
-            InstagramWebView(webView: model.webView)
-                .overlay(alignment: .top) { Divider().overlay(Palette.border) }
         }
     }
 
-    private var resultPane: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                if model.candidates.isEmpty {
-                    Text("Yeni kayıt yok.")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textQuaternary)
-                        .padding(.top, 20)
+    // MARK: - İlerleme
+
+    private var progressBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("\(model.doneCount)")
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(" / \(model.candidates.count)")
+                        .foregroundStyle(Palette.textTertiary)
                 }
-                ForEach(model.candidates) { candidate in
-                    candidateRow(candidate)
+                .font(.system(size: 30, weight: .semibold).monospacedDigit())
+                Spacer(minLength: 12)
+                HStack(spacing: 14) {
+                    legend("\(model.savedCount) tarif", Palette.positive)
+                    if model.skippedCount > 0 { legend("\(model.skippedCount) değil", Palette.textPrimary.opacity(0.3)) }
+                    if model.failedCount > 0 { legend("\(model.failedCount) hata", Palette.negative) }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            progressBar
         }
     }
 
-    @ViewBuilder
-    private func candidateRow(_ item: ImportCandidate) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            statusDot(item)
-                .padding(.top, 4)
+    private func legend(_ text: String, _ color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(text)
+        }
+        .font(.system(size: 12.5).monospacedDigit())
+        .foregroundStyle(Palette.textSecondary)
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(item.result?.title ?? item.shortcode)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(item.savedToLibrary ? Palette.textPrimary : Palette.textQuaternary)
-                    if item.savedToLibrary {
-                        badge(item.unsavedOnInstagram ? "kaydedildi · IG'den çıkarıldı" : "kaydedildi",
-                              tint: Palette.positive)
+    /// Her gönderi için bir çizgi (60'a kadar); daha fazlasında oranlı dört parça.
+    @ViewBuilder private var progressBar: some View {
+        let items = model.candidates
+        if items.count <= 60 {
+            HStack(spacing: 3) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(tickColor(item, current: index == currentIndex))
+                        .frame(height: 10)
+                }
+            }
+        } else {
+            GeometryReader { geo in
+                let total = max(1, CGFloat(items.count))
+                let parts: [(CGFloat, Color)] = [
+                    (CGFloat(model.savedCount), Palette.positive),
+                    (CGFloat(model.skippedCount), Palette.textPrimary.opacity(0.22)),
+                    (CGFloat(model.failedCount), Palette.negative),
+                    (CGFloat(items.count - model.doneCount), Palette.textPrimary.opacity(0.07)),
+                ]
+                HStack(spacing: 3) {
+                    ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                        if part.0 > 0 {
+                            Capsule().fill(part.1).frame(width: max(3, (geo.size.width - 9) * part.0 / total))
+                        }
                     }
                 }
+            }
+            .frame(height: 10)
+        }
+    }
 
-                if let result = item.result {
-                    Text(macroLine(result))
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textQuaternary)
+    /// İşlenmekte olan gönderi: bitmemiş ilk gönderi (meşgulken).
+    private var currentIndex: Int? {
+        guard model.isBusy else { return nil }
+        return model.candidates.firstIndex { !$0.isDone }
+    }
+
+    private func tickColor(_ item: ImportCandidate, current: Bool) -> Color {
+        if item.savedToLibrary { return Palette.positive }
+        if item.failure != nil { return Palette.negative }
+        if item.skippedReason != nil { return Palette.textPrimary.opacity(0.22) }
+        return current ? Palette.textSecondary : Palette.textPrimary.opacity(0.07)
+    }
+
+    // MARK: - Sonuçlar
+
+    private var resultList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if model.candidates.isEmpty {
+                    Text("Yeni kayıt yok")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.top, 20)
                 }
-                if let unsaveError = item.unsaveError {
-                    Text("Instagram kaydı kaldırılamadı, orada duruyor — \(unsaveError)")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.warning)
-                        .lineLimit(2)
-                }
-                if let skipped = item.skippedReason {
-                    Text(skipped)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textQuaternary)
-                        .lineLimit(2)
-                }
-                if let failure = item.failure {
-                    Text(failure)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.negative.opacity(0.85))
-                        .lineLimit(2)
-                }
-                if !item.isDone {
-                    Text("bekliyor…")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textQuaternary)
+                ForEach(Array(model.candidates.enumerated()), id: \.element.id) { index, candidate in
+                    candidateRow(candidate, current: index == currentIndex)
                 }
             }
-            Spacer(minLength: 8)
-            if let strategy = item.strategyNote {
-                Text(strategy)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(Palette.textQuaternary)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 18)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private func candidateRow(_ item: ImportCandidate, current: Bool) -> some View {
+        HStack(spacing: 12) {
+            statusMark(item, current: current)
+                .frame(width: 17)
+            Text(item.result?.title ?? item.shortcode)
+                .font(.system(size: 14, weight: item.savedToLibrary ? .medium : .regular))
+                .foregroundStyle(item.savedToLibrary ? Palette.textPrimary : (current ? Palette.textSecondary : Palette.textTertiary))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(item.strategyNote ?? "")
+            if let unsaveError = item.unsaveError {
+                HStack(spacing: 5) {
+                    Lucide(sf: "exclamationmark.triangle", size: 12)
+                    Text("IG'de kaldı")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.warning)
+                .help("Instagram kaydı kaldırılamadı — \(unsaveError)")
+            }
+            if let result = item.result {
+                Text(macroLine(result))
+                    .font(.system(size: 12.5).monospacedDigit())
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+            } else if let skipped = item.skippedReason {
+                Text(skipped == "yemek tarifi değil" ? "tarif değil" : skipped)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .help(skipped)
+            } else if let failure = item.failure {
+                Text("hata")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Palette.negative)
+                    .help(failure)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Palette.surfaceElevated)
-        )
+        .frame(height: 44)
+        .overlay(alignment: .top) { SadeRule().opacity(0.75) }
     }
 
     @ViewBuilder
-    private func statusDot(_ item: ImportCandidate) -> some View {
+    private func statusMark(_ item: ImportCandidate, current: Bool) -> some View {
         if item.savedToLibrary {
-            Lucide(sf: "checkmark", size: 11).foregroundStyle(Palette.positive)
+            Lucide(sf: "checkmark.circle.fill", size: 16).foregroundStyle(Palette.positive)
         } else if item.failure != nil {
-            Circle().fill(Palette.negative.opacity(0.75)).frame(width: 7, height: 7)
+            Circle().fill(Palette.negative).frame(width: 10, height: 10)
         } else if item.skippedReason != nil {
-            Circle().strokeBorder(Palette.border, lineWidth: 1.2).frame(width: 7, height: 7)
+            Circle().strokeBorder(Palette.textTertiary, lineWidth: 1.5).frame(width: 13, height: 13)
+        } else if current {
+            ProgressView().controlSize(.mini)
         } else {
-            Circle().fill(Palette.border).frame(width: 7, height: 7)
+            Circle().fill(Palette.textQuaternary).frame(width: 7, height: 7)
         }
     }
 
-    private func badge(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                Capsule().fill(tint.opacity(0.12))
-            )
-    }
-
+    /// "310 kcal · P 24 · K 32 · Y 9"; makro yoksa boş.
     private func macroLine(_ result: AIRecipeResult) -> String {
         var parts: [String] = []
         if let c = result.calories { parts.append("\(Fmt.int(c)) kcal") }
-        if let p = result.protein_g { parts.append("P \(Fmt.int(p))g") }
-        if let k = result.carbs_g { parts.append("K \(Fmt.int(k))g") }
-        if let f = result.fat_g { parts.append("Y \(Fmt.int(f))g") }
-        if let s = result.servings { parts.append("\(s) porsiyon") }
-        if result.macrosEstimated == true { parts.append("tahmin") }
-        return parts.isEmpty ? "makro yok" : parts.joined(separator: " · ")
-    }
-
-    @ViewBuilder
-    private var footerContent: some View {
-        Group {
-            if model.isBusy {
-                ProgressView().controlSize(.small)
-            }
-            if !model.candidates.isEmpty {
-                Text("\(model.doneCount)/\(model.candidates.count) işlendi · \(model.savedCount) kaydedildi")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textQuaternary)
-            }
-            Spacer()
-
-            Button(model.isBusy ? "Durdur" : "Kapat") {
-                task?.cancel()
-                if !model.isBusy { dismiss() }
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(Palette.textSecondary)
-
-            switch model.phase {
-            case .session, .scanning:
-                actionButton("Kaydedilenleri Tara", enabled: !model.isBusy) {
-                    task = Task {
-                        if await model.scan() { await model.runImport(into: ctx) }
-                    }
-                }
-            case .working:
-                actionButton("İşleniyor…", enabled: false) {}
-            case .finished:
-                actionButton("Tekrar Tara", enabled: !model.isBusy) {
-                    task = Task {
-                        if await model.scan() { await model.runImport(into: ctx) }
-                    }
-                }
-            }
-        }
-    }
-
-    private func actionButton(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(enabled ? Palette.btnFg : Palette.textQuaternary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(enabled ? Palette.accent : Palette.border.opacity(0.4))
-                )
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
+        if let p = result.protein_g { parts.append("P \(Fmt.int(p))") }
+        if let k = result.carbs_g { parts.append("K \(Fmt.int(k))") }
+        if let f = result.fat_g { parts.append("Y \(Fmt.int(f))") }
+        return parts.joined(separator: " · ")
     }
 
     /// Kütüphanedeki tarif linklerinden gönderi kodlarını çıkarır — dedup anahtarı bu.

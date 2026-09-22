@@ -2,6 +2,12 @@ import SwiftUI
 import LucideKit
 import SwiftData
 
+// Öğün Takip pencereleri — tasarım: "Hercules Mac Tasarımı" tuvali ▸ Pencereler · Beslenme (az yazı).
+
+// MARK: - Plan oluştur
+
+/// Aylık plan: solda başlangıç, şimdi/hedef kilo, süre ve tempo; sağda Grafikler dilinde ay ay
+/// önizleme (üzerine gelince o ayın hedefi) ve aylık/haftalık tempo.
 struct PlanSetupSheet: View {
     struct Plan {
         var startDate: Date
@@ -16,19 +22,15 @@ struct PlanSetupSheet: View {
         case even, customFirst
         var label: String {
             switch self {
-            case .even: return "Eşit Dağıt"
-            case .customFirst: return "İlk Ay Özel"
-            }
-        }
-        var detail: String {
-            switch self {
-            case .even: return "Her ay aynı miktar"
-            case .customFirst: return "İlk ay farklı, sonrası eşit"
+            case .even: return "Eşit"
+            case .customFirst: return "İlk ay özel"
             }
         }
     }
 
     let startWeight: Double
+    /// Mevcut aylık hedefler var mı — varsa oluşturmak onların yerini alır (altta uyarı).
+    var replacesExisting = false
     let onCreate: (Plan) -> Void
     let onCancel: () -> Void
 
@@ -39,9 +41,11 @@ struct PlanSetupSheet: View {
     @State private var paceMode: PaceMode = .even
     @State private var firstMonthTarget: Double = 0
     @State private var firstMonthTargetEdited: Bool = false
+    @State private var hover: TrendPoint?
 
-    init(startWeight: Double, onCreate: @escaping (Plan) -> Void, onCancel: @escaping () -> Void) {
+    init(startWeight: Double, replacesExisting: Bool = false, onCreate: @escaping (Plan) -> Void, onCancel: @escaping () -> Void) {
         self.startWeight = startWeight
+        self.replacesExisting = replacesExisting
         self.onCreate = onCreate
         self.onCancel = onCancel
         _startWeightInput = State(initialValue: startWeight)
@@ -74,106 +78,37 @@ struct PlanSetupSheet: View {
 
     private var subsequentPerWeek: Double { subsequentMonthDelta / 4.345 }
 
+    /// Başlangıç + her ay sonunun hedefi (önizleme çizgisi).
+    private var planPoints: [TrendPoint] {
+        let cal = Calendar.current
+        var out = [TrendPoint(date: startDate, value: startWeightInput)]
+        for m in 1...max(1, monthsInput) {
+            let date = cal.date(byAdding: .month, value: m, to: startDate) ?? startDate
+            let value = paceMode == .customFirst
+                ? firstMonthTarget + subsequentMonthDelta * Double(m - 1)
+                : startWeightInput + perMonth * Double(m)
+            out.append(TrendPoint(date: date, value: value))
+        }
+        return out
+    }
+
     var body: some View {
-        SheetChrome(
-            eyebrow: "Öğün Takip",
-            title: "Plan Oluştur",
-            subtitle: "Başlangıç ve final kilonu gir; ayları doğrusal böler, sonradan tek tek düzenleyebilirsin.",
-            size: .standard,
-            onClose: onCancel
-        ) {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                SheetField("Başlangıç tarihi") {
-                    DatePicker("", selection: $startDate, displayedComponents: .date)
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                }
-                HStack(spacing: Spacing.md) {
-                    SheetField("Başlangıç (kg)") { weightInput($startWeightInput) }
-                    SheetField("Final hedef (kg)") { weightInput($endWeightInput) }
-                }
-
-                SheetSection("Süre") {
-                    SheetRow("Ay sayısı") {
-                        Stepper(value: $monthsInput, in: 1...36) {
-                            Text("\(monthsInput)").font(Typography.mono)
-                        }
-                    }
-                    HStack(spacing: 6) {
-                        ForEach([3, 6, 12], id: \.self) { m in
-                            quickMonths(m)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 6)
-                }
-
-                SheetSection("Tempo") {
-                    Picker("", selection: $paceMode) {
-                        ForEach(PaceMode.allCases, id: \.self) { mode in
-                            Text(mode.label).tag(mode)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 6)
-
-                    Text(paceMode.detail)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-
-                    if paceMode == .customFirst {
-                        SheetRow("İlk ay sonu (kg)") {
-                            TextField("", value: Binding(
-                                get: { firstMonthTarget },
-                                set: { firstMonthTarget = $0; firstMonthTargetEdited = true }
-                            ), format: .number)
-                                .textFieldStyle(.plain)
-                                .font(Typography.mono)
-                                .frame(width: 70)
-                                .multilineTextAlignment(.trailing)
-                        }
-                    }
-                }
-
-                SheetSection("Önizleme") {
-                    SheetRow("Toplam değişim") {
-                        Text("\(Fmt.signed(totalDelta, digits: 1)) kg").font(Typography.mono)
-                    }
-                    if paceMode == .customFirst {
-                        SheetRow("İlk ay") {
-                            Text("\(Fmt.signed(firstMonthDelta, digits: 1)) kg").font(Typography.mono)
-                        }
-                        SheetRow("Sonraki aylar") {
-                            Text("\(Fmt.signed(subsequentMonthDelta, digits: 2)) kg / ay").font(Typography.mono)
-                        }
-                    } else {
-                        SheetRow("Aylık tempo") {
-                            Text("\(Fmt.signed(perMonth, digits: 2)) kg").font(Typography.mono)
-                        }
-                        SheetRow("Haftalık tempo") {
-                            Text("\(Fmt.signed(perWeek, digits: 2)) kg").font(Typography.mono)
-                        }
-                    }
-                    if let warning = paceWarning {
-                        HStack(spacing: 6) {
-                            Lucide(sf: "exclamationmark.triangle.fill", size: 11)
-                            Text(warning).font(Typography.caption)
-                        }
-                        .foregroundStyle(Palette.warning)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                    }
-                }
+        SadeSheet(title: "Plan oluştur", onClose: onCancel) {
+            HStack(alignment: .top, spacing: 0) {
+                inputs
+                    .frame(width: 360)
+                SadeRule(vertical: true)
+                preview
             }
-        } footer: {
-            Spacer(minLength: 0)
-            SheetSecondaryButton("İptal", action: onCancel)
-            SheetPrimaryButton("Planı Oluştur") {
+            .overlay(alignment: .top) { SadeRule() }
+            .padding(.top, 18)
+        } footerLeading: {
+            if replacesExisting {
+                SadeNote(text: "Mevcut plan değişir")
+            }
+        } footerTrailing: {
+            SadeButton(title: "İptal", action: onCancel)
+            SadeButton(title: "Planı oluştur", role: .primary) {
                 onCreate(Plan(
                     startDate: startDate,
                     startWeight: startWeightInput,
@@ -183,6 +118,7 @@ struct PlanSetupSheet: View {
                 ))
             }
         }
+        .frame(width: 880)
         .onChange(of: paceMode) { _, newMode in
             if newMode == .customFirst, !firstMonthTargetEdited {
                 firstMonthTarget = roundedHalf(defaultFirstMonthTarget)
@@ -205,186 +141,142 @@ struct PlanSetupSheet: View {
         }
     }
 
-    private func roundedHalf(_ v: Double) -> Double {
-        (v * 2).rounded() / 2
-    }
+    // MARK: Sol: girişler
 
-    /// Kilo girdisi — `.roundedBorder` yerine uygulamanın kendi alan stili.
-    private func weightInput(_ value: Binding<Double>) -> some View {
-        TextField("", value: value, format: .number)
-            .textFieldStyle(.plain)
-            .font(.system(size: 13, design: .monospaced))
-            .foregroundStyle(Palette.textPrimary)
-    }
-
-    /// 3/6/12 ay kısayolu. Eskiden `.buttonStyle(.bordered)` + `.tint` idi, yani
-    /// koyu temanın ortasında Aqua düğmesi.
-    private func quickMonths(_ m: Int) -> some View {
-        let selected = monthsInput == m
-        return Button { monthsInput = m } label: {
-            Text("\(m) ay")
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(selected ? Palette.btnFg : Palette.textSecondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(selected ? Palette.accent : Palette.fieldFill)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(selected ? Color.clear : Palette.border, lineWidth: 1)
-                )
-        }
-        .buttonStyle(SheetPressStyle())
-    }
-
-    private var paceModePicker: some View {
-        HStack(spacing: 6) {
-            ForEach(PaceMode.allCases, id: \.self) { mode in
-                Button {
-                    paceMode = mode
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(mode.label)
-                            .font(Typography.bodyBold)
-                            .foregroundStyle(paceMode == mode ? Palette.textPrimary : Palette.textSecondary)
-                        Text(mode.detail)
-                            .font(Typography.caption)
-                            .foregroundStyle(paceMode == mode ? Palette.textSecondary : Palette.textTertiary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(paceMode == mode ? Palette.track : Palette.surfaceElevated)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .strokeBorder(paceMode == mode ? Palette.accent.opacity(0.4) : Palette.border, lineWidth: 0.5)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+    private var inputs: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SadeDateField(label: "Başlangıç", date: $startDate)
+            HStack(spacing: 12) {
+                weightField("Şimdi", $startWeightInput)
+                weightField("Hedef", $endWeightInput)
             }
-        }
-    }
-
-    private var monthsPicker: some View {
-        HStack(spacing: Spacing.sm) {
-            stepperControl
-            HStack(spacing: 6) {
-                ForEach([3, 6, 12], id: \.self) { m in
-                    Button {
-                        monthsInput = m
-                    } label: {
-                        Text("\(m)")
-                            .font(Typography.captionBold)
-                            .foregroundStyle(monthsInput == m ? Palette.textPrimary : Palette.textSecondary)
-                            .frame(width: 32, height: 28)
-                            .background(
-                                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
-                                    .fill(monthsInput == m ? Palette.track : Palette.surfaceElevated)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous)
-                                    .strokeBorder(monthsInput == m ? Palette.accent.opacity(0.4) : Palette.border, lineWidth: 0.5)
-                            )
+            VStack(alignment: .leading, spacing: 8) {
+                label("Süre")
+                HStack(spacing: 8) {
+                    SadeStepper(unit: "ay", width: 140) {
+                        monthsInput = max(1, monthsInput - 1)
+                    } increment: {
+                        monthsInput = min(36, monthsInput + 1)
+                    } field: {
+                        TextField("", value: Binding(get: { monthsInput }, set: { monthsInput = max(1, min(36, $0)) }), format: .number)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                            .multilineTextAlignment(.center)
+                            .frame(width: 30)
                     }
-                    .buttonStyle(.plain)
+                    ForEach([3, 6, 12], id: \.self) { m in
+                        SadePill(title: "\(m)", selected: monthsInput == m, help: "\(m) ay") { monthsInput = m }
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                label("Tempo")
+                SadeSegmented(options: PaceMode.allCases.map { (value: $0, label: $0.label) }, selection: $paceMode)
+                if paceMode == .customFirst {
+                    weightField("İlk ay sonu", Binding(
+                        get: { firstMonthTarget },
+                        set: { firstMonthTarget = $0; firstMonthTargetEdited = true }
+                    ))
+                    .padding(.top, 6)
                 }
             }
         }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 20)
     }
 
-    private var stepperControl: some View {
-        HStack(spacing: 0) {
-            stepperButton(systemImage: "minus", enabled: monthsInput > 1) {
-                if monthsInput > 1 { monthsInput -= 1 }
-            }
+    // MARK: Sağ: önizleme (Grafikler dili)
 
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                TextField("", value: Binding(
-                    get: { monthsInput },
-                    set: { monthsInput = max(1, min(36, $0)) }
-                ), format: .number)
-                    .textFieldStyle(.plain)
-                    .font(Typography.monoLarge)
+    private var preview: some View {
+        let points = planPoints
+        let shown = hover ?? points[points.count - 1]
+        let change = shown.value - startWeightInput
+        let tint = paceWarning == nil ? Palette.positive : Palette.warning
+        let parts = SadeFormat.num(shown.value).split(separator: ",", maxSplits: 1).map(String.init)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text(parts.first ?? "")
                     .foregroundStyle(Palette.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .frame(width: 44)
-                Text("ay")
-                    .font(Typography.body)
+                Text(parts.count > 1 ? ",\(parts[1])" : "")
+                    .foregroundStyle(Palette.textTertiary)
+                Text("kg")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.leading, 6)
+            }
+            .font(.system(size: 34, weight: .semibold).monospacedDigit())
+            .tracking(-0.8)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(SadeFormat.signed(change)) kg")
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(tint)
+                Text(hover.map { Fmt.dateMonthAxis.string(from: $0.date) } ?? "\(monthsInput) ayda")
+                    .font(.system(size: 13))
                     .foregroundStyle(Palette.textTertiary)
             }
-            .padding(.horizontal, 8)
-            .frame(height: 36)
+            .padding(.top, 4)
 
-            stepperButton(systemImage: "plus", enabled: monthsInput < 36) {
-                if monthsInput < 36 { monthsInput += 1 }
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Palette.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
-    }
+            SadeLineChart(points: points, tint: tint) { hover = $0 }
+                .frame(height: 150)
+                .padding(.top, 14)
 
-    private func stepperButton(systemImage: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Lucide(sf: systemImage, size: 11)
-                .foregroundStyle(enabled ? Palette.textPrimary : Palette.textQuaternary)
-                .frame(width: 32, height: 36)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-    }
-
-    private var previewCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Önizleme").eyebrow()
-            HStack(spacing: Spacing.lg) {
-                previewStat(label: "Toplam", value: "\(Fmt.signed(totalDelta, digits: 1)) kg")
-                Divider().frame(height: 32).background(Palette.border)
+            HStack(alignment: .top, spacing: 12) {
                 if paceMode == .customFirst {
-                    previewStat(label: "İlk Ay", value: "\(Fmt.signed(firstMonthDelta, digits: 1)) kg")
-                    Divider().frame(height: 32).background(Palette.border)
-                    previewStat(label: "Sonraki Ay", value: "\(Fmt.signed(subsequentMonthDelta, digits: 2)) kg")
+                    stat("İlk ay", SadeFormat.signed(firstMonthDelta), "kg")
+                    stat("Sonra", SadeFormat.signed(subsequentMonthDelta, digits: 2), "kg/ay")
                 } else {
-                    previewStat(label: "Aylık", value: "\(Fmt.signed(perMonth, digits: 2)) kg")
-                    Divider().frame(height: 32).background(Palette.border)
-                    previewStat(label: "Haftalık", value: "\(Fmt.signed(perWeek, digits: 2)) kg")
+                    stat("Aylık", SadeFormat.signed(perMonth, digits: 2), "kg")
+                    stat("Haftalık", SadeFormat.signed(perWeek, digits: 2), "kg")
                 }
-                Spacer()
             }
+            .padding(.top, 16)
+
             if let warning = paceWarning {
-                HStack(spacing: 5) {
-                    Lucide(sf: "exclamationmark.triangle.fill", size: 10)
-                        .foregroundStyle(Palette.warning)
-                    Text(warning)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.warning)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                SadeNote(text: warning)
+                    .padding(.top, 14)
             }
         }
-        .padding(Spacing.md)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func stat(_ title: String, _ value: String, _ unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            label(title)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Palette.textPrimary)
+                Text(unit)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Palette.textTertiary)
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Palette.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
-        )
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11.5))
+            .foregroundStyle(Palette.textTertiary)
+    }
+
+    private func weightField(_ title: String, _ value: Binding<Double>) -> some View {
+        SadeField(label: title) {
+            TextField("", value: value, format: .number)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14).monospacedDigit())
+                .fixedSize()
+            Text("kg")
+                .font(.system(size: 12.5))
+                .foregroundStyle(Palette.textTertiary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func roundedHalf(_ v: Double) -> Double {
+        (v * 2).rounded() / 2
     }
 
     private var paceWarning: String? {
@@ -392,37 +284,30 @@ struct PlanSetupSheet: View {
             // İlk ay totalDelta'yı geçtiyse / yön ters dönüyorsa uyarı
             if totalDelta != 0, firstMonthDelta != 0,
                firstMonthDelta.sign != totalDelta.sign {
-                return "İlk ay yönü genel hedefin tersine. Final hedefe ulaşmak için sonraki aylarda tempo artar."
+                return "İlk ay hedefin tersine gidiyor"
             }
             if abs(firstMonthDelta) > abs(totalDelta) {
-                return "İlk ay değişimi toplam hedefi aşıyor. Sonraki aylar ters yönde ilerler."
+                return "İlk ay toplam hedefi aşıyor"
             }
             if abs(firstMonthDelta / 4.345) > 1.0 {
-                return "İlk hafta 1 kg üstü tempo agresif olabilir."
+                return "İlk ay haftada 1 kg üstü — agresif"
             }
             if abs(subsequentPerWeek) > 1.0 {
-                return "Sonraki haftalarda 1 kg üstü tempo agresif olabilir."
+                return "Sonraki aylar haftada 1 kg üstü — agresif"
             }
         } else {
             if abs(perWeek) > 1.0 {
-                return "Haftalık 1 kg üstü tempo agresif olabilir."
+                return "Haftada 1 kg üstü — agresif"
             }
         }
         return nil
     }
-
-    private func previewStat(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).eyebrow()
-            Text(value)
-                .font(Typography.monoLarge)
-                .foregroundStyle(Palette.textPrimary)
-        }
-    }
 }
 
-// MARK: - Food date editor sheet
+// MARK: - Yemek tarihi
 
+/// Bir yemeğin gününü/saatini değiştirir: üstte eski → yeni, altında tarih ve saat, en altta
+/// "‹ 1 gün · seçili gün · 1 gün ›".
 struct FoodDateEditorSheet: View {
     let food: FoodEntry
     let selectedDay: Date
@@ -430,6 +315,7 @@ struct FoodDateEditorSheet: View {
     let onCancel: () -> Void
 
     @State private var dateInput: Date
+    private let original: Date
 
     init(
         food: FoodEntry,
@@ -442,48 +328,65 @@ struct FoodDateEditorSheet: View {
         self.onSave = onSave
         self.onCancel = onCancel
         _dateInput = State(initialValue: food.date)
+        original = food.date
     }
 
     var body: some View {
-        SheetChrome(
-            eyebrow: "Öğün Takip",
-            title: "Yemek Tarihi",
-            size: .compact,
-            fitsHeightToContent: true,
-            onClose: onCancel
-        ) {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                SheetSection("Yemek") {
-                    SheetRow("Kayıt") {
-                        Text(food.name).lineLimit(2)
-                    }
-                    SheetRow("Kalori") {
-                        Text("\(Fmt.int(food.calories)) kcal")
-                            .font(.system(size: 12.5, design: .monospaced))
-                    }
+        SadeSheet(title: "Yemek tarihi", subtitle: food.name, onClose: onCancel) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    moment(original, active: false)
+                    Lucide(sf: "arrow.right", size: 15)
+                        .foregroundStyle(Palette.textTertiary)
+                    moment(dateInput, active: dateInput != original)
                 }
-
-                SheetField("Tarih ve saat") {
-                    DatePicker("", selection: $dateInput,
-                               displayedComponents: [.date, .hourAndMinute])
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
+                HStack(alignment: .bottom, spacing: 12) {
+                    SadeDateField(label: "Tarih", date: $dateInput)
+                    SadeTimeField(label: "Saat", date: $dateInput)
+                        .frame(width: 120)
                 }
-
-                SheetSection("Hızlı düzeltme") {
-                    SheetActionRow("Seçili güne taşı: \(CalendarView.fullDayFormatter.string(from: selectedDay))",
-                                   icon: "arrow.right") {
+                .padding(.top, 18)
+                HStack(spacing: 8) {
+                    SadePill(title: "1 gün", leading: "chevron.left", help: "1 gün geri") { shiftDay(-1) }
+                    SadePill(title: Self.dayLabel.string(from: selectedDay),
+                             selected: Calendar.current.isDate(dateInput, inSameDayAs: selectedDay),
+                             help: "Takvimde seçili güne taşı") {
                         dateInput = Self.merged(day: selectedDay, time: dateInput)
                     }
-                    SheetActionRow("1 gün geri al", icon: "chevron.left") { shiftDay(-1) }
-                    SheetActionRow("1 gün ileri al", icon: "chevron.right") { shiftDay(1) }
+                    SadePill(title: "1 gün", trailing: "chevron.right", help: "1 gün ileri") { shiftDay(1) }
                 }
+                .padding(.top, 14)
             }
-        } footer: {
-            Spacer(minLength: 0)
-            SheetSecondaryButton("İptal", action: onCancel)
-            SheetPrimaryButton("Kaydet") { onSave(dateInput) }
+            .padding(.horizontal, 28)
+            .padding(.top, 20)
+            .padding(.bottom, 24)
+        } footerLeading: {
+            EmptyView()
+        } footerTrailing: {
+            SadeButton(title: "İptal", action: onCancel)
+            SadeButton(title: "Kaydet", role: .primary) { onSave(dateInput) }
         }
+        .frame(width: 520)
+    }
+
+    /// "21 Eyl Pzt   20:10" kartı; yeni değer değiştiyse yeşil çerçeve.
+    private func moment(_ date: Date, active: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(Self.dayLabel.string(from: date))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(active ? Palette.textPrimary : Palette.textTertiary)
+            Spacer(minLength: 8)
+            Text(SadeTimeField.formatter.string(from: date))
+                .font(.system(size: 13).monospacedDigit())
+                .foregroundStyle(active ? Palette.textSecondary : Palette.textTertiary)
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(active ? Palette.positive.opacity(0.07) : Palette.textPrimary.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(active ? Palette.positive.opacity(0.35) : Palette.textPrimary.opacity(0.06), lineWidth: 1))
     }
 
     private func shiftDay(_ days: Int) {
@@ -501,15 +404,26 @@ struct FoodDateEditorSheet: View {
             of: dayStart
         ) ?? day
     }
+
+    /// "22 Eyl Sal"
+    private static let dayLabel: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMM EEE"
+        return f
+    }()
 }
 
-// MARK: - Goal editor sheet
+// MARK: - Aylık hedef
 
+/// Ayın hedef kilosu: tarih, −/+ ile hedef (yanında son tartıya göre fark) ve not.
 struct GoalEditorSheet: View {
     @Bindable var goal: MonthlyGoal
     let onSave: () -> Void
     let onDelete: () -> Void
     let onCancel: () -> Void
+
+    @Query(sort: \Measurement.date, order: .reverse) private var measurements: [Measurement]
 
     @State private var weightInput: Double
     @State private var dateInput: Date
@@ -532,39 +446,46 @@ struct GoalEditorSheet: View {
     }
 
     var body: some View {
-        SheetChrome(
-            eyebrow: "Öğün Takip",
-            title: "Aylık Hedef",
-            size: .compact,
-            fitsHeightToContent: true,
-            onClose: onCancel
-        ) {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                SheetField("Tarih") {
-                    DatePicker("", selection: $dateInput, displayedComponents: .date)
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
+        SadeSheet(title: "Aylık hedef", onClose: onCancel) {
+            VStack(alignment: .leading, spacing: 18) {
+                SadeDateField(label: "Tarih", date: $dateInput)
+                HStack(alignment: .bottom, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Hedef")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.textTertiary)
+                        SadeStepper(unit: "kg", width: 220) {
+                            weightInput = max(30, weightInput - 0.5)
+                        } increment: {
+                            weightInput += 0.5
+                        } field: {
+                            TextField("", value: $weightInput, format: .number)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                                .multilineTextAlignment(.center)
+                                .frame(width: 64)
+                        }
+                    }
+                    if let current = measurements.first?.weight {
+                        let delta = weightInput - current
+                        Text("\(SadeFormat.signed(delta)) kg")
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(delta <= 0 ? Palette.positive : Palette.textTertiary)
+                            .help("Son tartıya göre")
+                            .padding(.bottom, 12)
+                    }
                 }
-                SheetField("Hedef kilo (kg)") {
-                    TextField("", value: $weightInput, format: .number)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(Palette.textPrimary)
-                }
-                SheetField("Not") {
-                    TextField("ör: yaza hazır", text: $noteInput, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(2...4)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Palette.textPrimary)
-                }
+                SadeTextArea(label: "Not", text: $noteInput, lines: 1...3, minHeight: 38)
             }
-        } footer: {
+            .padding(.horizontal, 28)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
+        } footerLeading: {
             // Yıkıcı eylem SOLDA — Kaydet'in dibinde olsa yanlışlıkla tıklanırdı.
-            SheetDestructiveButton("Sil") { showDeleteConfirm = true }
-            Spacer(minLength: 0)
-            SheetSecondaryButton("İptal", action: onCancel)
-            SheetPrimaryButton("Kaydet") {
+            SadeButton(title: "Sil", role: .destructive) { showDeleteConfirm = true }
+        } footerTrailing: {
+            SadeButton(title: "İptal", action: onCancel)
+            SadeButton(title: "Kaydet", role: .primary) {
                 goal.targetWeight = weightInput
                 goal.anchorDate = dateInput
                 let trimmed = noteInput.trimmingCharacters(in: .whitespaces)
@@ -572,6 +493,7 @@ struct GoalEditorSheet: View {
                 onSave()
             }
         }
+        .frame(width: 480)
         .alert("Hedefi sil?", isPresented: $showDeleteConfirm) {
             Button("İptal", role: .cancel) { }
             Button("Sil", role: .destructive) { onDelete() }

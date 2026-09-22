@@ -70,51 +70,26 @@ struct CalendarView: View {
     var body: some View {
         let consumedDict = consumedByDay
         let weightDict = weightByDay
-        return GeometryReader { proxy in
-            let contentWidth = proxy.size.width
-            let compact = contentWidth < 860
-
-            // Viewport'u doldur: takvim masası kalan boşluğu yutar, Hedef Rotası dibe
-            // yapışır; pencere kısaysa sayfa yine kayar.
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    header(compact: compact)
-                    periodStrip
-                    calendarDesk(consumed: consumedDict, weights: weightDict)
-                    goalRouteCard
+        // Üst şerit yok: sayfa adı ve metası sidebar'da; içerik doğrudan başlar.
+        return VStack(spacing: 0) {
+            // Viewport yüksekliğini ölç: masa (esnek bölüm) kalan boşluğu yutabilsin.
+            GeometryReader { geo in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                        calendarDesk(consumed: consumedDict, weights: weightDict, available: geo.size.height)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, compact ? Spacing.lg : Spacing.xxxl)
-                .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
             }
         }
-        .toolbar {
-            if !goals.isEmpty {
-                ToolbarItem(placement: .destructiveAction) {
-                    Button(role: .destructive) {
-                        showingClearConfirm = true
-                    } label: {
-                        Label { Text("Sıfırla") } icon: { Lucide(sf: "trash") }
-                    }
-                    .help("Tüm aylık hedefleri sil")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { showingSetup = true } label: {
-                    Label {
-                        Text(goals.isEmpty ? "Plan Oluştur" : "Yeni Plan")
-                    } icon: {
-                        Lucide(sf: goals.isEmpty ? "plus" : "arrow.clockwise")
-                    }
-                }
-                .keyboardShortcut("n", modifiers: .command)
-                .help(goals.isEmpty ? "Aylık plan oluştur (⌘N)" : "Mevcut planı değiştir (⌘N)")
-            }
-        }
-        .background(Palette.background.ignoresSafeArea())
+        .background(DashboardBackground().ignoresSafeArea())
         .sheet(isPresented: $showingSetup) {
             PlanSetupSheet(
                 startWeight: currentWeight ?? 80,
+                replacesExisting: !goals.isEmpty,
                 onCreate: { plan in
                     applyPlan(plan)
                     showingSetup = false
@@ -159,51 +134,52 @@ struct CalendarView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Header (ince üst şerit: yalnız günlük hedef metası)
 
-    @ViewBuilder
-    private func header(compact: Bool) -> some View {
-        if compact {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                headerCopy
-                headerTargetBlock(alignment: .leading)
-            }
-        } else {
-            HStack(alignment: .bottom) {
-                headerCopy
-                Spacer(minLength: Spacing.xl)
-                headerTargetBlock(alignment: .trailing)
-            }
-        }
-    }
-
-    private var headerCopy: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Beslenme Takibi").eyebrow()
-            Text("Takvim")
-                .font(.system(size: 22, weight: .bold))
-                .tracking(-0.2)
+    private var headerTargetMeta: some View {
+        HStack(spacing: 7) {
+            Circle().fill(Palette.accent).frame(width: 6, height: 6)
+            Text("Günlük Hedef")
+                .font(.system(size: 11.5, weight: .regular))
+                .foregroundStyle(Palette.textTertiary)
+            Text("\(Fmt.int(dailyTarget)) kalori")
+                .font(.system(size: 12.5, weight: .semibold))
+                .monospacedDigit()
                 .foregroundStyle(Palette.textPrimary)
-            Text("Günlük kayıtları, ay içi kalori ritmini ve kilo hedeflerini tek panoda gör.")
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.top, 2)
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+        .help(profile == nil || latestMeasurement == nil ? "Profil ve son ölçüm bekleniyor" : "Profildeki hedeften okunuyor")
     }
 
-    private func headerTargetBlock(alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 3) {
-            HStack(spacing: 8) {
-                Circle().fill(Palette.accent).frame(width: 6, height: 6)
-                Text("Günlük Hedef").eyebrow()
-                Text("\(Fmt.int(dailyTarget)) kcal")
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textPrimary)
+    /// Buzz kanal-başlığı aksiyonları: sayfanın eylemleri toolbar'da değil,
+    /// başlığın sağında outline buton olarak durur (ChatHeader.tsx dili).
+    private var headerActions: some View {
+        HStack(spacing: 6) {
+            if !goals.isEmpty {
+                Button(role: .destructive) { showingClearConfirm = true } label: {
+                    Lucide(sf: "trash", size: 14)
+                        .foregroundStyle(Palette.negative)
+                        .frame(width: 32, height: 32)
+                        .flatButtonChrome()
+                }
+                .buttonStyle(.plain)
+                .help("Tüm aylık hedefleri sil")
             }
-            Text(profile == nil || latestMeasurement == nil ? "Profil ve son ölçüm bekleniyor" : "Profildeki hedeften okunuyor")
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
+
+            Button { showingSetup = true } label: {
+                HStack(spacing: 6) {
+                    Lucide(sf: goals.isEmpty ? "plus" : "arrow.clockwise", size: 13)
+                    Text(goals.isEmpty ? "Plan Oluştur" : "Yeni Plan")
+                        .font(.system(size: 12.5, weight: .medium))
+                }
+                .foregroundStyle(Palette.textPrimary)
+                .padding(.horizontal, 11)
+                .frame(height: 32)
+                .flatButtonChrome()
+            }
+            .buttonStyle(.plain)
+            .help(goals.isEmpty ? "Aylık plan oluştur" : "Mevcut planı değiştir")
         }
     }
 
@@ -230,99 +206,64 @@ struct CalendarView: View {
             PeriodItem(
                 label: "Bugün",
                 value: Fmt.int(today.totalConsumed),
-                unit: "kcal",
+                unit: "kalori",
                 sub: "\(balanceText(todayBalance)) · kayıt \(todayMeals)",
                 badge: nil
             ),
             PeriodItem(
                 label: "Bu Hafta",
                 value: Fmt.int(week.totalConsumed),
-                unit: "kcal",
+                unit: "kalori",
                 sub: "\(week.loggedDays) gün kayıtlı · ort. \(Fmt.int(week.averageDailyKcal))",
                 badge: (balanceText(week.netBalance), balanceTint(week.netBalance))
             ),
             PeriodItem(
                 label: "Bu Ay",
                 value: Fmt.int(month.totalConsumed),
-                unit: "kcal",
+                unit: "kalori",
                 sub: "\(month.loggedDays) gün kayıtlı · ort. \(Fmt.int(month.averageDailyKcal))",
                 badge: (balanceText(month.netBalance), balanceTint(month.netBalance))
             ),
             PeriodItem(
                 label: "Son 30 Gün",
                 value: Fmt.signed(last30.averageDailyBalance, digits: 0),
-                unit: "kcal/gün",
+                unit: "kalori/gün",
                 sub: "toplam \(Fmt.signed(last30.netBalance, digits: 0)) · \(last30.loggedDays) gün",
                 badge: (balanceText(last30.netBalance), balanceTint(last30.netBalance))
             ),
         ]
     }
 
-    private var periodStrip: some View {
-        let items = periodItems
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
-                    if idx > 0 {
-                        Rectangle().fill(Palette.border).frame(width: 0.5)
-                    }
-                    periodColumn(item)
-                        .frame(minWidth: 196, maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .dashboardCard(radius: 14)
-
-            VStack(spacing: 0) {
-                ForEach([0, 2], id: \.self) { row in
-                    if row > 0 {
-                        Rectangle().fill(Palette.border).frame(height: 0.5)
-                    }
-                    HStack(spacing: 0) {
-                        periodColumn(items[row])
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Rectangle().fill(Palette.border).frame(width: 0.5)
-                        periodColumn(items[row + 1])
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .dashboardCard(radius: 14)
-        }
-    }
-
-    private func periodColumn(_ item: PeriodItem) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Text(item.label).eyebrow()
-                Spacer(minLength: 4)
-                if let badge = item.badge {
-                    Text(badge.text)
-                        .font(.system(size: 10.5, weight: .regular, design: .monospaced))
-                        .foregroundStyle(badge.tint)
+    /// Buzz tarzı düz KPI şeridi: kutu yok, kolonlar dikey hairline'larla ayrılır.
+    /// Dar kolon sürümü: dört dönem alt alta, tek satırlık kompakt gruplar.
+    private var periodSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(periodItems.enumerated()), id: \.offset) { idx, item in
+                if idx > 0 { Hairline() }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.label)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(width: 74, alignment: .leading)
+                    Text(item.value)
+                        .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(Palette.textPrimary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(item.unit)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.textQuaternary)
+                    Spacer(minLength: 6)
+                    if let badge = item.badge {
+                        Text(badge.text)
+                            .font(.system(size: 10.5).monospacedDigit())
+                            .foregroundStyle(badge.tint)
+                            .lineLimit(1)
+                    }
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(item.value)
-                    .font(.system(size: 24, weight: .bold))
-                    .monospacedDigit()
-                    .tracking(-0.4)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text(item.unit)
-                    .font(.system(size: 11.5, weight: .regular))
-                    .foregroundStyle(Palette.textTertiary)
-            }
-            Text(item.sub)
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
         }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func balanceText(_ balance: Double) -> String {
@@ -338,48 +279,111 @@ struct CalendarView: View {
 
     // MARK: - Calendar desk (ay grid'i + seçili gün)
 
-    private func calendarDesk(consumed: [Date: Double], weights: [Date: Double]) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: Spacing.lg) {
-                calendarPanel(consumed: consumed, weights: weights)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                selectedDayDetail
-                    .frame(width: 392, alignment: .topLeading)
-            }
+    // Masa geometrisi — esneklik hesabı ile çizim aynı sayıları kullansın.
+    private static let dayRowMin: CGFloat = 78      // gün fayansının tabanı (DayCell kendi minHeight'ı 74)
+    private static let gridGap: CGFloat = 7         // grid satır/kolon aralığı
+    private static let weekdayRowH: CGFloat = 28    // PZT…PAZ başlık kapsülü
+    private static let panelChromeH: CGFloat = 54   // panel üst boşluğu 6 + ay başlığı 32 (butonlu) + başlık altı 16
+    private static let deskColumnGap: CGFloat = 10  // Seçili Gün ile dönem özeti arası
 
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                calendarPanel(consumed: consumed, weights: weights)
-                selectedDayDetail
+    /// Viewport'u doldur: takvim masası kalan boşluğu yutar, Hedef Rotası dibe.
+    /// Sabit kalemler viewport'tan düşülür, ARTAN yükseklik grid satırlarına
+    /// (gün fayansları uzar) ve Seçili Gün paneline dağıtılır. Esnek frame yerine
+    /// açık matematik: ScrollView dikey öneri vermediği için `maxHeight: .infinity`
+    /// zinciri ideal boya çöker (ve eski kabukta layout döngüsü yapıyordu).
+    private func calendarDesk(consumed: [Date: Double], weights: [Date: Double], available: CGFloat) -> some View {
+        let weeks = max(1, monthGridDays().count / 7)
+        // Sabit kalan: yalnız sayfa dikey padding'i. (Dönem özeti sağ kolonun
+        // dibine indi; Hedef Rotası bölümü kaldırıldı.)
+        let fixedRest = 18 * 2 as CGFloat
+        // Masanın doğal tabanı: panel kabuğu + gün adları satırı + aralıklar + 104'lük satırlar.
+        let deskChrome = Self.panelChromeH + Self.weekdayRowH + Self.gridGap * CGFloat(weeks)
+        let deskMin = deskChrome + Self.dayRowMin * CGFloat(weeks)
+        // Kısa pencerede max(...) doğal boyu korur; sayfa eskisi gibi kayar.
+        let elastic = max(deskMin, available - fixedRest)
+        let rowH = max(Self.dayRowMin, (elastic - deskChrome) / CGFloat(weeks))
+        // Sağ kolon: panel + hairline + dönem özeti TAM masa boyunda bitsin
+        // (yoksa özet viewport'un altında kesiliyordu).
+        //   özet = 4 satır × 17 + 3 hairline + 6 × 10 aralık = 131
+        //   kolon = panel + 2 × kolonAralığı + 1pt hairline + özet
+        let summaryH: CGFloat = 131
+        let detailMin = max(0, elastic - Self.deskColumnGap * 2 - 1 - summaryH)
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 28) {
+                calendarPanel(consumed: consumed, weights: weights, rowHeight: rowH)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                Rectangle()
+                    .fill(Palette.border.opacity(0.6))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                VStack(alignment: .trailing, spacing: Self.deskColumnGap) {
+                    selectedDayDetail(minHeight: detailMin)
+                    // Dönem özeti (Bugün/Bu Hafta/Bu Ay/Son 30 Gün) sayfanın üstünde
+                    // tam genişlik şerit olarak gereksiz yer kaplıyordu; seçili günün
+                    // altında, bağlamının yanında duruyor.
+                    Hairline()
+                    periodSummary
+                }
+                .frame(width: 392, alignment: .topLeading)
+            }
+            // Çok öğünlü günde sağ kolon daha uzun olabilir: minHeight sıkıştırmaz, büyütür.
+            .frame(minHeight: elastic, alignment: .top)
+
+            // Dar pencere: kolonlar alt alta düştüğü için sayfa zaten viewport'u aşar —
+            // fayanslar doğal boyunda kalır, esneme yalnız yan yana düzende anlamlı.
+            VStack(alignment: .leading, spacing: 12) {
+                calendarPanel(consumed: consumed, weights: weights, rowHeight: Self.dayRowMin)
+                selectedDayDetail(minHeight: 0)
+                Hairline()
+                periodSummary
             }
         }
     }
 
-    private func calendarPanel(consumed: [Date: Double], weights: [Date: Double]) -> some View {
+    private func calendarPanel(consumed: [Date: Double], weights: [Date: Double], rowHeight: CGFloat) -> some View {
         let monthStats = monthLoggedStats(consumed: consumed)
+        // Referans başlık: solda daire chevron çifti, büyük ay adı + soluk yıl.
+        let titleParts: (month: String, year: String) = {
+            let full = Self.monthTitleFormatter.string(from: currentMonth)
+            let comps = full.split(separator: " ")
+            guard comps.count >= 2 else { return (full, "") }
+            return (comps.dropLast().joined(separator: " "), String(comps.last!))
+        }()
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            HStack(alignment: .center, spacing: 10) {
                 monthNavButton(icon: "chevron.left") { jumpMonth(by: -1) }
-                Text(Self.monthTitleFormatter.string(from: currentMonth))
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(Palette.textPrimary)
                 monthNavButton(icon: "chevron.right") { jumpMonth(by: 1) }
-                Text(monthStats.days > 0
-                     ? "\(monthStats.days) gün kayıtlı · ort. \(Fmt.int(monthStats.avg)) kcal"
-                     : "kayıt yok")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
+
+                Text("\(Text(titleParts.month).foregroundStyle(Palette.textPrimary)) \(Text(titleParts.year).foregroundStyle(Palette.textQuaternary))")
+                    .font(.system(size: 25, weight: .bold))
+                    .tracking(-0.3)
                     .lineLimit(1)
+
+                // İçinde bulunulan ay için aynı satır zaten dönem şeridinin
+                // "Bu Ay" kolonunda duruyor — özet yalnızca başka aya gezinince görünür.
+                if !Calendar.current.isDate(currentMonth, equalTo: .now, toGranularity: .month) {
+                    Text(monthStats.days > 0
+                         ? "\(monthStats.days) gün kayıtlı · ort. \(Fmt.int(monthStats.avg)) kalori"
+                         : "kayıt yok")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .padding(.leading, 2)
+                }
                 Spacer(minLength: Spacing.sm)
                 todayButton
+                // Plan eylemleri ay başlığında: aylık hedefler bu takvimin
+                // günlerinde çip olarak yaşıyor, eylemleri de burada dursun.
+                headerActions
             }
             .padding(.bottom, Spacing.lg)
 
-            calendarGridBody(consumed: consumed, weights: weights)
+            calendarGridBody(consumed: consumed, weights: weights, rowHeight: rowHeight)
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 22)
-        .padding(.bottom, 24)
-        .dashboardCard()
+        // Referans: fayanslar kart içinde değil, doğrudan kanvasta yüzer.
+        // Üst boşluk + başlık satırı (30) + başlık altı (16) = panelChromeH.
+        .padding(.top, 6)
     }
 
     private var todayButton: some View {
@@ -396,15 +400,7 @@ struct CalendarView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Palette.surface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Palette.borderStrong, lineWidth: 0.75)
-            )
-            .contentShape(Rectangle())
+            .flatButtonChrome()
         }
         .buttonStyle(.plain)
         .help("Bugüne dön")
@@ -412,10 +408,11 @@ struct CalendarView: View {
 
     private func monthNavButton(icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Lucide(sf: icon, size: 11)
-                .foregroundStyle(Palette.textTertiary)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
+            Lucide(sf: icon, size: 12)
+                .foregroundStyle(Palette.textSecondary)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Palette.surfaceElevated))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
     }
@@ -423,32 +420,37 @@ struct CalendarView: View {
     // MARK: - Calendar grid
 
     /// Grid hesaplamasını body'de pre-build edilmiş `consumed`/`weights` dict'leri üzerinden yap.
-    private func calendarGridBody(consumed: [Date: Double], weights: [Date: Double]) -> some View {
-        let cols = Array(repeating: GridItem(.flexible(), spacing: 7), count: 7)
+    private func calendarGridBody(consumed: [Date: Double], weights: [Date: Double], rowHeight: CGFloat) -> some View {
+        let cols = Array(repeating: GridItem(.flexible(), spacing: Self.gridGap), count: 7)
         let days = monthGridDays()
         // Haftalara böl (7'şer). LazyVGrid satırlara dikey alan dağıtmadığı için
-        // manuel HStack satırları kullanıyoruz: her satır kalan yüksekliği eşit paylaşır,
-        // böylece grid kartın dibine kadar uzar (altta boşluk kalmaz).
+        // manuel HStack satırları kullanıyoruz: her satır masanın esnek yüksekliğinden
+        // pay alır, böylece grid kanvasın dibine kadar uzar (altta boşluk kalmaz).
         let weeks = stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<min($0 + 7, days.count)]) }
-        return VStack(spacing: 7) {
+        return VStack(spacing: Self.gridGap) {
             // Weekday headers
-            LazyVGrid(columns: cols, spacing: 7) {
+            LazyVGrid(columns: cols, spacing: Self.gridGap) {
                 ForEach(Self.weekdayHeaders, id: \.self) { wd in
-                    Text(wd).eyebrow()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 11)
+                    Text(wd)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: Self.weekdayRowH)
+                        .background(Capsule().fill(Palette.surfaceElevated.opacity(0.6)))
                 }
             }
-            // Day cells — esneyen satırlar
+            // Day cells — masadan gelen AÇIK satır boyu (dayRowMin tabanlı, viewport'a göre uzar).
+            // Esnek frame değil sayı: ScrollView içinde maxHeight:.infinity greedy-fill
+            // zinciri hem ideale çöküyor hem de layout döngüsü yapıyordu.
             ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                HStack(spacing: 7) {
+                HStack(spacing: Self.gridGap) {
                     ForEach(week, id: \.self) { date in
                         dayCell(date, consumed: consumed, weights: weights)
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 104)   // SABİT satır boyu — ScrollView içinde maxHeight:.infinity
-                                      // greedy-fill zinciri yeni kabukta layout döngüsü yapıyordu.
+                .frame(height: rowHeight)
             }
         }
     }
@@ -480,324 +482,31 @@ struct CalendarView: View {
 
     // MARK: - Selected day detail
 
-    private var selectedDayDetail: some View {
-        let foods = foodsFor(day: selectedDay)
-        let consumed = foods.reduce(0) { $0 + $1.calories }
-        let p = foods.compactMap(\.protein).reduce(0, +)
-        let c = foods.compactMap(\.carbs).reduce(0, +)
-        let f = foods.compactMap(\.fat).reduce(0, +)
-        let remaining = dailyTarget - consumed
-        let isOver = remaining < 0
-        let hasFood = !foods.isEmpty
-        let progress = dailyTarget > 0 ? min(1, max(0, consumed / dailyTarget)) : 0
-        let statusColor: Color = hasFood ? (isOver ? Palette.warning : Palette.positive) : Palette.textTertiary
-
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Seçili Gün").eyebrow()
-                Spacer()
-                Text("\(foods.count) öğün")
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
-            HStack(spacing: Spacing.sm) {
-                Text(Self.fullDayFormatter.string(from: selectedDay))
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(Palette.textPrimary)
-                if Calendar.current.isDateInToday(selectedDay) {
-                    Text("BUGÜN")
-                        .font(.system(size: 8.5, weight: .bold))
-                        .tracking(0.7)
-                        .foregroundStyle(Palette.accent)
-                }
-            }
-            .padding(.top, 6)
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Fmt.int(consumed))
-                    .font(.system(size: 34, weight: .bold))
-                    .monospacedDigit()
-                    .tracking(-0.5)
-                    .foregroundStyle(hasFood ? statusColor : Palette.textPrimary)
-                    .contentTransition(.numericText())
-                    .animation(.snappy, value: consumed)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text("/ \(Fmt.int(dailyTarget)) kcal")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .padding(.top, 10)
-
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Palette.track)
-                GeometryReader { geo in
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(statusColor)
-                        .opacity(0.85)
-                        .frame(width: max(0, geo.size.width * progress))
-                }
-            }
-            .frame(height: 3)
-            .padding(.top, 10)
-
-            Text(isOver
-                 ? "\(Fmt.int(abs(remaining))) kcal hedef üstü"
-                 : "\(Fmt.int(remaining)) kcal alan kaldı")
-                .font(.system(size: 11.5, weight: .regular))
-                .foregroundStyle(isOver ? Palette.warning : (hasFood ? Palette.positive : Palette.textTertiary))
-                .padding(.top, 7)
-
-            if hasFood {
-                HStack(spacing: Spacing.lg) {
-                    macroChip(label: "Protein", value: p, tint: Palette.macroProtein)
-                    macroChip(label: "Karb", value: c, tint: Palette.macroCarbs)
-                    macroChip(label: "Yağ", value: f, tint: Palette.macroFat)
-                }
-                .padding(.top, 12)
-                .padding(.bottom, 14)
-
-                Hairline()
-
-                VStack(spacing: 0) {
-                    ForEach(Array(foods.enumerated()), id: \.element.id) { idx, entry in
-                        if idx > 0 { Hairline() }
-                        mealRow(entry)
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Kayıt yok")
-                        .font(Typography.bodyBold)
-                        .foregroundStyle(Palette.textPrimary)
-                    Text("Bu güne yemek eklenince satır satır burada görünür.")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                }
-                .padding(Spacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Palette.fieldFill.opacity(0.55))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: 0.75)
-                )
-                .padding(.top, 14)
-            }
-
-        }
-        .padding(.horizontal, 26)
-        .padding(.top, 22)
-        .padding(.bottom, 20)
-        .dashboardCard()
+    /// `minHeight`: masanın esnek boyundan gelen taban — kart kolonun dibine iner,
+    /// içerik üstte kalır. Öğün listesi daha uzunsa kart doğal boyunda büyür (sıkışmaz).
+    private func selectedDayDetail(minHeight: CGFloat) -> some View {
+        // Panel Genel Bakış hero'sundakiyle aynı bileşen; buradaki fark satır
+        // aksiyonları (tarih/saat düzenleme + gün kaydırma).
+        DayMealsPanel(
+            day: selectedDay,
+            foods: foodsFor(day: selectedDay),
+            dailyTarget: dailyTarget,
+            title: "Seçili Gün",
+            // Düz zemin (Genel Bakış dili): kart kabuğu yok.
+            showsCard: false,
+            minHeight: minHeight,
+            onEditDate: { editingFoodDate = $0 },
+            onMove: { entry, days in moveFood(entry, byDays: days) }
+        )
     }
 
-    private func mealRow(_ entry: FoodEntry) -> some View {
-        HStack(alignment: .top, spacing: Spacing.md) {
-            Text(Self.timeFormatter.string(from: entry.date))
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)   // yanındaki yemek adı (layoutPriority 1)
-                .padding(.top, 2)                                // saati sıkıştırıp "14:30"u alt alta kırmasın
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.name)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineSpacing(2)
-                    .lineLimit(2)
-                Text(mealMetaText(entry))
-                    .font(.system(size: 10.5, weight: .regular))
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-            }
-            .layoutPriority(1)
-            Spacer(minLength: Spacing.sm)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(Fmt.int(entry.calories))
-                    .font(.system(size: 12.5, weight: .regular, design: .monospaced))
-                    .foregroundStyle(Palette.textPrimary)
-                Text("kcal")
-                    .font(.system(size: 10, weight: .regular))
-                    .foregroundStyle(Palette.textTertiary)
-            }
-            .lineLimit(1)
-            .fixedSize()
-            Button {
-                editingFoodDate = entry
-            } label: {
-                Lucide(sf: "calendar.badge.clock", size: 10)
-                    .foregroundStyle(Palette.textQuaternary)
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Yemeğin gününü veya saatini değiştir")
-        }
-        .padding(.vertical, 12)
-        .contextMenu {
-            Button {
-                editingFoodDate = entry
-            } label: {
-                Label("Tarih ve Saati Değiştir", systemImage: "calendar.badge.clock")
-            }
-            Button {
-                moveFood(entry, byDays: -1)
-            } label: {
-                Label("1 Gün Geri Al", systemImage: "arrow.left")
-            }
-            Button {
-                moveFood(entry, byDays: 1)
-            } label: {
-                Label("1 Gün İleri Al", systemImage: "arrow.right")
-            }
-        }
-    }
-
-    /// "265g · P 34g · K 43g · Y 5g" — tek satır, kayıt eksikse "Makro yok".
-    private func mealMetaText(_ entry: FoodEntry) -> String {
-        var parts: [String] = []
-        if let g = entry.grams { parts.append("\(Fmt.int(g))g") }
-        if let p = entry.protein { parts.append("P \(Fmt.int(p))g") }
-        if let c = entry.carbs { parts.append("K \(Fmt.int(c))g") }
-        if let f = entry.fat { parts.append("Y \(Fmt.int(f))g") }
-        return parts.isEmpty ? "Makro yok" : parts.joined(separator: " · ")
-    }
-
+    /// Sağ tık menüsünden gün kaydırma: yemeği taşı, seçimi ve ayı da oraya al.
     private func moveFood(_ entry: FoodEntry, byDays days: Int) {
         guard let newDate = Calendar.current.date(byAdding: .day, value: days, to: entry.date) else { return }
         entry.date = newDate
         ctx.saveOrReport()
         selectedDay = Calendar.current.startOfDay(for: newDate)
         currentMonth = Self.startOfMonth(newDate)
-    }
-
-    private func macroChip(label: String, value: Double, tint: Color) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(tint).frame(width: 5, height: 5)
-            Text(label)
-                .font(.system(size: 11.5, weight: .regular))
-                .foregroundStyle(Palette.textSecondary)
-            Text("\(Fmt.int(value))g")
-                .font(.system(size: 11.5, weight: .regular, design: .monospaced))
-                .foregroundStyle(Palette.textPrimary)
-        }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    // MARK: - Hedef rotası (yatay zaman çizgisi)
-
-    @ViewBuilder
-    private var goalRouteCard: some View {
-        if goals.isEmpty {
-            goalRouteEmpty
-        } else {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Hedef Rotası").eyebrow()
-                    Text(routeMetaText)
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                    Spacer(minLength: 0)
-                }
-
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(Array(goals.enumerated()), id: \.element.id) { index, g in
-                        GoalRouteNode(
-                            // Dinamik: düğüme ULAŞTIK mı? Tarih değil, gerçek kilo ilerlemesi.
-                            goal: g,
-                            isReached: routeProgress >= Double(index) - 0.001,
-                            delta: currentWeight.map { g.targetWeight - $0 }
-                        ) {
-                            // Düğüme tıkla → düzenle (kilo/tarih/not/sil).
-                            editing = g
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-                .background {
-                    GeometryReader { geo in
-                        let count = max(1, goals.count)
-                        let cellW = geo.size.width / CGFloat(count)
-                        let fullW = cellW * CGFloat(max(0, count - 1))
-                        let fillW = min(fullW, cellW * CGFloat(routeProgress))
-                        ZStack(alignment: .leading) {
-                            // Tüm rota — soluk ray
-                            Rectangle()
-                                .fill(Palette.border)
-                                .frame(width: fullW, height: 1)
-                            // Kat edilen mesafe — hedefe yaklaştıkça uzar
-                            Rectangle()
-                                .fill(Palette.positive)
-                                .frame(width: fillW, height: 1.5)
-                        }
-                        .offset(x: cellW / 2, y: 8)
-                    }
-                }
-            }
-            .padding(.horizontal, 32)
-            .padding(.top, 20)
-            .padding(.bottom, 22)
-            .dashboardCard()
-        }
-    }
-
-    /// Rota üzerindeki sürekli konum [0 … n-1]: güncel kilonun aylık hedef
-    /// dizisinde nereye düştüğü. Örn. 1.4 = 1. ve 2. düğüm arası %40 yol alınmış.
-    /// Hedefe yaklaştıkça büyür; bağlayıcı çizgiyi ve düğüm tiklerini bu besler.
-    private var routeProgress: Double {
-        let targets = goals.map(\.targetWeight)
-        guard targets.count > 1, let cw = currentWeight else { return 0 }
-        // Aralıkları gez: cw iki ardışık hedef arasındaysa kesirli konum üret.
-        for i in 0..<(targets.count - 1) {
-            let a = targets[i], b = targets[i + 1]
-            let lo = min(a, b), hi = max(a, b)
-            if cw >= lo && cw <= hi {
-                let span = a - b
-                guard abs(span) > 0.0001 else { return Double(i) }
-                return Double(i) + min(max((a - cw) / span, 0), 1)
-            }
-        }
-        // Aralık dışı: başlangıçtan önce mi (henüz 0. düğüm yolunda) yoksa son hedefi geçti mi?
-        let descending = (targets.last ?? 0) <= (targets.first ?? 0)
-        let beyondStart = descending ? cw <= targets[0] : cw >= targets[0]
-        return beyondStart ? Double(targets.count - 1) : 0
-    }
-
-    private var routeMetaText: String {
-        guard let first = goals.first, let last = goals.last else { return "" }
-        let span = max(1, (Calendar.current.dateComponents([.month], from: first.anchorDate, to: last.anchorDate).month ?? 0) + 1)
-        let totalKg = abs((currentWeight ?? first.targetWeight) - last.targetWeight)
-        return "\(span) aylık plan · \(goals.count) hedef · \(Fmt.num(totalKg, digits: 1)) kg"
-    }
-
-    private var goalRouteEmpty: some View {
-        HStack(alignment: .center, spacing: Spacing.lg) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Hedef Rotası").eyebrow()
-                Text("Hedef rotası yok")
-                    .font(Typography.titleSmall)
-                    .foregroundStyle(Palette.textPrimary)
-                Text("Aylık kilo hedeflerini ekleyince rota burada ay ay işaretlenir.")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-            Spacer(minLength: Spacing.lg)
-            PrimaryButton(title: "Plan Oluştur", systemImage: "wand.and.stars") {
-                showingSetup = true
-            }
-            .frame(width: 180)
-        }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 20)
-        .dashboardCard()
     }
 
     private func applyPlan(_ plan: PlanSetupSheet.Plan) {
@@ -905,12 +614,6 @@ struct CalendarView: View {
         return f
     }()
 
-    static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "HH:mm"
-        return f
-    }()
 }
 
 // MARK: - DayCell (calendar grid)

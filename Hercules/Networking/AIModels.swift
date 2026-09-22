@@ -1045,6 +1045,9 @@ struct ChatTurn: Identifiable, Equatable, Codable, Sendable {
     var saved: Bool = false
     var searchedFor: String? = nil  // populated if AI did a web search
     var imageIDs: [String]? = nil   // ekli görsellerin ChatImageStore id'leri (default nil → eski payload uyumlu)
+    /// Öğün günlüğe hangi GÜNE yazıldı. Kart tarih seçtirdiği için "eklendi"
+    /// şeridi mesajın saati yerine bunu gösterir (nil → eski payload, createdAt).
+    var savedFoodDate: Date? = nil
     var createdAt: Date
 
     init(
@@ -1056,6 +1059,7 @@ struct ChatTurn: Identifiable, Equatable, Codable, Sendable {
         saved: Bool = false,
         searchedFor: String? = nil,
         imageIDs: [String]? = nil,
+        savedFoodDate: Date? = nil,
         createdAt: Date = .now
     ) {
         self.id = id
@@ -1066,11 +1070,12 @@ struct ChatTurn: Identifiable, Equatable, Codable, Sendable {
         self.saved = saved
         self.searchedFor = searchedFor
         self.imageIDs = imageIDs
+        self.savedFoodDate = savedFoodDate
         self.createdAt = createdAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, food, actions, saved, searchedFor, imageIDs, createdAt
+        case id, role, text, food, actions, saved, searchedFor, imageIDs, savedFoodDate, createdAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1083,6 +1088,7 @@ struct ChatTurn: Identifiable, Equatable, Codable, Sendable {
         saved = (try? c.decodeIfPresent(Bool.self, forKey: .saved)) ?? false
         searchedFor = try? c.decodeIfPresent(String.self, forKey: .searchedFor)
         imageIDs = try? c.decodeIfPresent([String].self, forKey: .imageIDs)
+        savedFoodDate = try? c.decodeIfPresent(Date.self, forKey: .savedFoodDate)
         createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? .now
     }
 
@@ -1098,6 +1104,7 @@ struct ChatTurn: Identifiable, Equatable, Codable, Sendable {
         try c.encode(saved, forKey: .saved)
         try c.encodeIfPresent(searchedFor, forKey: .searchedFor)
         try c.encodeIfPresent(imageIDs, forKey: .imageIDs)
+        try c.encodeIfPresent(savedFoodDate, forKey: .savedFoodDate)
         try c.encode(createdAt, forKey: .createdAt)
     }
 }

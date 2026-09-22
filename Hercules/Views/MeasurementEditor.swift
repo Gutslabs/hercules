@@ -7,10 +7,10 @@ enum EditorMode {
     case edit(Measurement)
 }
 
-/// Tartı ekle / Tam ölçüm — V1 dili, kompakt (560px).
-/// İlkeler: mod seçimi segment (radio kart yok), tarih varsayılan GİZLİ
-/// ("Bugün · 15:50" çipi — kaçırılan gün için tıklayıp açılır), sağ özet
-/// paneli yok. Tek zorunlu alan: kilo; tam ölçümde detaylar opsiyonel.
+/// Tartı ekle / Tam ölçüm — tasarım: tuval ▸ Pencereler · Veriler (az yazı). Üstte mod + tarih
+/// (‹ gün ›, saat); Tartı'da büyük kilo girişi (−/+ 0,1), düne göre fark ve son 30 günün Grafikler
+/// dilindeki eğrisi (yazılan değer ucunda); Tam ölçümde kilo, çevreler, US Navy yağ oranı ve not.
+/// Tek zorunlu alan: kilo.
 struct MeasurementEditor: View {
     enum CreateKind {
         case smart
@@ -24,6 +24,7 @@ struct MeasurementEditor: View {
 
     @Environment(\.dismiss) private var dismiss
     @Query private var profiles: [UserProfile]
+    @Query(sort: \Measurement.date, order: .reverse) private var measurements: [Measurement]
 
     @State private var date: Date
     @State private var weight: Double?
@@ -33,8 +34,10 @@ struct MeasurementEditor: View {
     @State private var neck: Double?
     @State private var note: String
     @State private var showExtra: Bool
-    @State private var dateOpen = false
+    @State private var pickingDay = false
+    @State private var pickingTime = false
     @State private var confirmingDelete = false
+    @State private var chartHover: TrendPoint?
     /// US Navy hesabı için boy — profilden gelir, yalnız bu kayıt için düzeltilebilir.
     @State private var heightLocal: Double? = nil
     /// false → yağ oranı bel+boyun+boydan otomatik; true → elle girilmiş değer korunur.
@@ -42,11 +45,9 @@ struct MeasurementEditor: View {
     @FocusState private var weightFocused: Bool
     @FocusState private var bodyFatFocused: Bool
 
-    private var fieldFill: Color { Palette.fieldFill }
-    private var segPaper: Color { Palette.btnBg }
-    private var segInk: Color { Palette.btnFg }
-
     private static let trLocale = Locale(identifier: "tr_TR")
+    private static let numberFormat = FloatingPointFormatStyle<Double>.number
+        .precision(.fractionLength(0...2)).locale(Locale(identifier: "tr_TR"))
 
     init(
         mode: EditorMode,
@@ -106,59 +107,50 @@ struct MeasurementEditor: View {
 
     private var saveButtonTitle: String {
         if isEditing { return "Kaydet" }
-        return showExtra ? "Tam Ölçüm Ekle" : "Tartı Ekle"
-    }
-
-    private var modeHint: String {
-        showExtra ? "kilo zorunlu, detaylar opsiyonel" : "günlük akış için sadece kilo yeterli"
+        return showExtra ? "Tam ölçüm ekle" : "Tartı ekle"
     }
 
     private var canSave: Bool {
         weight != nil
     }
 
+    /// Düzenlenen kayıt hariç, bu kaydın tarihinden önceki ölçümler (yeniden eskiye).
+    private var earlier: [Measurement] {
+        let editing: Measurement? = { if case .edit(let m) = mode { return m } else { return nil } }()
+        return measurements.filter { $0 !== editing && $0.date < date }
+    }
+
+    private var lowerIsBetter: Bool { (profiles.first?.goal.calorieAdjustment ?? 0) <= 0 }
+
     var body: some View {
-        SheetChrome(
-            eyebrow: isEditing ? "Kayıt" : "Yeni Kayıt",
-            title: editorTitle,
-            size: .standard,
-            // Tartı ↔ Tam Ölçüm geçişinde yükseklik animasyonla değişiyor; sabit yükseklik
-            // bunu öldürürdü.
-            fitsHeightToContent: true,
-            headerAccessory: AnyView(modeSegment),
-            onClose: { dismiss() }
-        ) {
-            VStack(alignment: .leading, spacing: 18) {
-                dateRow
-
-                numberField(label: "Kilo", unit: "kg", value: $weight, big: true, required: true)
-                    .focused($weightFocused)
-
+        SadeSheet(title: editorTitle, onClose: { dismiss() }) {
+            VStack(alignment: .leading, spacing: 0) {
+                modeRow
                 if showExtra {
-                    detailFields
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .top).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                    fullFields
+                        .transition(.opacity)
+                } else {
+                    quickFields
+                        .transition(.opacity)
                 }
             }
-        } footer: {
-            Text("↵ kaydet · esc vazgeç")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Palette.textTertiary)
-            Spacer(minLength: Spacing.md)
+            .padding(.horizontal, 28)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
+        } footerLeading: {
             if isEditing, onDelete != nil {
-                SheetDestructiveButton("Sil") { confirmingDelete = true }
+                SadeButton(title: "Sil", role: .destructive) { confirmingDelete = true }
             }
-            SheetSecondaryButton("Vazgeç") { dismiss() }
-            SheetPrimaryButton(saveButtonTitle, enabled: canSave) {
+        } footerTrailing: {
+            SadeButton(title: "Vazgeç") { dismiss() }
+            SadeButton(title: saveButtonTitle, role: .primary, enabled: canSave) {
                 save()
                 dismiss()
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showExtra)
-        .animation(.easeInOut(duration: 0.16), value: dateOpen)
-        // ↵ herhangi bir alandayken kaydeder (mockup: "↵ kaydet").
+        .frame(width: 660)
+        .animation(.easeInOut(duration: 0.18), value: showExtra)
+        // ↵ herhangi bir alandayken kaydeder.
         .onSubmit {
             if canSave { save(); dismiss() }
         }
@@ -175,134 +167,76 @@ struct MeasurementEditor: View {
         }
     }
 
-    // MARK: - Header (eyebrow + başlık · segment · kapat)
+    // MARK: - Üst: mod + tarih
 
-    private var modeSegment: some View {
-        HStack(spacing: 2) {
-            segmentItem("Tartı", selected: !showExtra) { showExtra = false }
-            segmentItem("Tam Ölçüm", selected: showExtra) { showExtra = true }
+    private var modeRow: some View {
+        HStack(spacing: 12) {
+            SadeSegmented(options: [(value: false, label: "Tartı"), (value: true, label: "Tam ölçüm")], selection: $showExtra)
+                .frame(width: 220)
+            Spacer(minLength: 8)
+            HStack(spacing: 2) {
+                stepButton("chevron.left", help: "Önceki gün", enabled: true) { stepDay(-1) }
+                Button { pickingDay = true } label: {
+                    HStack(spacing: 8) {
+                        Lucide(sf: "calendar", size: 13)
+                            .foregroundStyle(Palette.textTertiary)
+                        Text(shortDayLabel)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Palette.textPrimary)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
+                    .sadeBox(radius: 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Tarihi değiştir")
+                .popover(isPresented: $pickingDay, arrowEdge: .bottom) {
+                    DatePicker("", selection: $date, in: ...Date(), displayedComponents: [.date])
+                        .datePickerStyle(.graphical)
+                        .labelsHidden()
+                        .environment(\.locale, Self.trLocale)
+                        .padding(12)
+                }
+                stepButton("chevron.right", help: "Sonraki gün", enabled: canStepForward) { stepDay(1) }
+                Button { pickingTime = true } label: {
+                    HStack(spacing: 8) {
+                        Text(Fmt.timeShort.string(from: date))
+                            .font(.system(size: 14).monospacedDigit())
+                            .foregroundStyle(Palette.textPrimary)
+                        Lucide(sf: "clock", size: 12)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
+                    .sadeBox(radius: 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Saati değiştir")
+                .padding(.leading, 6)
+                .popover(isPresented: $pickingTime, arrowEdge: .bottom) {
+                    DatePicker("", selection: $date, in: ...Date(), displayedComponents: .hourAndMinute)
+                        .datePickerStyle(.stepperField)
+                        .labelsHidden()
+                        .environment(\.locale, Self.trLocale)   // 24 saat (AM/PM değil)
+                        .padding(12)
+                }
+            }
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.fieldFill))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
     }
 
-    private func segmentItem(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    private func stepButton(_ icon: String, help: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(selected ? segInk : Palette.textSecondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(selected ? segPaper : Color.clear)
-                )
+            Lucide(sf: icon, size: 13)
+                .foregroundStyle(enabled ? Palette.textSecondary : Palette.textQuaternary)
+                .frame(width: 30, height: 38)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Tarih (varsayılan gizli çip — tıklayınca gün gezgini)
-
-    private var dateRow: some View {
-        HStack(alignment: .center, spacing: 10) {
-            if dateOpen {
-                openDateChip
-                Text(relativeDayHint)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-            } else {
-                collapsedDateChip
-            }
-            Spacer(minLength: Spacing.md)
-            Text(modeHint)
-                .font(.system(size: 10.5))
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-    }
-
-    private var collapsedDateChip: some View {
-        Button {
-            dateOpen = true
-        } label: {
-            HStack(spacing: 7) {
-                Text(shortDayLabel)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Palette.textSecondary)
-                Text(Fmt.timeShort.string(from: date))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Palette.textQuaternary)
-                Lucide(sf: "chevron.down", size: 7.5)
-                    .foregroundStyle(Palette.textQuaternary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Tarihi değiştir")
-    }
-
-    /// ‹ 9 Haziran › | saat — kaçırılan günü girmek için. Çip içerik boyunda
-    /// sabittir (.fixedSize) — dar düzende metin asla harf harf kırılmaz.
-    private var openDateChip: some View {
-        HStack(spacing: 9) {
-            Button { stepDay(-1) } label: {
-                Lucide(sf: "chevron.left", size: 9)
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: 14, height: 16)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button { dateOpen = false } label: {
-                Text(Fmt.dayMonth.string(from: date))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Tarihi gizle")
-
-            Button { stepDay(1) } label: {
-                Lucide(sf: "chevron.right", size: 9)
-                    .foregroundStyle(canStepForward ? Palette.textTertiary : Palette.textQuaternary.opacity(0.4))
-                    .frame(width: 14, height: 16)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canStepForward)
-
-            Rectangle().fill(Palette.border).frame(width: 1, height: 12)
-
-            DatePicker("", selection: $date, in: ...Date(), displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
-                .labelsHidden()
-                .controlSize(.small)
-                .environment(\.locale, Self.trLocale)   // 24 saat (AM/PM değil)
-                .fixedSize()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Palette.accent.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1)
-        )
-        .fixedSize()
+        .disabled(!enabled)
+        .help(help)
     }
 
     private var shortDayLabel: String {
@@ -310,16 +244,6 @@ struct MeasurementEditor: View {
         if cal.isDateInToday(date) { return "Bugün" }
         if cal.isDateInYesterday(date) { return "Dün" }
         return Fmt.dayMonth.string(from: date)
-    }
-
-    private var relativeDayHint: String {
-        let cal = Calendar.current
-        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: .now)).day ?? 0
-        switch days {
-        case 0:  return "bugünü giriyorsun"
-        case 1:  return "dünü giriyorsun"
-        default: return "\(days) gün öncesini giriyorsun"
-        }
     }
 
     private var canStepForward: Bool {
@@ -331,151 +255,203 @@ struct MeasurementEditor: View {
         date = min(stepped, .now)
     }
 
-    // MARK: - Alanlar
+    // MARK: - Tartı: büyük kilo + eğri
 
-    private func numberField(
-        label: String,
-        unit: String,
-        value: Binding<Double?>,
-        big: Bool = false,
-        required: Bool = false
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Text(label).eyebrow()
-                if required {
-                    Circle().fill(Palette.accent).frame(width: 4, height: 4)
+    private var quickFields: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 26) {
+                SadeRoundButton(icon: "minus", help: "0,1 kg azalt") { nudge(-0.1) }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    TextField("", value: $weight, format: Self.numberFormat, prompt: Text("0,0").foregroundStyle(Palette.textQuaternary))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 60, weight: .semibold).monospacedDigit())
+                        .tracking(-1.5)
+                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize()
+                        .frame(minWidth: 90)
+                        .focused($weightFocused)
+                    Text("kg")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Palette.textTertiary)
                 }
+                SadeRoundButton(icon: "plus", help: "0,1 kg artır") { nudge(0.1) }
             }
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                TextField(
-                    "0,0",
-                    value: value,
-                    format: .number.precision(.fractionLength(0...2)).locale(Locale(identifier: "tr_TR"))
-                )
-                .textFieldStyle(.plain)
-                .font(.system(size: big ? 22 : 14, design: .monospaced))
-                .foregroundStyle(Palette.textPrimary)
-                .multilineTextAlignment(.leading)
-
-                Text(unit)
-                    .font(.system(size: big ? 12 : 10.5))
-                    .foregroundStyle(Palette.textQuaternary)
-            }
-            .padding(.horizontal, big ? 16 : 14)
-            .padding(.vertical, big ? 12 : 9)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(fieldFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(required ? Palette.accent.opacity(0.4) : Palette.border, lineWidth: 1)
-            )
+            .padding(.top, 30)
+            changeLine
+                .padding(.top, 10)
+            SadeLineChart(points: chartPoints, tint: chartTint) { chartHover = $0 }
+                .frame(height: 92)
+                .padding(.top, 22)
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private var detailFields: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 12),
-                    GridItem(.flexible(), spacing: 12)
-                ],
-                spacing: 12
-            ) {
-                numberField(label: "Bel", unit: "cm", value: $waist)
-                numberField(label: "Boyun", unit: "cm", value: $neck)
-                numberField(label: "Göğüs", unit: "cm", value: $chest)
-                numberField(label: "Boy", unit: "cm", value: $heightLocal)
+    /// Düne (bir önceki tartıya) göre fark; eğride imleç varsa o günün değeri.
+    @ViewBuilder private var changeLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if let hover = chartHover {
+                Text("\(SadeFormat.num(hover.value)) kg")
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Palette.textPrimary)
+                Text(Fmt.dateMonthAxis.string(from: hover.date))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.textTertiary)
+            } else if let weight, let previous = earlier.first(where: { $0.weight != nil }), let prev = previous.weight {
+                let delta = weight - prev
+                Text("\(SadeFormat.signed(delta)) kg")
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(SadeLineChart.tint(change: delta, lowerIsBetter: lowerIsBetter))
+                Text(relativeLabel(previous.date))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.textTertiary)
+            } else {
+                Text(" ")
+                    .font(.system(size: 13))
             }
+        }
+        .lineLimit(1)
+    }
+
+    private func relativeLabel(_ previous: Date) -> String {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: previous), to: cal.startOfDay(for: date)).day ?? 0
+        return days == 1 ? "dün" : Fmt.dateMonthAxis.string(from: previous)
+    }
+
+    /// Son 30 günün 7 günlük ortalaması (Grafikler kilo eğrisi); yazılan değer ucunda.
+    private var chartPoints: [TrendPoint] {
+        let cal = Calendar.current
+        guard let from = cal.date(byAdding: .day, value: -30, to: date),
+              let windowStart = cal.date(byAdding: .day, value: -37, to: date) else { return [] }
+        var raw = earlier
+            .filter { $0.date >= windowStart }
+            .compactMap { m in m.weight.map { TrendPoint(date: m.date, value: $0) } }
+            .sorted { $0.date < $1.date }
+        if let weight { raw.append(TrendPoint(date: date, value: weight)) }
+        return TrendAnalysis.trailingAverage(raw, windowDays: 7).filter { $0.date >= from }
+    }
+
+    private var chartTint: Color {
+        let pts = chartPoints
+        guard let first = pts.first, let last = pts.last else { return Palette.textTertiary }
+        return SadeLineChart.tint(change: last.value - first.value, lowerIsBetter: lowerIsBetter)
+    }
+
+    private func nudge(_ step: Double) {
+        let base = weight ?? earlier.first(where: { $0.weight != nil })?.weight ?? 80
+        weight = ((base + step) * 10).rounded() / 10
+    }
+
+    // MARK: - Tam ölçüm
+
+    private var fullFields: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .bottom, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Kilo")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.textTertiary)
+                    SadeStepper(unit: "kg", width: 220) { nudge(-0.1) } increment: { nudge(0.1) } field: {
+                        TextField("", value: $weight, format: Self.numberFormat, prompt: Text("0,0").foregroundStyle(Palette.textQuaternary))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                            .multilineTextAlignment(.center)
+                            .frame(width: 70)
+                            .focused($weightFocused)
+                    }
+                }
+                changeLine
+                    .padding(.bottom, 12)
+            }
+            .padding(.top, 20)
+
+            HStack(spacing: 12) {
+                numberField("Bel", unit: "cm", value: $waist)
+                numberField("Boyun", unit: "cm", value: $neck)
+                numberField("Göğüs", unit: "cm", value: $chest)
+                numberField("Boy", unit: "cm", value: $heightLocal)
+            }
+            .padding(.top, 20)
             .onChange(of: waist) { _, _ in syncAutoBodyFat() }
             .onChange(of: neck) { _, _ in syncAutoBodyFat() }
             .onChange(of: heightLocal) { _, _ in syncAutoBodyFat() }
 
-            bodyFatRow
+            bodyFatCard
+                .padding(.top, 20)
 
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("Not").eyebrow()
-                TextField("ör: sabah aç karnına, antrenman sonrası", text: $note)
+            SadeField(label: "Not") {
+                TextField("", text: $note)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.textPrimary)
+                    .font(.system(size: 13.5))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(fieldFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: 1)
-            )
+            .padding(.top, 18)
+        }
+    }
+
+    private func numberField(_ label: String, unit: String, value: Binding<Double?>) -> some View {
+        SadeField(label: label) {
+            TextField("", value: value, format: Self.numberFormat)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14).monospacedDigit())
+                .fixedSize()
+            Text(unit)
+                .font(.system(size: 12.5))
+                .foregroundStyle(Palette.textTertiary)
+            Spacer(minLength: 0)
         }
     }
 
     // MARK: - Yağ oranı (US Navy'den otomatik; kalemle manuel moda geçilir)
 
-    private var bodyFatRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("Yağ Oranı").eyebrow()
-                if !bodyFatManual {
-                    Text("oto · US Navy")
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(Palette.macroCarbs)
-                }
-            }
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                if bodyFatManual {
-                    TextField(
-                        "0,0",
-                        value: $bodyFat,
-                        format: .number.precision(.fractionLength(0...2)).locale(Locale(identifier: "tr_TR"))
-                    )
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundStyle(Palette.textPrimary)
-                    .focused($bodyFatFocused)
-                } else {
-                    Text(bodyFat.map { Fmt.num($0, digits: 1) } ?? "0,0")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundStyle(bodyFat == nil ? Palette.textQuaternary : Palette.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                Text("%")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Palette.textQuaternary)
-                Button {
-                    toggleBodyFatMode()
-                } label: {
-                    Lucide(sf: bodyFatManual ? "arrow.uturn.backward" : "pencil", size: 10)
+    private var bodyFatCard: some View {
+        let previous = earlier.first(where: { $0.bodyFat != nil })?.bodyFat
+        let hasAuto = !bodyFatManual && bodyFat != nil
+        return HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Yağ oranı")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.textTertiary)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if bodyFatManual {
+                        TextField("", value: $bodyFat, format: Self.numberFormat, prompt: Text("0,0").foregroundStyle(Palette.textQuaternary))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 28, weight: .semibold).monospacedDigit())
+                            .fixedSize()
+                            .frame(minWidth: 40, alignment: .leading)
+                            .focused($bodyFatFocused)
+                    } else {
+                        Text(bodyFat.map { SadeFormat.num($0) } ?? "–")
+                            .font(.system(size: 28, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(bodyFat == nil ? Palette.textQuaternary : Palette.textPrimary)
+                    }
+                    Text("%")
+                        .font(.system(size: 15))
                         .foregroundStyle(Palette.textTertiary)
-                        .frame(width: 18, height: 18)
-                        .contentShape(Rectangle())
+                    if let bodyFat, let previous {
+                        let delta = bodyFat - previous
+                        Text(SadeFormat.signed(delta))
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(SadeLineChart.tint(change: delta, lowerIsBetter: true))
+                            .help("Önceki tam ölçüme göre")
+                    }
                 }
-                .buttonStyle(.plain)
-                .help(bodyFatManual ? "Otomatik hesaba dön" : "Elle düzenle")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(fieldFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(
-                        !bodyFatManual && bodyFat != nil ? Palette.macroCarbs.opacity(0.3) : Palette.border,
-                        lineWidth: 1
-                    )
-            )
-            Text("bel + boyun + boy girilince US Navy formülüyle otomatik hesaplanır")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
+            Spacer(minLength: 8)
+            if !bodyFatManual {
+                SadeChip(text: "oto")
+                    .help("Bel, boyun ve boydan (US Navy)")
+            }
+            SadeIconButton(sf: bodyFatManual ? "arrow.uturn.backward" : "pencil",
+                           help: bodyFatManual ? "Otomatik hesaba dön" : "Elle düzenle", size: 34) {
+                toggleBodyFatMode()
+            }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(hasAuto ? Palette.positive.opacity(0.07) : Palette.textPrimary.opacity(0.03)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(hasAuto ? Palette.positive.opacity(0.18) : Palette.textPrimary.opacity(0.06), lineWidth: 1))
     }
 
     private func toggleBodyFatMode() {

@@ -19,7 +19,7 @@ enum ChatChrome {
     static let quaternary = Charcoal.text4
     static let accent = Charcoal.paper
     static let accentSoft = Color.white.opacity(0.08)
-    static let positive = Color(hex: 0xA4ADA0)
+    static let positive = BuzzTheme.statusAdded
     /// Kağıt-beyazı eylem üstündeki mürekkep.
     static let ink = Charcoal.ink
     /// Referanstaki tek yüksek-kontrast vurgu.

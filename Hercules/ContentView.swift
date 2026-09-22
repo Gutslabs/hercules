@@ -3,14 +3,11 @@ import SwiftData
 #if canImport(AppKit)
 import AppKit
 #endif
-#if os(macOS)
-import WebKit
-#endif
 
 // MARK: - Navigation tabs
 
 enum NavTab: String, CaseIterable, Identifiable, Hashable {
-    case dashboard, measurements, charts, workout, analysis, calendar, recipes, chat, profile, progress, fotolar
+    case dashboard, measurements, charts, workout, analysis, calendar, recipes, chat, profile, progress, fotolar, labs
     var id: String { rawValue }
 
     var label: String {
@@ -19,6 +16,7 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .progress:     return "İlerleme"
         case .fotolar:      return "Fotoğraflar"
         case .measurements: return "Ölçümler"
+        case .labs:         return "Tahliller"
         case .charts:       return "Grafikler"
         case .workout:      return "Antrenman"
         case .analysis:     return "Analiz"
@@ -35,6 +33,7 @@ enum NavTab: String, CaseIterable, Identifiable, Hashable {
         case .progress:     return "target"
         case .fotolar:      return "camera"
         case .measurements: return "list.bullet"
+        case .labs:         return "drop"
         case .charts:       return "chart.xyaxis.line"
         case .workout:      return "dumbbell"
         case .analysis:     return "gauge.medium"
@@ -69,7 +68,7 @@ enum NavCategory: String, CaseIterable, Identifiable, Hashable {
     var tabs: [NavTab] {
         switch self {
         case .genel:    return [.dashboard, .analysis, .progress]
-        case .takip:    return [.measurements, .charts, .workout]
+        case .takip:    return [.measurements, .labs, .charts, .workout]
         case .beslenme: return [.calendar, .recipes]
         }
     }
@@ -79,7 +78,8 @@ enum NavCategory: String, CaseIterable, Identifiable, Hashable {
 
 struct ContentView: View {
     @State private var selection: NavTab? = .dashboard
-    @State private var chatStore = ChatStore()
+    // Sunucu (telefon istekleri) ile aynı örnek — bkz. ChatStore.shared.
+    @State private var chatStore = ChatStore.shared
     @State private var saveErrors = SaveErrorReporter.shared
     @Environment(\.modelContext) private var modelContext
     /// CloudKit + seed UserProfile'ı çiftleyebilir (tekil olmalı); birden fazla olunca tekle.
@@ -89,8 +89,7 @@ struct ContentView: View {
     @AppStorage(ThemeSettings.appearanceKey) private var appearanceRaw: String = AppAppearance.dark.rawValue
     @State private var themeEpoch = 0
     // Sidebar kalıcı kolondur: collapse / ikon-rayı yok, her zaman tam açık.
-    private let sidebarWidth: CGFloat = 244
-    @State private var keyNavMonitor: Any? = nil   // tek-harf sekme kısayolları (K→Koç vb.)
+    private let sidebarWidth: CGFloat = 280   // Buzz varsayılanı 300; Hercules penceresine oranlı
 
     #if os(macOS)
     /// SwiftUI'nin `.preferredColorScheme`'i yalnız SwiftUI ağacını boyar; native menü,
@@ -106,95 +105,57 @@ struct ContentView: View {
         }
     }
 
-    /// Tek-harf sekme kısayolları — metin girişi DIŞINDA ve modifier'sız basınca ilgili sekmeye atlar.
-    /// (Superhuman/Linear tarzı hızlı gezinme. TextEditor/TextField odaktayken harf yazılır, yutulmaz.)
-    static let navShortcuts: [String: NavTab] = [
-        "k": .chat,        // Koç
-        "g": .dashboard,   // Genel Bakış
-        "a": .analysis,    // Analiz
-        "f": .fotolar,     // Fotoğraflar (ikincil bölgede, ⌘ kısayolu yok)
-        "p": .profile,     // Profil
-    ]
-
-    private func installKeyNavMonitor() {
-        guard keyNavMonitor == nil else { return }
-        let bind = $selection
-        keyNavMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // ⌘/⌥/⌃/fn varsa dokunma (sistem + diğer kısayollar serbest kalsın).
-            guard event.modifierFlags.intersection([.command, .control, .option, .function]).isEmpty
-            else { return event }
-            let window = NSApp.keyWindow
-            // Sheet açıkken arkadaki sayfayı değiştirmek istemiyoruz: sheet modal bir bağlam,
-            // oradaki tuşlar gezinmeye ait değil.
-            if window?.isSheet == true { return event }
-            // Metin girişi yapılan her yerde harfi yutmuyoruz.
-            if ContentView.wantsTextInput(window?.firstResponder) { return event }
-            guard let ch = event.charactersIgnoringModifiers?.lowercased(),
-                  let tab = ContentView.navShortcuts[ch] else { return event }
-            bind.wrappedValue = tab
-            return nil   // olayı tüket → harf başka yere gitmesin
-        }
-    }
-
-    /// Odaktaki şey metin girişi bekliyor mu?
-    ///
-    /// Eskiden yalnızca `NSTextView` kontrol ediliyordu (SwiftUI TextField/TextEditor'ın field
-    /// editor'ı o). Ama web içeriğinde odak WKWebView'ın kendi iç view'ında oluyor ve o
-    /// NSTextView değil — sonuç olarak Instagram giriş formuna yazılan "a" yutulup Analiz
-    /// sekmesine atıyordu. İki kontrol birlikte:
-    ///   1. NSTextInputClient — native metin alanları ve IME kabul eden view'lar,
-    ///   2. görünüm zincirinde WKWebView — iç view'ın sınıfına bel bağlamadan web içeriği.
-    static func wantsTextInput(_ responder: NSResponder?) -> Bool {
-        guard let responder else { return false }
-        if responder is NSTextInputClient { return true }
-        var view = responder as? NSView
-        while let current = view {
-            if current is WKWebView { return true }
-            view = current.superview
-        }
-        return false
-    }
-
-    private func removeKeyNavMonitor() {
-        if let m = keyNavMonitor { NSEvent.removeMonitor(m); keyNavMonitor = nil }
-    }
     #endif
 
     var body: some View {
         // Düz HStack — NavigationSplitView değil. macOS (Tahoe) split view'ı sidebar'ı
         // kendi kromuyla (yuvarlak panel + kenarlık + tıklamada focus halkası) çiziyordu;
         // collapse zaten kullanılmadığı için sistem kromundan tamamen çıkıyoruz.
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: sidebarWidth)
-                .overlay(alignment: .trailing) {
-                    // Kalıcı kolon: gölge yok (her karede yeniden çizilen büyük
-                    // gölge kasmaya yol açıyordu), ince ayraç yeter.
-                    Rectangle()
-                        .fill(Palette.border)
-                        .frame(width: 0.5)
-                        .ignoresSafeArea()
-                }
+        // Buzz kanvası: pencere zeminine tek dikey gradient boyanır (zeytin → gece),
+        // sidebar bu gradient üstünde şeffaf durur, içerik 16px köşeli bir kart
+        // olarak üstte yüzer (Buzz `content-surface`: üst 1px, sağ/alt 8px inset).
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                sidebar
+                    .frame(width: geometry.size.width < 1000 ? 220 : sidebarWidth)
 
-            detailColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                detailColumn
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        // Koyuda tek kenar vurgusu (hairline); açıkta kenar + yumuşak kaldırma.
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(BuzzTheme.contentEdge, lineWidth: 1)
+                    )
+                    .shadow(color: dynColor(light: Color.black.opacity(0.07), dark: .clear), radius: 4)
+                    .padding(.top, 1)
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 8)
+            }
         }
-        .background(Palette.background.ignoresSafeArea())
+        .background(
+            LinearGradient(
+                colors: [BuzzTheme.gradientTop, BuzzTheme.gradientBottom],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
         .preferredColorScheme((AppAppearance(rawValue: appearanceRaw) ?? .dark).colorScheme)
         #if os(macOS)
-        .onAppear { syncAppKitAppearance(); installKeyNavMonitor() }
+        // Buzz overlay scrollbar'ları: her sayfa geçişinde yeni scroll view'ları da yakala.
+        .background(BuzzScrollerStyler().id(selection))
+        .onAppear { syncAppKitAppearance() }
         .onChange(of: appearanceRaw) { _, _ in syncAppKitAppearance() }
-        .onDisappear { removeKeyNavMonitor() }
         #endif
         .id(themeEpoch)
         .onReceive(NotificationCenter.default.publisher(for: .herculesThemeChanged)) { _ in
             themeEpoch += 1
         }
         #if os(macOS)
-        // Toolbar şeridi tüm pencere genişliğini kaplar → yan kolonun değil,
-        // içerik zemininin rengini alır (yoksa sohbetin üstüne yanlış basamak biner).
-        .toolbarBackground(Palette.background, for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
+        // Toolbar şeridi şeffaf: Buzz'ın üst kromu gibi gradient'in zeytin bandı
+        // trafik ışıklarının ve toolbar butonlarının arkasında görünür.
+        .toolbarBackground(.hidden, for: .windowToolbar)
         #endif
         .alert("Kaydedilemedi", isPresented: Binding(
             get: { saveErrors.message != nil },
@@ -227,14 +188,7 @@ struct ContentView: View {
         })
     }
 
-    /// Hızlı tartı ekleme — dock popover'ından gelen kg'ı bugünün ölçümü olarak kaydeder.
-    private func addQuickWeight(_ kg: Double) {
-        let measurement = Measurement(date: .now, weight: kg)
-        modelContext.insert(measurement)
-        modelContext.saveOrReport("tartı ekle")
-    }
-
-    // MARK: Detail column (yüzen Koç'a Sor dock'u; eski sağ AI paneli kaldırıldı)
+    // MARK: Detail column (eski sağ AI paneli ve yüzen dock kaldırıldı; Koç'a Sor sidebar'da)
 
     private var detailColumn: some View {
         // GeometryReader ile sar: GR "greedy"dir — içeriğine pencereden gelen SABİT boyutu önerir
@@ -243,31 +197,24 @@ struct ContentView: View {
         // kapanır). Commit'li kabukta detailColumn zaten GR ile sarılıydı; chat sadeleştirmesinde
         // onu kaldırınca Takvim "boştayken bile" sürekli yeniden layout'a giriyordu.
         GeometryReader { _ in
-            ZStack(alignment: .bottom) {
+            // Buzz sayfa geçişi: kısa crossfade — sayfa değişirken kartlar
+            // zıplamadan eski sayfa 140ms'de yenisine karışır.
+            ZStack {
                 selectedDetail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(TapGesture().onEnded {
-                        resignAIChatInputFocus()
-                    })
-                    // Input DIŞINDA bir yere tıklayınca metin alanı focus'unu bırak (cursor kalmasın).
-                    .onTapGesture { dismissTextFocus() }
-
-                // "Koç'a Sor" → tam sayfa sohbeti (.chat) açar. Chat'te dock gizli.
-                if selection != .chat {
-                    FloatingActionDock(
-                        onAskCoach: { selection = .chat },   // anlık geçiş (cross-fade yok)
-                        onAddWeight: addQuickWeight
-                    )
-                    .padding(20)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .transition(.scale.combined(with: .opacity))
-                }
+                    .id(selection ?? .dashboard)
+                    .transition(.opacity)
             }
+            .animation(.easeOut(duration: 0.14), value: selection)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture().onEnded {
+                resignAIChatInputFocus()
+            })
+            // Input DIŞINDA bir yere tıklayınca metin alanı focus'unu bırak (cursor kalmasın).
+            .onTapGesture { dismissTextFocus() }
         }
-        .background(Palette.background)
+        .background(DashboardBackground())
     }
 
     private func resignAIChatInputFocus() {
@@ -298,6 +245,11 @@ struct ContentView: View {
                 selection = .chat
             })
         case .measurements: MeasurementsView()
+        case .labs:
+            LabsView(onAskCoach: { prompt in
+                chatStore.input = prompt
+                selection = .chat
+            })
         case .charts:       ChartsView()
         case .workout:      WorkoutView()
         case .analysis:     AnalysisView()

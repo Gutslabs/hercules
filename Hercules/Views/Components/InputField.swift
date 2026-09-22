@@ -16,10 +16,10 @@ struct PrimaryButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 11)
-            .foregroundStyle(.black)
+            .foregroundStyle(Palette.btnFg)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(Color.white)
+                    .fill(Palette.btnBg)
             )
             .contentShape(Rectangle())
         }

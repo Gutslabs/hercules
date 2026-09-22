@@ -79,8 +79,9 @@ struct MobileAttachSurface<Composer: View>: View {
     }
 
     private var borderColor: Color {
-        if stage.isOpen { return Palette.border }
-        return composerFocused ? Palette.accentSoft : Palette.border
+        if stage.isOpen { return ChatChrome.borderStrong.opacity(0.5) }
+        // Masaüstü composer'ıyla aynı kural: odakta kenar güçlenir.
+        return composerFocused ? ChatChrome.borderStrong : ChatChrome.borderStrong.opacity(0.5)
     }
 
     private var morph: Animation? {
@@ -106,15 +107,16 @@ struct MobileAttachSurface<Composer: View>: View {
         .frame(height: surfaceHeight, alignment: .bottom)
         .background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(stage.isOpen ? Palette.surfaceElevated : Palette.surface)
+                .fill(stage.isOpen ? ChatChrome.panelRaised : ChatChrome.background)
         )
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(borderColor, lineWidth: 0.6)
+                .strokeBorder(borderColor, lineWidth: 1)
         )
-        // Kap HER ZAMAN hafif yükseltilmiş durur (yalnız açıkken değil).
-        .shadow(color: Palette.cardShadow, radius: stage.isOpen ? 18 : 14, y: stage.isOpen ? 8 : 7)
+        // Gölge YOK: Buzz composer kartında yükseklik hissi gölgeyle değil
+        // kenarlıkla verilir (masaüstündeki kartla aynı kural).
+        .shadow(color: .black.opacity(stage.isOpen ? 0.35 : 0), radius: stage.isOpen ? 18 : 0, y: stage.isOpen ? 8 : 0)
         .animation(morph, value: stage)
         .animation(measured ? morph : nil, value: composerHeight)
         .animation(.easeOut(duration: reduceMotion ? 0 : 0.15), value: composerFocused)
@@ -149,12 +151,12 @@ struct MobileAttachSurface<Composer: View>: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Lucide(sf: icon, size: 16)
-                    .foregroundStyle(Palette.textPrimary)
+                    .foregroundStyle(ChatChrome.primary)
                     .frame(width: 34, height: 34)
-                    .background(Circle().fill(Palette.surfaceElevated))
+                    .background(Circle().fill(ChatChrome.panelRaised))
                 Text(title)
                     .font(.system(size: 15))
-                    .foregroundStyle(Palette.textPrimary)
+                    .foregroundStyle(ChatChrome.primary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -192,10 +194,10 @@ struct MobileAttachSurface<Composer: View>: View {
                 } label: {
                     Text("Tüm fotoğraflar")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.btnFg)
+                        .foregroundStyle(ChatChrome.ink)
                         .padding(.horizontal, 16)
                         .frame(height: 36)
-                        .background(Capsule().fill(Palette.accent.opacity(0.92)))
+                        .background(Capsule().fill(ChatChrome.white.opacity(0.92)))
                 }
                 .buttonStyle(.plain)
             }
@@ -224,10 +226,10 @@ struct MobileAttachSurface<Composer: View>: View {
         VStack(spacing: 10) {
             Text("Fotoğraf erişimi kapalı")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Palette.textPrimary)
+                .foregroundStyle(ChatChrome.primary)
             Text("Son fotoğrafları burada göstermek için Ayarlar'dan erişim ver — ya da tek seferlik seçim yap.")
                 .font(.system(size: 12))
-                .foregroundStyle(Palette.textTertiary)
+                .foregroundStyle(ChatChrome.tertiary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -242,10 +244,10 @@ struct MobileAttachSurface<Composer: View>: View {
     ) -> some View {
         Button(action: action) {
             label()
-                .foregroundStyle(Palette.textPrimary)
+                .foregroundStyle(ChatChrome.primary)
                 .frame(width: 36, height: 36)
                 .background(Circle().fill(.ultraThinMaterial))
-                .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
+                .overlay(Circle().strokeBorder(ChatChrome.border, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibility)
@@ -259,7 +261,7 @@ struct MobileAttachSurface<Composer: View>: View {
 // MARK: - Ölçüler
 
 enum MobileAttachMetrics {
-    static let composerRadius: CGFloat = 12
+    static let composerRadius: CGFloat = 16
     static let openRadius: CGFloat = 26
     static let menuRowHeight: CGFloat = 54
     static let menuVerticalPadding: CGFloat = 8
@@ -278,7 +280,7 @@ enum MobileAttachMetrics {
 private struct MobileAttachRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? Palette.surfaceElevated : .clear)
+            .background(configuration.isPressed ? ChatChrome.panelRaised : .clear)
     }
 }
 
@@ -320,7 +322,7 @@ private struct MobileAttachPhotoCell: View {
                     if let thumb {
                         Image(uiImage: thumb).resizable().scaledToFill()
                     } else {
-                        Palette.surfaceElevated
+                        ChatChrome.panelRaised
                     }
                 }
                 .clipped()

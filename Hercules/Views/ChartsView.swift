@@ -1,363 +1,115 @@
 import SwiftUI
 import SwiftData
 
+/// Grafikler · V1 "İzleme listesi": solda seçili ölçümün büyük grafiği, sağda izleme listesi.
+/// Görünümler ChartsWatchlist.swift'te; burada veri toplama, seçim ve pencereyi doldurma.
 struct ChartsView: View {
     @Query(sort: \Measurement.date) private var measurements: [Measurement]
     @Query private var profiles: [UserProfile]
+    @Query(sort: \FoodEntry.date) private var foods: [FoodEntry]
+    @Query(sort: \StepEntry.date) private var stepEntries: [StepEntry]
 
-    @State private var focusedKind: MetricKind = .weight
-    @State private var seriesSnapshots: [MetricKind: MetricSeriesSnapshot]? = nil
+    private let initialSelection: GraphMetric
+    /// Önizleme/test kancası: grafiği bu günde imleç varmış gibi çizer (nil → normal hâl).
+    private let scrubPreview: Date?
 
-    private var profile: UserProfile? { profiles.first }
+    init(selected: GraphMetric = .body(.weight), scrubPreview: Date? = nil) {
+        self.initialSelection = selected
+        self.scrubPreview = scrubPreview
+    }
+
+    /// Kilo verme ve korumada düşüş olumlu; yalnız kütle alma hedefinde artış.
+    private var weightLowerIsBetter: Bool { (profiles.first?.goal.calorieAdjustment ?? 0) <= 0 }
 
     var body: some View {
-        let series = seriesSnapshots ?? makeSeriesSnapshots()
-        let snapshot = seriesSnapshot(for: focusedKind, in: series)
+        // SwiftData fields stay observed here. Selection/range/hover state belongs
+        // to child views, so interacting with a chart cannot rescan the store.
+        ChartsRangeContent(
+            sources: GraphSources(measurements: measurements, foods: foods, steps: stepEntries),
+            weightLowerIsBetter: weightLowerIsBetter,
+            initialSelection: initialSelection,
+            scrubPreview: scrubPreview
+        )
+    }
+}
+
+private struct ChartsRangeContent: View {
+    let sources: GraphSources
+    let weightLowerIsBetter: Bool
+    let initialSelection: GraphMetric
+    let scrubPreview: Date?
+    @State private var span: GraphSpan = .all
+
+    var body: some View {
+        let bodyRows = GraphMetric.bodyMetrics.map {
+            ($0, sources.series($0, span: span, weightLowerIsBetter: weightLowerIsBetter))
+        }
+        let dailyRows = GraphMetric.dailyMetrics.map {
+            ($0, sources.series($0, span: span, weightLowerIsBetter: weightLowerIsBetter))
+        }
+        ChartsSelectionContent(bodyRows: bodyRows, dailyRows: dailyRows, span: $span,
+                               initialSelection: initialSelection, scrubPreview: scrubPreview)
+    }
+}
+
+private struct ChartsSelectionContent: View {
+    let bodyRows: [(GraphMetric, GraphSeries?)]
+    let dailyRows: [(GraphMetric, GraphSeries?)]
+    @Binding var span: GraphSpan
+    @State private var selected: GraphMetric
+    let scrubPreview: Date?
+
+    /// Liste panelinin sığdığı taban boy; daha kısa pencerede sayfa kayar.
+    private static let minHeight: CGFloat = 880
+
+    init(bodyRows: [(GraphMetric, GraphSeries?)], dailyRows: [(GraphMetric, GraphSeries?)],
+         span: Binding<GraphSpan>, initialSelection: GraphMetric, scrubPreview: Date?) {
+        self.bodyRows = bodyRows
+        self.dailyRows = dailyRows
+        self._span = span
+        self._selected = State(initialValue: initialSelection)
+        self.scrubPreview = scrubPreview
+    }
+
+    var body: some View {
+        let current = (bodyRows + dailyRows).first { $0.0 == selected }?.1
 
         GeometryReader { proxy in
-            let compact = proxy.size.width < 1040
-
-            if compact {
-                // Dar pencere: doğal yükseklik + scroll.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        header(compact: true)
-                        if measurements.isEmpty {
-                            ChartsEmptyState()
-                        } else {
-                            mainCard(snapshot)
-                            readingPanel(snapshot)
-                            seriesCard(series)
-                        }
-                        Spacer(minLength: 20)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                // Masaüstü: mockup tek ekran — scroll yok, kartlar viewport'u doldurur
-                // (grafik esner, footer'lar kart dibinde; sağ kolon aynı hizada biter).
-                VStack(alignment: .leading, spacing: 16) {
-                    header(compact: false)
-                    if measurements.isEmpty {
-                        ChartsEmptyState()
-                        Spacer(minLength: 0)
-                    } else {
-                        HStack(alignment: .top, spacing: 16) {
-                            mainCard(snapshot)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            VStack(spacing: 16) {
-                                readingPanel(snapshot)
-                                seriesCard(series)
-                                    .frame(maxHeight: .infinity)
-                            }
-                            .frame(width: 392)
-                        }
-                        .frame(maxHeight: .infinity)
-                    }
-                }
-                .padding(.horizontal, 40)
-                .padding(.vertical, 32)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            ScrollView {
+                content(size: proxy.size, current: current, bodyRows: bodyRows, dailyRows: dailyRows)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
         .background(DashboardBackground().ignoresSafeArea())
-        .onAppear { refreshSeriesSnapshots() }
-        .onChange(of: measurementCacheKey) { _, _ in refreshSeriesSnapshots() }
     }
 
-    private func readingPanel(_ snapshot: MetricSeriesSnapshot) -> some View {
-        ChartReadingPanel(
-            kind: snapshot.kind,
-            stats: snapshot.stats,
-            points: snapshot.points,
-            goalBand: snapshot.goalBand,
-            lowerIsBetter: lowerIsBetter(snapshot.kind)
-        )
-    }
-
-    // MARK: - Header
-
+    /// Geniş pencere: grafik | liste (tasarım ölçüsünde 1029 | 440), pencereyi doldurur.
+    /// Dar pencere: alt alta, sabit boylarla.
     @ViewBuilder
-    private func header(compact: Bool) -> some View {
-        if compact {
-            VStack(alignment: .leading, spacing: 8) {
-                headerTitle
-                headerLastReading
+    private func content(size: CGSize, current: GraphSeries?,
+                         bodyRows: [(GraphMetric, GraphSeries?)],
+                         dailyRows: [(GraphMetric, GraphSeries?)]) -> some View {
+        let innerW = max(0, size.width - 48)
+        let chart = GraphChartPanel(metric: selected, series: current, span: $span, scrubPreview: scrubPreview)
+        let list = GraphWatchlistPanel(bodyRows: bodyRows, dailyRows: dailyRows, selected: selected) { metric in
+            withAnimation(.snappy(duration: 0.25)) { selected = metric }
+        }
+        if innerW >= 900 {
+            let innerH = max(size.height - 36, Self.minHeight)
+            let listW = min(440, max(360, floor((innerW - 24) * 0.3)))
+            HStack(spacing: 24) {
+                chart.frame(width: innerW - 24 - listW)
+                list.frame(width: listW)
             }
+            .frame(width: innerW, height: innerH)
         } else {
-            HStack(alignment: .bottom) {
-                headerTitle
-                Spacer()
-                headerLastReading
+            VStack(spacing: 18) {
+                chart.frame(height: 640)
+                list.frame(height: Self.minHeight)
             }
+            .frame(width: innerW)
         }
-    }
-
-    private var headerTitle: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Trend Lab").eyebrow()
-            Text("Grafikler")
-                .font(.system(size: 22, weight: .bold))
-                .tracking(-0.2)
-                .foregroundStyle(Palette.textPrimary)
-            Text("Ölçüm serilerini hedef bandı, haftalık hız ve oynaklıkla birlikte oku.")
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textQuaternary)
-                .padding(.top, 2)
-        }
-    }
-
-    @ViewBuilder
-    private var headerLastReading: some View {
-        if let last = measurements.last {
-            HStack(spacing: 8) {
-                Circle().fill(Palette.accent).frame(width: 6, height: 6)
-                Text("Son Okuma").eyebrow()
-                Text(Fmt.relative(last.date))
-                    .font(Typography.bodyBold)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    // MARK: - Main chart card
-
-    private func mainCard(_ s: MetricSeriesSnapshot) -> some View {
-        let stats = s.stats
-        let unit = s.kind.unit
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 10) {
-                Circle().fill(Palette.accent).frame(width: 6, height: 6)
-                Text(s.points.isEmpty ? "veri bekliyor" : "\(s.points.count) nokta")
-                    .font(Typography.captionBold)
-                    .foregroundStyle(s.points.isEmpty ? Palette.textTertiary : Palette.textSecondary)
-                Text(measurementWindowText)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textQuaternary)
-                Spacer()
-                Text("Güncel").eyebrow()
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(s.kind.label)
-                    .font(.system(size: 27, weight: .bold))
-                    .tracking(-0.4)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Spacer(minLength: 8)
-                DeltaBadge(delta: stats.delta, lowerIsBetter: lowerIsBetter(s.kind))
-                HStack(alignment: .lastTextBaseline, spacing: 6) {
-                    Text(Fmt.numOpt(stats.current))
-                        .font(.system(size: 38, weight: .bold))
-                        .monospacedDigit()
-                        .tracking(-0.5)
-                        .foregroundStyle(Palette.textPrimary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    Text(unit)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(Palette.textQuaternary)
-                }
-            }
-            .padding(.top, 4)
-
-            // Hedef bandını grafiğe geçirmiyoruz: 12 haftalık hedef projeksiyonu
-            // Y/X domain'i şişirip veriyi köşeye sıkıştırıyordu. TrendChart zaten
-            // veri aralığı üstüne dar bir regresyon (trend) bandı çiziyor — mockup
-            // görünümü bu. (Hedef durumu sağdaki Okuma panelinde kalıyor.)
-            TrendChart(points: s.points, goalBand: nil, height: 260, accent: Palette.chart, unit: unit, fills: true)
-                .padding(.top, 10)
-
-            Hairline().padding(.top, 14)
-            HStack(spacing: 0) {
-                chartStatColumn("7 gün ort", movingAvg(s.points, 7), unit: unit, leading: false)
-                chartStatColumn("14 gün ort", movingAvg(s.points, 14), unit: unit, leading: true)
-                chartStatColumn("30 gün ort", movingAvg(s.points, 30), unit: unit, leading: true)
-            }
-            .padding(.top, 13)
-
-            Hairline().padding(.top, 13)
-            HStack(spacing: 0) {
-                chartStatColumn(
-                    "Haftalık",
-                    stats.weeklyChange.map { "\(Fmt.signed($0, digits: 2)) \(unit)/hafta" } ?? "—",
-                    unit: "",
-                    leading: false,
-                    tint: weeklyTint(stats, lowerIsBetter: lowerIsBetter(s.kind))
-                )
-                chartStatColumn("Aralık", rangeText(stats), unit: unit, leading: true)
-                chartStatColumn("Ortalama", Fmt.numOpt(stats.average), unit: unit, leading: true)
-            }
-            .padding(.top, 13)
-        }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 24)
-        .dashboardCard()
-    }
-
-    private func chartStatColumn(_ label: String, _ value: String, unit: String, leading: Bool, tint: Color = Palette.textPrimary) -> some View {
-        HStack(spacing: 0) {
-            if leading {
-                Rectangle()
-                    .fill(Palette.border)
-                    .frame(width: 0.5, height: 30)
-                    .padding(.trailing, 22)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label).eyebrow()
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(value)
-                        .font(.system(size: 14.5, weight: .regular, design: .monospaced))
-                        .foregroundStyle(tint)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                    if !unit.isEmpty {
-                        Text(unit)
-                            .font(.system(size: 11, weight: .regular))
-                            .foregroundStyle(Palette.textQuaternary)
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Series selector
-
-    private func seriesCard(_ series: [MetricKind: MetricSeriesSnapshot]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Seri Seçimi").eyebrow()
-                Spacer()
-                Text("\(MetricKind.allCases.count) seri · \(measurements.count) ölçüm")
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(Palette.textQuaternary)
-            }
-
-            ForEach(MetricCategory.allCases) { category in
-                let kinds = MetricKind.allCases.filter { $0.category == category }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(category.label.uppercased())
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .tracking(0.9)
-                        .foregroundStyle(Palette.textQuaternary)
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                        ForEach(kinds, id: \.self) { kind in
-                            ChartSeriesTile(
-                                kind: kind,
-                                stats: seriesSnapshot(for: kind, in: series).stats,
-                                lowerIsBetter: lowerIsBetter(kind),
-                                isSelected: focusedKind == kind
-                            ) {
-                                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                                    focusedKind = kind
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.top, 14)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 26)
-        .padding(.vertical, 20)
-        .dashboardCard()
-    }
-
-    // MARK: - Derived
-
-    private func movingAvg(_ points: [TrendPoint], _ days: Int) -> String {
-        TrendAnalysis.movingAverageNow(points, windowDays: Double(days)).map { Fmt.num($0, digits: 1) } ?? "—"
-    }
-
-    private func rangeText(_ stats: TrendStats) -> String {
-        guard let mn = stats.min, let mx = stats.max else { return "—" }
-        return "\(Fmt.num(mn, digits: 1)) – \(Fmt.num(mx, digits: 1))"
-    }
-
-    private func weeklyTint(_ stats: TrendStats, lowerIsBetter: Bool) -> Color {
-        guard let weekly = stats.weeklyChange, abs(weekly) >= 0.01 else { return Palette.textSecondary }
-        let positive = weekly > 0
-        let good = lowerIsBetter ? !positive : positive
-        return good ? Palette.positive : Palette.negative
-    }
-
-    /// Goal-aware "good direction": for weight, down is good only when cutting.
-    private func lowerIsBetter(_ kind: MetricKind) -> Bool {
-        switch kind {
-        case .bodyFat, .fatMass, .waist: return true
-        case .leanMass: return false
-        case .weight: return (profile?.goal.calorieAdjustment ?? 0) < 0
-        case .chest, .neck: return false
-        }
-    }
-
-    private var measurementWindowText: String {
-        guard let first = measurements.first?.date, let last = measurements.last?.date else {
-            return "Veri bekleniyor"
-        }
-        if Calendar.current.isDate(first, inSameDayAs: last) {
-            return Fmt.dateLong.string(from: last)
-        }
-        return "\(Fmt.date.string(from: first)) – \(Fmt.dateLong.string(from: last))"
-    }
-
-    // MARK: - Snapshots
-
-    /// UCUZ anahtar. `onChange(of:)` değerini HER body geçişinde hesaplar; eski hali
-    /// tüm ölçüm geçmişinin 6 alanını her seferinde hash'liyordu (GeometryReader boyut
-    /// değişimleri dahil). Satır ekleme/silme sayıdan, düzenleme `updatedAt`ten yakalanır.
-    private var measurementCacheKey: Int {
-        var hasher = Hasher()
-        hasher.combine(profile?.targetWeight)
-        hasher.combine(measurements.count)
-        hasher.combine(measurements.first?.date)
-        hasher.combine(measurements.last?.date)
-        hasher.combine(measurements.map(\.updatedAt).max())
-        return hasher.finalize()
-    }
-
-    private func refreshSeriesSnapshots() {
-        seriesSnapshots = makeSeriesSnapshots()
-    }
-
-    private func makeSeriesSnapshots() -> [MetricKind: MetricSeriesSnapshot] {
-        Dictionary(uniqueKeysWithValues: MetricKind.allCases.map { kind in
-            let points = TrendAnalysis.points(measurements, for: kind)
-            return (
-                kind,
-                MetricSeriesSnapshot(
-                    kind: kind,
-                    points: points,
-                    stats: TrendAnalysis.stats(points),
-                    goalBand: goalBand(for: kind, points: points)
-                )
-            )
-        })
-    }
-
-    private func seriesSnapshot(
-        for kind: MetricKind,
-        in series: [MetricKind: MetricSeriesSnapshot]
-    ) -> MetricSeriesSnapshot {
-        series[kind] ?? MetricSeriesSnapshot(
-            kind: kind,
-            points: [],
-            stats: TrendAnalysis.stats([]),
-            goalBand: nil
-        )
-    }
-
-    private func goalBand(for kind: MetricKind, points: [TrendPoint]) -> (start: TrendPoint, end: TrendPoint)? {
-        guard kind == .weight, let target = profile?.targetWeight else { return nil }
-        return TrendAnalysis.goalBand(from: points, target: target)
     }
 }

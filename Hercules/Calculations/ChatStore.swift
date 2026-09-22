@@ -473,19 +473,26 @@ final class ChatStore {
     var lastError: String? = nil
     var lastUsedUserData: Bool = false
 
-    @ObservationIgnored private var client: AIClient = AIKeyStore.shared.makeClient()
+    @ObservationIgnored private var client: AIClient
     @ObservationIgnored private var notificationToken: NSObjectProtocol?
+    @ObservationIgnored private var dayChangeToken: NSObjectProtocol?
+    @ObservationIgnored private var activationToken: NSObjectProtocol?
+    /// Günün thread'inin en son hangi gün için açıldığı ("2026-09-07"); bellek içi
+    /// store'da UserDefaults'a dokunulmaz.
+    @ObservationIgnored private var dailyThreadLastDay: String?
     @ObservationIgnored private var historyWriteTask: Task<Void, Never>?
     @ObservationIgnored private var memoryBackfillTask: Task<Void, Never>?
     @ObservationIgnored private var sendTask: Task<Void, Never>?
     @ObservationIgnored private var typewriterTask: Task<Void, Never>?
     @ObservationIgnored private var activeSendID: UUID?
+    @ObservationIgnored private var pendingConversationDeletionID: UUID?
     @ObservationIgnored private let historyWriter = HerculesChatHistoryWriter()
     @ObservationIgnored private var historyWriteSequence = 0
-    @ObservationIgnored private let historyURLs = ChatStore.makeHistoryURLs()
+    @ObservationIgnored private lazy var historyURLs = ChatStore.makeHistoryURLs()
     @ObservationIgnored private var historyWritesAllowed = true
+    @ObservationIgnored private let inMemory: Bool
     @ObservationIgnored private var memoryBackfilledUserTurnIDs: Set<UUID> = []
-    @ObservationIgnored private let agentRouter: AgentRouter = .shared
+    @ObservationIgnored private let agentRouter: AgentRouter
 
     private static let historyRetention: TimeInterval = 7 * 24 * 60 * 60
     private static let memoryBackfillKey = "hercules.memory.backfill.v3.signature"
@@ -509,9 +516,24 @@ final class ChatStore {
         return decoder
     }()
 
-    init() {
+    /// TEK örnek. Telefondan gelen istekleri işleyen `RemoteAIServer` ile
+    /// penceredeki sohbet aynı store'u paylaşır — iki kopya aynı geçmiş
+    /// dosyasına yazsaydı biri diğerinin turlarını ezerdi.
+    @MainActor static let shared = ChatStore(inMemory: NSClassFromString("XCTestCase") != nil)
+
+    init(inMemory: Bool = false, client: AIClient? = nil, agentRouter: AgentRouter = .shared) {
+        self.inMemory = inMemory
+        self.client = client ?? AIKeyStore.shared.makeClient()
+        self.agentRouter = agentRouter
+        if inMemory {
+            historyWritesAllowed = false
+            startBlankConversation()
+            return
+        }
         loadHistory()
         backfillMemoriesFromHistoryIfNeeded()
+        dailyThreadLastDay = UserDefaults.standard.string(forKey: Self.dailyThreadMarkerKey)
+        ensureDailyThread(trigger: .launch)
         notificationToken = NotificationCenter.default.addObserver(
             forName: .aiClientChanged,
             object: nil,
@@ -519,10 +541,29 @@ final class ChatStore {
         ) { [weak self] _ in
             Task { @MainActor in self?.reloadClient() }
         }
+        // Gece yarısını (uyku sonrası gün değiştiyse uyanışı) sistem haber verir;
+        // günün thread'i için ayrı bir zamanlayıcı kurmayız.
+        dayChangeToken = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.ensureDailyThread(trigger: .dayChange) }
+        }
+        #if canImport(AppKit)
+        // Emniyet kemeri: gün değişimi bildirimi kaçtıysa pencereye dönüşte tamamla.
+        activationToken = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.ensureDailyThread(trigger: .activation) }
+        }
+        #endif
     }
 
     deinit {
-        if let token = notificationToken {
+        for token in [notificationToken, dayChangeToken, activationToken].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(token)
         }
         // En son submission actor'a ulaştıktan sonra writer'ın kendi kuyruğunu bitir.
@@ -542,7 +583,7 @@ final class ChatStore {
     }
 
     func reloadHistoryFromDisk() {
-        guard !isSending else { return }
+        guard !inMemory, !isSending else { return }
         loadHistory()
         backfillMemoriesFromHistoryIfNeeded()
         input = ""
@@ -561,10 +602,18 @@ final class ChatStore {
     }
 
     var currentConversationTitle: String {
-        guard let currentConversationID,
-              let conversation = conversations.first(where: { $0.id == currentConversationID })
-        else { return "Yeni sohbet" }
-        return conversation.title
+        currentConversation?.title ?? "Yeni sohbet"
+    }
+
+    private var currentConversation: ChatConversation? {
+        guard let currentConversationID else { return nil }
+        return conversations.first(where: { $0.id == currentConversationID })
+    }
+
+    /// Açık thread'in kayıt günü bugüne göre kaç gün geride — öğün kartının gün
+    /// seçicisi buradan açılır (bkz. `ChatDailyThread.logDayOffset`).
+    var currentLogDayOffset: Int {
+        ChatDailyThread.logDayOffset(for: currentConversation)
     }
 
     func newChat() {
@@ -586,10 +635,82 @@ final class ChatStore {
         persistHistory()
     }
 
-    func selectConversation(_ id: UUID) {
-        guard !isSending else { return }
+    /// Telefondan gelen bir alışverişi (kullanıcı turu + koç yanıtı) Mac'in
+    /// kanalına yazar. İki cihazın AYNI geçmişi görmesinin tek kaynağı budur:
+    /// telefon kendi kopyasını tutmaz, Mac'in kanalını aynalar.
+    ///
+    /// Akış sürüyorsa yazmayız — kullanıcının o an yazdığı tur bozulmasın;
+    /// çağıran `nil` görürse turu yalnız telefonda gösterir.
+    @discardableResult
+    func appendRemoteExchange(
+        conversationID: UUID?,
+        userTurn: ChatTurn,
+        assistantTurn: ChatTurn
+    ) -> UUID? {
+        guard !isSending else { return nil }
+
+        if let conversationID,
+           let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+            conversations[index].messages.append(userTurn)
+            conversations[index].messages.append(assistantTurn)
+            conversations[index].updatedAt = assistantTurn.createdAt
+            if conversations[index].title == "Yeni sohbet" || conversations[index].title.isEmpty {
+                conversations[index].title = Self.remoteTitle(from: userTurn.text)
+            }
+            // Açık thread aynı konuşmaysa pencere de anında güncellensin.
+            //
+            // EKLE, yeniden atama YAPMA: `messages`'ı komple değiştirmek
+            // LazyVStack'teki tüm satırların kimliğini tazeliyor, içerik boyu
+            // bir kare için çöküyor ve `.defaultScrollAnchor(.bottom)` scroll'u
+            // en tepeye atıyordu (telefondan mesaj gelince "durduk yere" zıplama).
+            if currentConversationID == conversationID {
+                messages.append(userTurn)
+                messages.append(assistantTurn)
+            }
+            persistHistoryFromRemote()
+            return conversationID
+        }
+
+        var convo = ChatConversation(
+            title: Self.remoteTitle(from: userTurn.text),
+            messages: [userTurn, assistantTurn],
+            createdAt: userTurn.createdAt,
+            updatedAt: assistantTurn.createdAt
+        )
+        convo.messages = Self.cleanMessages(convo.messages)
+        conversations.append(convo)
+        persistHistoryFromRemote()
+        return convo.id
+    }
+
+    /// Telefonun aynalayacağı tam kanal.
+    func remoteHistorySnapshot() -> (conversations: [ChatConversation], currentID: UUID?) {
         syncCurrentConversation()
-        guard let conversation = conversations.first(where: { $0.id == id }) else { return }
+        return (conversations.filter { !$0.messages.isEmpty }, currentConversationID)
+    }
+
+    /// `persistHistory()` açık thread'i de senkronlar; uzaktan yazımda pencere
+    /// state'ine dokunmadan yalnız diske indirmek istiyoruz.
+    private func persistHistoryFromRemote() {
+        persistHistory()
+    }
+
+    private static func remoteTitle(from text: String) -> String {
+        let line = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n").first.map(String.init) ?? "Sohbet"
+        return String(line.prefix(60))
+    }
+
+    @discardableResult
+    func selectConversation(_ id: UUID) -> Bool {
+        guard conversations.contains(where: { $0.id == id }) else { return false }
+        // Opening the live thread is navigation only. Reloading its snapshot would
+        // discard streamed text, the empty assistant placeholder and composer draft.
+        if id == currentConversationID { return true }
+        guard !isSending else { return false }
+        syncCurrentConversation()
+        guard let conversation = conversations.first(where: { $0.id == id }) else { return false }
         currentConversationID = conversation.id
         messages = Self.cleanMessages(conversation.messages)
         input = ""
@@ -597,6 +718,79 @@ final class ChatStore {
         searchingFor = nil
         lastUsedUserData = false
         persistHistory()
+        return true
+    }
+
+    // MARK: - Günün thread'i
+
+    enum DailyThreadTrigger {
+        case launch, dayChange, activation, sendFinished
+    }
+
+    /// Kullanıcı son yarım saatte açık thread'de yazıyorsa gün değişince onu
+    /// oradan koparmayız; pencere boşta duruyorsa günün thread'ine geçer.
+    private static let dailyThreadHandoffIdle: TimeInterval = 30 * 60
+    private static let dailyThreadMarkerKey = "hercules.chat.dailyThread.lastDay"
+
+    /// Bugünün thread'i yoksa koçun tarih açılışıyla kanala düşürür ve boşta duran
+    /// pencereyi oraya geçirir. Eskiden kullanıcı her sabah kanala "6 eylül" yazıp
+    /// bunu elle yapıyordu.
+    ///
+    /// Idempotent: gün içinde kaç kez tetiklenirse tetiklensin tek thread olur.
+    /// Kullanıcı o günkü thread'i sildiyse aynı gün yeniden açılmaz (işaret
+    /// UserDefaults'ta ve cihaza özel; geçmiş dosyası tek kaynak olmaya devam eder).
+    /// Telefon kendi thread'ini açmaz — Mac'in kanalını aynaladığı için bu thread
+    /// ona da aynı id ile iner.
+    @discardableResult
+    func ensureDailyThread(now: Date = .now, trigger: DailyThreadTrigger = .launch) -> Bool {
+        let day = ChatDailyThread.dayKey(for: now)
+        let id = ChatDailyThread.id(for: now)
+        var created = false
+
+        if !conversations.contains(where: { $0.id == id }), dailyThreadLastDay != day {
+            // Akış sürerken listeye dokunmayız; finishSend aynı kontrolü yeniden çalıştırır.
+            guard !isSending else { return false }
+            syncCurrentConversation()
+            conversations.append(ChatDailyThread.makeConversation(for: now))
+            setDailyThreadMarker(day)
+            created = true
+        }
+
+        // Pencereye dönüş yalnız eksik thread'i tamamlar: kullanıcı bilerek eski bir
+        // thread'i okuyorsa onu oradan çekmeyiz. Gönderim bitişi de yalnız tamamlar.
+        let mayHandOff: Bool
+        switch trigger {
+        case .launch, .dayChange: mayHandOff = true
+        case .activation: mayHandOff = created
+        case .sendFinished: mayHandOff = false
+        }
+
+        if mayHandOff, currentConversationID != id, currentThreadIsIdle(now: now),
+           selectConversation(id) {
+            return created
+        }
+        if created { persistHistory() }
+        return created
+    }
+
+    /// Boş taslak ya da yarım saattir sessiz thread "boşta"dır. Composer'da
+    /// gönderilmemiş metin/görsel varsa geçilmez (`selectConversation` taslağı siler).
+    private func currentThreadIsIdle(now: Date) -> Bool {
+        guard input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              pendingImages.isEmpty
+        else { return false }
+        guard let latest = messages.map(\.createdAt).max() else { return true }
+        return now.timeIntervalSince(latest) >= Self.dailyThreadHandoffIdle
+    }
+
+    private func setDailyThreadMarker(_ day: String?) {
+        dailyThreadLastDay = day
+        guard !inMemory else { return }
+        if let day {
+            UserDefaults.standard.set(day, forKey: Self.dailyThreadMarkerKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.dailyThreadMarkerKey)
+        }
     }
 
     /// Gönderimi kendi Task'ında başlatır; handle'ı saklar ki "Dur" butonu iptal edebilsin.
@@ -633,7 +827,14 @@ final class ChatStore {
         typewriterTask = nil
         isSending = false
         searchingFor = nil
-        persistHistory()
+        if let id = pendingConversationDeletionID {
+            pendingConversationDeletionID = nil
+            deleteConversation(id)
+        } else {
+            persistHistory()
+        }
+        // Gün, akış sürerken değiştiyse thread'i şimdi aç (pencere olduğu yerde kalır).
+        ensureDailyThread(trigger: .sendFinished)
     }
 
     private func send(
@@ -701,7 +902,12 @@ final class ChatStore {
             persistHistory()
             return
         }
-        let effectiveContext = Self.joinContext(appContext: userContext, skillContext: skillContext)
+        // Geçmiş bir günün thread'inde model kaydı doğru günle ansın (günü host seçer).
+        let threadNote = ChatDailyThread.contextNote(for: currentConversation)
+        let effectiveContext = Self.joinContext(
+            appContext: [threadNote, userContext].compactMap { $0 }.joined(separator: "\n\n"),
+            skillContext: skillContext
+        )
         lastUsedUserData = (effectiveContext != nil)
 
         // Cached index'in hala doğru olduğunu doğrulayan helper.
@@ -714,28 +920,8 @@ final class ChatStore {
             return messages.lastIndex(where: { $0.id == assistantId })
         }
 
-        // Typewriter: model token'ları (genelde kelime parçaları) buffer'a yazılır;
-        // ayrı bir döngü buffer'ı SABİT HIZLA harf harf açar → gerçek daktilo hissi.
-        // Model bizden çok ileri giderse (buffer büyürse) kademeli hızlanır, geri kalmaz.
-        //
-        // Hedef metin [Character] olarak tutulur: `String.count`/`prefix` her tick'te
-        // baştan grapheme yürüyüşü yapıyordu (tick başına O(n) ICU işi → mesaj başına
-        // O(n²)); dizide count O(1), tick başına yalnız yeni açılan dilim eklenir.
-        var pendingChars: [Character] = []   // modelden gelen tam birikmiş hedef metin
-        var revealed = 0                     // şu an gösterilen karakter sayısı
-        var revealedText = ""                // gösterilen prefix (append ile büyür)
-        var streamComplete = false           // ağ akışı bitti mi (kuyruğu boşalt)
-
-        func setPendingStream(_ value: String) {
-            pendingChars = Array(value)
-            // Hedef, açılmış olandan KISAYSA (retry/fallback bildirimi gibi bir
-            // değiştirme) prefix'i hedefe hizala; yoksa daktilo sonsuza dek susardı.
-            if revealed > pendingChars.count {
-                revealed = pendingChars.count
-                revealedText = String(pendingChars[0..<revealed])
-                setAssistantTextWithoutAnimation(revealedText)
-            }
-        }
+        var streamBuffer = ChatStreamBuffer()
+        var streamComplete = false
 
         func setAssistantTextWithoutAnimation(_ value: String) {
             guard let idx = assistantIdx(), messages[idx].text != value else { return }
@@ -746,31 +932,15 @@ final class ChatStore {
             }
         }
 
-        /// Tek tick — gösterilen prefix'i hedefe doğru ilerletir. Yakınken yavaş
-        /// (daktilo), çok geride kalınca hızlanır. Açılacak metin kaldıysa true.
-        func advanceTypewriter() -> Bool {
-            let target = pendingChars.count
-            guard revealed < target else { return false }
-            let behind = target - revealed
-            let step: Int
-            if behind > 600 { step = max(12, behind / 24) }
-            else if behind > 200 { step = 6 }
-            else if behind > 60 { step = 3 }
-            else { step = streamComplete ? 4 : 2 }
-            let next = min(target, revealed + step)
-            revealedText.append(contentsOf: pendingChars[revealed..<next])
-            revealed = next
-            setAssistantTextWithoutAnimation(revealedText)
-            return revealed < target
-        }
-
-        // Akış boyunca ~16ms'de bir tick'leyen daktilo görevi.
+        // Coalesce network chunks into at most 30 text/layout updates per second.
         let typer = Task { @MainActor in
             while !Task.isCancelled {
-                let more = advanceTypewriter()
-                if !more && streamComplete { break }
+                if let text = streamBuffer.advance(isComplete: streamComplete) {
+                    setAssistantTextWithoutAnimation(text)
+                }
+                if streamBuffer.isCaughtUp && streamComplete { break }
                 do {
-                    try await Task.sleep(nanoseconds: 16_000_000)
+                    try await Task.sleep(nanoseconds: 33_333_333)
                 } catch {
                     break
                 }
@@ -790,7 +960,7 @@ final class ChatStore {
                 },
                 onMessageUpdate: { partial in
                     guard self.activeSendID == requestID else { return }
-                    setPendingStream(partial)   // hedefi güncelle; daktilo kendi hızıyla açar
+                    streamBuffer.update(partial)
                 }
             )
             guard activeSendID == requestID else { throw CancellationError() }
@@ -807,7 +977,7 @@ final class ChatStore {
                 ? rawAssistantText
                 : "Kanka tarif konusunda kaynaksız cevap vermeyi kapattım. Web araması tetiklenmediği için tarif üretmedim; tekrar denediğinde kaynaklı tarif arayacağım."
             // Daktilonun nihai metni harf harf bitirmesini bekle, sonra kartı tamamla.
-            setPendingStream(assistantText)
+            streamBuffer.update(assistantText)
             streamComplete = true
             await typer.value
             guard activeSendID == requestID else { throw CancellationError() }
@@ -834,7 +1004,7 @@ final class ChatStore {
             typer.cancel()   // daktiloyu durdur; gerisini doğrudan yaz
             if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
                 // Kullanıcı "Dur"a bastı — o ana kadar gelen tam kısmi metni göster
-                setAssistantTextWithoutAnimation(String(pendingChars))
+                setAssistantTextWithoutAnimation(streamBuffer.latestText)
                 if let idx = assistantIdx(), messages[idx].text.isEmpty {
                     setAssistantTextWithoutAnimation("⏹︎ Durduruldu")
                 }
@@ -846,7 +1016,7 @@ final class ChatStore {
             }
         }
         typewriterTask = nil
-        persistHistory()
+        // finishSend commits the final state once the request has unwound.
     }
 
     private static func joinContext(appContext: String?, skillContext: String?) -> String? {
@@ -872,10 +1042,15 @@ final class ChatStore {
         return sections.joined(separator: "\n\n")
     }
 
-    func saveFood(in turn: ChatTurn, ctx: ModelContext) {
-        guard let food = turn.food, let cals = food.calories else { return }
+    /// `on` kartta seçilen gün — saat kısmı korunur, yalnız takvim günü taşınır,
+    /// böylece dünkü öğün dünün akışında doğru saatte görünür.
+    func saveFood(in turn: ChatTurn, ctx: ModelContext, on date: Date = .now) {
+        // Consult live state: two rapid clicks can carry the same stale view value.
+        guard let idx = messages.firstIndex(where: { $0.id == turn.id }),
+              !messages[idx].saved,
+              let food = messages[idx].food, let cals = food.calories else { return }
         let entry = FoodEntry(
-            date: .now,
+            date: date,
             name: food.name ?? "Yemek",
             grams: food.grams,
             calories: cals,
@@ -884,12 +1059,13 @@ final class ChatStore {
             fat: food.fat_g
         )
         ctx.insert(entry)
-        ctx.saveOrReport()
-        if let idx = messages.firstIndex(where: { $0.id == turn.id }) {
-            messages[idx].saved = true
-            syncCurrentConversation()
-            persistHistory()
+        guard ctx.saveOrReport() else {
+            ctx.delete(entry)
+            return
         }
+        messages[idx].saved = true
+        messages[idx].savedFoodDate = date
+        persistHistory()
     }
 
     func confirmAction(turnID: UUID, actionID: UUID, ctx: ModelContext) {
@@ -962,6 +1138,7 @@ final class ChatStore {
         userText: String,
         assistantText: String
     ) {
+        guard !inMemory else { return }
         Task { @MainActor [weak self] in
             // Turn işlendiği sürece store'u canlı tut; aksi halde provider commit
             // edip ledger yazılamadan deinit olmak aynı turn'ü sonraki açılışta replay eder.
@@ -1002,7 +1179,11 @@ final class ChatStore {
     private func alreadyAppliedReply(for action: AIAppAction) -> String {
         switch action.tool {
         case .logFood:
-            return "Zaten bugüne eklemiştim kanka; tekrar kalori yazmadım."
+            // Geçmiş bir günün thread'inde kayıt o güne gitti; "bugüne" demek yanıltır.
+            let loggedToday = messages.last?.savedFoodDate.map(Calendar.current.isDateInToday) ?? true
+            return loggedToday
+                ? "Zaten bugüne eklemiştim kanka; tekrar kalori yazmadım."
+                : "Zaten o güne eklemiştim kanka; tekrar kalori yazmadım."
         case .addRecipe:
             return "Zaten tariflere eklemiştim kanka; tekrar duplicate oluşturmadım."
         case .updateWorkoutPlan:
@@ -1017,12 +1198,17 @@ final class ChatStore {
         else { return }
         guard messages[turnIdx].actions[actionIdx].status == .pending else { return }
 
+        // Geçmiş bir günün thread'inde öğün o güne yazılır, bugüne değil.
+        let logDate = ChatDailyThread.logDate(for: currentConversation)
         do {
-            let result = try ChatActionExecutor.executeAction(messages[turnIdx].actions[actionIdx], ctx: ctx)
+            let result = try ChatActionExecutor.executeAction(
+                messages[turnIdx].actions[actionIdx], ctx: ctx, logDate: logDate
+            )
             messages[turnIdx].actions[actionIdx].status = .applied
             messages[turnIdx].actions[actionIdx].resultMessage = result
             if messages[turnIdx].actions[actionIdx].tool == .logFood {
                 messages[turnIdx].saved = true
+                messages[turnIdx].savedFoodDate = logDate
             }
         } catch {
             messages[turnIdx].actions[actionIdx].status = .failed
@@ -1035,6 +1221,8 @@ final class ChatStore {
     private func applyAutomaticActions(in turnIdx: Int, currentUserText: String, ctx: ModelContext) {
         guard messages.indices.contains(turnIdx) else { return }
         var appliedKeys: Set<String> = []
+        // Geçmiş bir günün thread'inde öğün o güne yazılır, bugüne değil.
+        let logDate = ChatDailyThread.logDate(for: currentConversation)
         for actionIdx in messages[turnIdx].actions.indices {
             let action = messages[turnIdx].actions[actionIdx]
             guard action.status == .pending, !action.requiresConfirmation else { continue }
@@ -1052,11 +1240,12 @@ final class ChatStore {
                 continue
             }
             do {
-                let result = try ChatActionExecutor.executeAction(action, ctx: ctx)
+                let result = try ChatActionExecutor.executeAction(action, ctx: ctx, logDate: logDate)
                 messages[turnIdx].actions[actionIdx].status = .applied
                 messages[turnIdx].actions[actionIdx].resultMessage = result
                 if action.tool == .logFood {
                     messages[turnIdx].saved = true
+                    messages[turnIdx].savedFoodDate = logDate
                 }
             } catch {
                 messages[turnIdx].actions[actionIdx].status = .failed
@@ -1068,9 +1257,47 @@ final class ChatStore {
 
     /// Rail'den tek bir konuşmayı sil. Yalnızca chat-history JSON'una dokunur
     /// (SwiftData store'a HİÇ dokunmaz). Silinen aktif konuşmaysa bir sonrakine geçer.
-    func deleteConversation(_ id: UUID) {
+    /// Minimal arşivle-sıfırla: mevcut geçmiş dosyası yanına tarihli bir kopya
+    /// olarak alınır, kanal boş başlar. Arşiv geri YÜKLENMEZ (dosya dursun
+    /// yeter) — kanal tek sayfa olduğu için "sıfırdan aç" ihtiyacını karşılar.
+    func archiveAllConversations() {
         guard !isSending else { return }
+        if !inMemory {
+            let fm = FileManager.default
+            let source = historyURLs.encrypted
+            if fm.fileExists(atPath: source.path) {
+                let stamp = ISO8601DateFormatter().string(from: .now)
+                    .replacingOccurrences(of: ":", with: "-")
+                let dest = source.deletingLastPathComponent()
+                    .appendingPathComponent("chat-archive-\(stamp).bin")
+                try? fm.copyItem(at: source, to: dest)
+            }
+        }
+        conversations = []
+        startBlankConversation()
+        input = ""
+        lastError = nil
+        searchingFor = nil
+        persistHistory()
+        // Sıfırlanan kanal günün thread'iyle açılır; tarihi elle yazmaya dönülmesin.
+        setDailyThreadMarker(nil)
+        ensureDailyThread(trigger: .launch)
+    }
+
+    @discardableResult
+    func deleteConversation(_ id: UUID) -> Bool {
+        guard let conversation = conversations.first(where: { $0.id == id }) else { return false }
         let wasCurrent = (id == currentConversationID)
+        if ChatDailyThread.isDaily(conversation), Calendar.current.isDateInToday(conversation.createdAt) {
+            setDailyThreadMarker(ChatDailyThread.dayKey(for: conversation.createdAt))
+        }
+        if wasCurrent && isSending {
+            // Wait for cancellation to unwind before moving the send target. Late
+            // chunks can never land in the next thread or recreate the deleted one.
+            pendingConversationDeletionID = id
+            stop()
+            return true
+        }
         conversations.removeAll { $0.id == id }
         if wasCurrent {
             if let next = conversationList.first {
@@ -1080,11 +1307,13 @@ final class ChatStore {
                 startBlankConversation()
             }
             input = ""
+            pendingImages = []
             lastError = nil
             searchingFor = nil
             lastUsedUserData = false
         }
         persistHistory()
+        return true
     }
 
     func clear() {

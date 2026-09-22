@@ -58,7 +58,7 @@ struct RecipeCard: View {
                             .font(.system(size: 22, weight: .bold))
                             .monospacedDigit()
                             .foregroundStyle(Palette.textPrimary)
-                        Text("kcal")
+                        Text("kalori")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Palette.textQuaternary)
                     }
@@ -217,8 +217,8 @@ struct RecipeVideosSection: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 9)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(canAdd ? Palette.accent : Palette.fieldFill)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(canAdd ? Palette.btnBg : Palette.fieldFill)
                     )
             }
             .buttonStyle(.plain)

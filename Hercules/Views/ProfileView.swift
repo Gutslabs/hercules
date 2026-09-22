@@ -28,12 +28,31 @@ enum ProfileTab: String, CaseIterable, Identifiable {
         case .gorunum:   return "Tema, semantik renk dili ve grafik rengi — değişiklik anında tüm sayfalara uygulanır."
         }
     }
+
+    /// Sol nav rail ikonu (Lucide adı).
+    var icon: String {
+        switch self {
+        case .genel:     return "user"
+        case .promptlar: return "file-text"
+        case .hafiza:    return "brain"
+        case .gorunum:   return "paintbrush"
+        }
+    }
 }
 
 /// Profil — V1 "Tek Akış" dili.
 /// Katmanlar: ① Kimlik + kilo durumu (hero) ② Hakkımda + Günlük Plan (tek ev)
-/// ③ Adım & Aktivite şeridi ④ Sistem (AI sağlayıcı + iCloud senkronu).
+/// ③ Sistem (AI sağlayıcı + iCloud senkronu).
+/// Adım/aktivite şeridi buradan KALDIRILDI: aynı veri Genel Bakış, Grafikler ve
+/// Analiz'de zaten bağlamıyla duruyor.
 struct ProfileView: View {
+    @State private var avatarEpoch = 0
+    @State private var avatarHovering = false
+    @State private var coachAvatarEpoch = 0
+    @State private var coachAvatarHovering = false
+    /// Ham tercih: alan boşken placeholder varsayılan adı gösterir.
+    @State private var coachName = CoachIdentity.customName
+    private var relay: IrohRelayHost { .shared }
     @Environment(\.modelContext) private var ctx
     @Query private var profiles: [UserProfile]
     @Query(sort: \Measurement.date, order: .reverse) private var measurements: [Measurement]
@@ -57,9 +76,10 @@ struct ProfileView: View {
     @FocusState private var focusedField: ProfileField?
     @State private var newSupplement = ""
 
-    private enum ProfileField: Hashable { case name, height, target, bodyFat, protein, carbs, fat }
+    private enum ProfileField: Hashable { case name, height, target, bodyFat, protein, carbs, fat, coachName }
 
     @State private var saved = false
+    @State private var hoveredNavTab: ProfileTab? = nil
     @State private var hasInitialized = false
     @State private var autosaveTask: Task<Void, Never>? = nil
     @State private var revealContent = false
@@ -86,60 +106,18 @@ struct ProfileView: View {
         GeometryReader { proxy in
             let compact = proxy.size.width < 980
 
-            // Promptlar: sayfa kaymaz, editör kutusu viewport'u doldurur ve KENDİ içinde
-            // kayar. Diğer sekmeler normal sayfa scroll'u kullanır.
-            if tab == .promptlar {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    header(compact: compact)
-                    ProfilePromptsPane(compact: compact)
-                        .frame(maxHeight: .infinity)
-                }
-                .padding(.horizontal, compact ? Spacing.lg : Spacing.xxxl)
-                .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .contentShape(Rectangle())
-                .onTapGesture { focusedField = nil }
-            } else {
-                // Viewport'u doldur: içerik kısaysa esneyen bölüm (Hakkımda/Plan ya da
-                // Hafıza kartları) kalan boşluğu yutar; pencere kısaysa sayfa yine kayar.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Spacing.lg) {
-                        header(compact: compact)
-                            .profileReveal(revealContent, delay: 0.02)
-                        switch tab {
-                        case .genel:
-                            heroCard(compact: compact)
-                                .profileReveal(revealContent, delay: 0.06)
-                            memoryAndPlan(compact: compact)
-                                .frame(maxHeight: .infinity)
-                                .profileReveal(revealContent, delay: 0.10)
-                            HealthKitCard()
-                                .profileReveal(revealContent, delay: 0.14)
-                            systemCard(compact: compact)
-                                .profileReveal(revealContent, delay: 0.18)
-                        case .hafiza:
-                            ProfileMemoryPane(compact: compact)
-                                .frame(maxHeight: .infinity)
-                        case .gorunum:
-                            ProfileAppearancePane(compact: compact)
-                                .frame(maxHeight: .infinity)
-                        case .promptlar:
-                            EmptyView()
-                        }
-                    }
-                    .padding(.horizontal, compact ? Spacing.lg : Spacing.xxxl)
-                    .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .frame(minHeight: proxy.size.height, alignment: .topLeading)
-                    // Input DIŞINDA herhangi bir yere tıklayınca focus'u bırak (cursor kalmasın).
-                    // Buton/TextField'lar kendi tıklamasını tüketir; non-interaktif her yer burayı tetikler.
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedField = nil }
-                }
+            // BoardUI "settings-modal" düzeni: solda sabit nav rail, 1px ayırıcı,
+            // sağda seçili bölümün içeriği. Bölümler ve seçim state'i (tabRaw) aynı.
+            HStack(spacing: 0) {
+                navRail
+                Rectangle()
+                    .fill(Palette.border)
+                    .frame(width: 1)
+                sectionPane(compact: compact, viewportHeight: proxy.size.height)
             }
         }
         .background(
-            Palette.background.ignoresSafeArea()
+            DashboardBackground().ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { focusedField = nil }
         )
@@ -160,66 +138,131 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Sağ panel (bölüm içeriği)
 
-    private func header(compact: Bool) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .bottom, spacing: Spacing.lg) {
-                headerCopy
-                Spacer(minLength: Spacing.lg)
-                tabSwitcher
-                saveButton
+    /// Seçili bölümün içeriği. Promptlar: sayfa kaymaz, editör kutusu viewport'u
+    /// doldurur ve KENDİ içinde kayar. Diğer bölümler normal sayfa scroll'u kullanır.
+    @ViewBuilder
+    private func sectionPane(compact: Bool, viewportHeight: CGFloat) -> some View {
+        if tab == .promptlar {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                paneHeader
+                ProfilePromptsPane(compact: compact)
+                    .frame(maxHeight: .infinity)
             }
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                headerCopy
-                HStack(spacing: Spacing.md) {
-                    tabSwitcher
-                    saveButton
+            .padding(.horizontal, compact ? Spacing.lg : Spacing.xxl)
+            .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .onTapGesture { focusedField = nil }
+        } else {
+            // Viewport'u doldur: içerik kısaysa esneyen bölüm (Hakkımda/Plan ya da
+            // Hafıza kartları) kalan boşluğu yutar; pencere kısaysa sayfa yine kayar.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    paneHeader
+                        .profileReveal(revealContent, delay: 0.02)
+                    switch tab {
+                    case .genel:
+                        // Düz zemin (Genel Bakış dili): kart kabuğu yok, bölümler
+                        // aralık ve ince çizgiyle ayrışır.
+                        heroCard(compact: compact)
+                            .profileReveal(revealContent, delay: 0.06)
+                        Hairline()
+                        memoryAndPlan(compact: compact)
+                            .frame(maxHeight: .infinity)
+                            .profileReveal(revealContent, delay: 0.10)
+                        Hairline()
+                        systemCard(compact: compact)
+                            .profileReveal(revealContent, delay: 0.18)
+                        Spacer(minLength: 8)
+                        syncFooter
+                            .profileReveal(revealContent, delay: 0.22)
+                    case .hafiza:
+                        ProfileMemoryPane(compact: compact)
+                            .frame(maxHeight: .infinity)
+                    case .gorunum:
+                        ProfileAppearancePane(compact: compact)
+                            .frame(maxHeight: .infinity)
+                    case .promptlar:
+                        EmptyView()
+                    }
                 }
+                .padding(.horizontal, compact ? Spacing.lg : Spacing.xxl)
+                .padding(.vertical, compact ? Spacing.lg : Spacing.xxl)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(minHeight: viewportHeight, alignment: .topLeading)
+                // Input DIŞINDA herhangi bir yere tıklayınca focus'u bırak (cursor kalmasın).
+                // Buton/TextField'lar kendi tıklamasını tüketir; non-interaktif her yer burayı tetikler.
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = nil }
             }
+        }
+    }
+
+    /// Sağ panelin başlığı — sayfa başlığı bölüm başlığına katlandı:
+    /// eyebrow (profil durumu) + bölüm adı (17 semibold) + bölüm açıklaması.
+    private var paneHeader: some View {
+        HStack(alignment: .bottom, spacing: Spacing.lg) {
+            // Eyebrow ve açıklama satırı kaldırıldı: sekme adı yeterli.
+            Text(tab.label)
+                .font(.system(size: 17, weight: .semibold))
+                .tracking(-0.2)
+                .foregroundStyle(Palette.textPrimary)
+            Spacer(minLength: Spacing.lg)
+            saveButton
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var headerCopy: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(calorieResult == nil ? "Profil kurulumu bekliyor" : "Profil canlı").eyebrow()
-            Text("Profil")
-                .font(.system(size: 22, weight: .bold))
-                .tracking(-0.2)
-                .foregroundStyle(Palette.textPrimary)
-            Text(tab.subtitle)
-                .font(Typography.caption)
+    // MARK: - Sol nav rail (eski üst segmentin settings-modal karşılığı)
+
+    private var navRail: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Ayarlar")
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.4)
                 .foregroundStyle(Palette.textTertiary)
-                .padding(.top, 2)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+            ForEach(ProfileTab.allCases) { t in
+                navRow(t)
+            }
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.xl)
+        .frame(width: 208, alignment: .topLeading)
     }
 
-    /// Genel | Promptlar | Hafıza — V1 segment.
-    private var tabSwitcher: some View {
-        HStack(spacing: 2) {
-            ForEach(ProfileTab.allCases) { t in
-                Button {
-                    tab = t
-                    focusedField = nil
-                } label: {
-                    Text(t.label)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(tab == t ? Palette.btnFg : Palette.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(tab == t ? Palette.btnBg : Color.clear)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+    private func navRow(_ t: ProfileTab) -> some View {
+        let active = tab == t
+        let hovered = hoveredNavTab == t
+        return Button {
+            tab = t
+            focusedField = nil
+        } label: {
+            HStack(spacing: 9) {
+                Lucide(t.icon, size: 14)
+                    .foregroundStyle(active ? Palette.textPrimary : Palette.textTertiary)
+                Text(t.label)
+                    .font(.system(size: 13, weight: active ? .semibold : .medium))
+                    .foregroundStyle(active ? Palette.textPrimary : Palette.textSecondary)
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(active ? Palette.track : (hovered ? Palette.fieldFill : Color.clear))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.fieldFill))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering { hoveredNavTab = t }
+            else if hoveredNavTab == t { hoveredNavTab = nil }
+        }
     }
 
     private var saveButton: some View {
@@ -233,14 +276,13 @@ struct ProfileView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(saved ? Palette.positive.opacity(0.14) : Palette.accent)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(saved ? Palette.positive.opacity(0.14) : Palette.btnBg)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(ProfilePressButtonStyle())
-        .keyboardShortcut("s", modifiers: .command)
-        .help("Profili kaydet (⌘S)")
+        .help("Profili kaydet")
     }
 
     // MARK: - Hero (kimlik + kilo durumu)
@@ -260,22 +302,61 @@ struct ProfileView: View {
                     Spacer(minLength: Spacing.lg)
                     statChipsRow(compact: false)
                 }
-                .padding(.horizontal, 32).padding(.vertical, 26)
+                .padding(.vertical, 4)
             }
         }
-        .dashboardCard()
+    }
+
+    /// Profil fotoğrafı — diskte saklanır (CloudKit şemasına dokunulmaz).
+    /// Aynı görsel sidebar'da ve koç sohbetindeki baloncuklarda da kullanılır.
+    private var avatarPicker: some View {
+        Button {
+            ProfileAvatarStore.pickImage()
+        } label: {
+            ZStack {
+                if avatarEpoch >= 0, let img = ProfileAvatarStore.image() {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Circle().fill(Palette.accent.opacity(0.14))
+                    Text(initial)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(Palette.accent)
+                }
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(Circle())
+            .overlay(Circle().strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1))
+            // Üzerine gelince "değiştir" ipucu — ayrı buton yerine fotoğrafın kendisi.
+            .overlay(alignment: .bottomTrailing) {
+                if avatarHovering {
+                    Lucide(sf: "camera", size: 11)
+                        .foregroundStyle(Palette.btnFg)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Palette.btnBg))
+                        .overlay(Circle().strokeBorder(Palette.background, lineWidth: 1.5))
+                }
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { avatarHovering = $0 }
+        .help(ProfileAvatarStore.image() == nil ? "Profil fotoğrafı seç" : "Fotoğrafı değiştir")
+        .contextMenu {
+            Button("Fotoğraf seç…") { ProfileAvatarStore.pickImage() }
+            if ProfileAvatarStore.image() != nil {
+                Button("Fotoğrafı kaldır", role: .destructive) { ProfileAvatarStore.clear() }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ProfileAvatarStore.changed)) { _ in
+            avatarEpoch += 1
+        }
     }
 
     private var identityBlock: some View {
         HStack(alignment: .center, spacing: 22) {
-            ZStack {
-                Circle().fill(Palette.accent.opacity(0.14))
-                Circle().strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1)
-                Text(initial)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(Palette.accent)
-            }
-            .frame(width: 64, height: 64)
+            avatarPicker
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 9) {
@@ -511,8 +592,6 @@ struct ProfileView: View {
             }
             .padding(.top, 13)
         }
-        .padding(.init(top: 22, leading: 28, bottom: 18, trailing: 28))
-        .dashboardCard()
     }
 
     /// Destekler — Hakkımda kartının alt şeridinde sağda (AI'ya kalıcı context).
@@ -685,7 +764,7 @@ struct ProfileView: View {
                         .foregroundStyle(Palette.textPrimary)
                         .contentTransition(.numericText(value: r.goalCalories))
                         .animation(.snappy, value: r.goalCalories)
-                    Text("kcal/gün")
+                    Text("kalori/gün")
                         .font(.system(size: 12.5))
                         .foregroundStyle(Palette.textTertiary)
                 }
@@ -730,8 +809,6 @@ struct ProfileView: View {
                 .padding(.top, 12)
             }
         }
-        .padding(.init(top: 22, leading: 28, bottom: 20, trailing: 28))
-        .dashboardCard()
     }
 
     /// BMR · TDEE · Hedef adj — hairline'lı üç kolon.
@@ -759,7 +836,7 @@ struct ProfileView: View {
                     Text(value)
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundStyle(tint)
-                    Text("kcal")
+                    Text("kalori")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Palette.textQuaternary)
                 }
@@ -832,7 +909,7 @@ struct ProfileView: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("\(Fmt.int(calories)) kcal · %\(Fmt.int(share * 100))")
+                Text("\(Fmt.int(calories)) kalori · %\(Fmt.int(share * 100))")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
@@ -901,25 +978,184 @@ struct ProfileView: View {
 
     @ViewBuilder
     private func systemCard(compact: Bool) -> some View {
-        Group {
-            if compact {
-                VStack(alignment: .leading, spacing: 0) {
-                    AIProviderCard()
-                    Hairline()
-                    CloudSyncCard()
+        // Senkron durumu artık burada değil: sayfanın sağ alt köşesinde tek satır
+        // (bkz. `syncFooter`). Orta kolonda dev bir blok olarak durmasına gerek yok.
+        VStack(alignment: .leading, spacing: 20) {
+            coachIdentityRow
+            Hairline()
+            AIProviderCard()
+            Hairline()
+            irohPairingRow
+        }
+        .frame(maxWidth: compact ? .infinity : 390, alignment: .leading)
+    }
+
+    /// Telefon bağlantısı — Iroh. QR'ı telefon okur, Mac'i IP ile değil
+    /// public key ile bulur; Tailscale'e (ve iOS'ta VPN profiline) gerek kalmaz.
+    private var irohPairingRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Telefon bağlantısı")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.textPrimary)
+                Text(relay.isRunning ? "iroh hazır" : "kapalı")
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(relay.isRunning ? Palette.positive : Palette.textQuaternary)
+                Spacer(minLength: 0)
+            }
+
+            if let error = relay.lastError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(alignment: .top, spacing: 14) {
+                // QR yalnız relay AYAKTAYKEN gösterilir. Yayınlanan kimlik dosyası
+                // relay kapandıktan sonra da diskte kalıyor; onu göstermek
+                // bağlanılamayacak bir kodu okutmak demek olurdu.
+                if relay.isRunning, let qr = relay.qrImage(side: 132) {
+                    Image(nsImage: qr)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 132, height: 132)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Palette.selectionVeilHover)
+                        .frame(width: 132, height: 132)
+                        .overlay(
+                            Text(relay.isRunning ? "Hazırlanıyor…" : "Relay kapalı")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.textQuaternary)
+                        )
                 }
-            } else {
-                HStack(alignment: .top, spacing: 0) {
-                    AIProviderCard()
-                        .frame(width: 390)
-                    Rectangle().fill(Palette.border).frame(width: 0.5)
-                    CloudSyncCard()
-                        .frame(maxWidth: .infinity)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Telefonda Profil ▸ Telefon bağlantısı'ndan bu kodu okut.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // Eşleşme isteği: telefon bağlanmayı deneyince burada belirir.
+                    // Onaylanana kadar hiçbir veriye erişemez.
+                    ForEach(relay.pending, id: \.self) { peer in
+                        HStack(spacing: 8) {
+                            Text(peer.prefix(10) + "…")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Palette.textPrimary)
+                            Button("Onayla") { relay.approve(peer) }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Palette.positive)
+                            Button("Reddet") { relay.reject(peer) }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.textQuaternary)
+                        }
+                    }
+
+                    ForEach(relay.paired, id: \.self) { peer in
+                        HStack(spacing: 8) {
+                            Lucide(sf: "checkmark", size: 9)
+                                .foregroundStyle(Palette.positive)
+                            Text(peer.prefix(10) + "…")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Palette.textSecondary)
+                            Button("Kaldır") { relay.revoke(peer) }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.textQuaternary)
+                        }
+                    }
+
+                    if relay.pending.isEmpty && relay.paired.isEmpty {
+                        Text("Henüz eşleşmiş telefon yok.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.textQuaternary)
+                    }
+                    Spacer(minLength: 0)
                 }
-                .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .dashboardCard()
+        .onAppear { relay.refresh() }
+    }
+
+    /// Koç kimliği — adı ve fotoğrafı. İkisi de cihaza özel (UserDefaults + disk),
+    /// CloudKit şemasına dokunmaz. Ad her tuşta yazılır: sidebar canlı güncellenir.
+    private var coachIdentityRow: some View {
+        HStack(spacing: 16) {
+            coachAvatarPicker
+
+            VStack(alignment: .leading, spacing: 4) {
+                TextField(CoachIdentity.defaultName, text: $coachName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .focused($focusedField, equals: .coachName)
+                    .onSubmit { focusedField = nil }
+                    .onChange(of: coachName) { _, new in CoachIdentity.setName(new) }
+                Text("\(CoachIdentity.dative) sor")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textTertiary)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Koç fotoğrafı — profil fotoğrafıyla aynı etkileşim: tıkla seç, sağ tık kaldır.
+    private var coachAvatarPicker: some View {
+        Button {
+            CoachAvatarStore.pickImage()
+        } label: {
+            ZStack {
+                if coachAvatarEpoch >= 0, let img = CoachAvatarStore.image() {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    // Fotoğraf yokken sohbetteki yüzün aynısı: koç orb'u.
+                    CoachOrb(state: .idle, seed: 1.7)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(Circle())
+            .overlay(Circle().strokeBorder(Palette.border, lineWidth: 1))
+            .overlay(alignment: .bottomTrailing) {
+                if coachAvatarHovering {
+                    Lucide(sf: "camera", size: 9)
+                        .foregroundStyle(Palette.btnFg)
+                        .frame(width: 17, height: 17)
+                        .background(Circle().fill(Palette.btnBg))
+                        .overlay(Circle().strokeBorder(Palette.background, lineWidth: 1.5))
+                }
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { coachAvatarHovering = $0 }
+        .help(CoachAvatarStore.image() == nil ? "Koç fotoğrafı seç" : "Fotoğrafı değiştir")
+        .contextMenu {
+            Button("Fotoğraf seç…") { CoachAvatarStore.pickImage() }
+            if CoachAvatarStore.image() != nil {
+                Button("Fotoğrafı kaldır", role: .destructive) { CoachAvatarStore.clear() }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CoachAvatarStore.changed)) { _ in
+            coachAvatarEpoch += 1
+        }
+    }
+
+    /// Sayfa dibinde, sağa yaslı senkron satırı — kenarda köşede.
+    private var syncFooter: some View {
+        HStack {
+            Spacer(minLength: 0)
+            CloudSyncCard(compact: true)
+        }
     }
 
     // MARK: - Veri
@@ -1040,19 +1276,25 @@ struct ProfileAppearancePane: View {
             acc: Charcoal.paper, c2: Color(hex: 0x6F9D83), c3: Color(hex: 0xC2A36B)
         )
         static let light = PreviewColors(
-            bg: Color(hex: 0xF2EFE8), card: Color(hex: 0xFAF9F5),
-            text: Color(hex: 0x26241F), sub: Color(hex: 0x6E6A60),
-            acc: Color(hex: 0x26241F), c2: Color(hex: 0x4E7A60), c3: Color(hex: 0x96763C)
+            bg: .white, card: Color(hex: 0xF6F6F6),
+            text: Color(hex: 0x24292E), sub: Color(hex: 0x6A737D),
+            acc: Color(hex: 0x24292E), c2: Color(hex: 0x4E7A60), c3: Color(hex: 0x96763C)
         )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
+        // Düz zemin: kart kabukları kalktı, bölümler ince çizgiyle ayrışıyor.
+        VStack(alignment: .leading, spacing: 26) {
             temaCard
                 .frame(maxHeight: .infinity)
+            Hairline()
             renkDiliCard
                 .frame(maxHeight: .infinity)
+            Hairline()
             grafikCard
+                .frame(maxHeight: .infinity)
+            Hairline()
+            sidebarCard
                 .frame(maxHeight: .infinity)
         }
     }
@@ -1075,9 +1317,7 @@ struct ProfileAppearancePane: View {
                 }
             }
         }
-        .padding(.init(top: 20, leading: 28, bottom: 22, trailing: 28))
         .frame(maxHeight: .infinity, alignment: .top)
-        .dashboardCard()
     }
 
     @ViewBuilder
@@ -1126,9 +1366,9 @@ struct ProfileAppearancePane: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Palette.fieldFill))
-            .overlay(selectionRing(selected))
-            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            // Düz dil: dolgulu kutu ve kontur yok — seçili olan sidebar peçesiyle ayrışır.
+            .selectionRing(selected, cornerRadius: 12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -1155,7 +1395,7 @@ struct ProfileAppearancePane: View {
                 }
                 .frame(width: 26, height: 26)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("1.938 kcal")
+                    Text("1.938 kalori")
                         .font(.system(size: 7.5, weight: .bold))
                         .foregroundStyle(p.text)
                     previewBar(p.acc, fraction: 0.76)
@@ -1220,9 +1460,7 @@ struct ProfileAppearancePane: View {
                 )
             }
         }
-        .padding(.init(top: 20, leading: 28, bottom: 22, trailing: 28))
         .frame(maxHeight: .infinity, alignment: .top)
-        .dashboardCard()
     }
 
     private func semGood(_ s: SemanticScheme) -> Color {
@@ -1272,9 +1510,9 @@ struct ProfileAppearancePane: View {
             }
             .padding(.init(top: 14, leading: 18, bottom: 14, trailing: 18))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Palette.fieldFill))
-            .overlay(selectionRing(selected))
-            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            // Düz dil: dolgulu kutu ve kontur yok — seçili olan sidebar peçesiyle ayrışır.
+            .selectionRing(selected, cornerRadius: 12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -1296,7 +1534,7 @@ struct ProfileAppearancePane: View {
             Text("5.409")
                 .font(.system(size: 15, weight: .bold).monospacedDigit())
                 .foregroundStyle(scheme == .adacayiBordo ? semGood(scheme) : Palette.textPrimary)
-            Text(scheme == .sessizPirinc ? "kcal açık · planda" : "kcal açık")
+            Text(scheme == .sessizPirinc ? "kalori açık · planda" : "kalori açık")
                 .font(.system(size: 10.5))
                 .foregroundStyle(Palette.textTertiary)
         }
@@ -1330,9 +1568,62 @@ struct ProfileAppearancePane: View {
                 }
             }
         }
-        .padding(.init(top: 20, leading: 28, bottom: 22, trailing: 28))
         .frame(maxHeight: .infinity, alignment: .top)
-        .dashboardCard()
+    }
+
+    // MARK: Sidebar rengi
+
+    private var sidebarCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Sidebar Rengi").eyebrow()
+                Text("pencere zemini — üstten alta iki duraklı gradient")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: Spacing.md)
+            }
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: compact ? 200 : 230), spacing: 14, alignment: .top)],
+                alignment: .leading,
+                spacing: 14
+            ) {
+                ForEach(SidebarTint.allCases) { tint in
+                    sidebarTile(tint)
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func sidebarTile(_ tint: SidebarTint) -> some View {
+        let selected = ThemeSettings.sidebar == tint
+        let stops = isDark ? tint.darkStops : tint.lightStops
+        return Button {
+            ThemeSettings.sidebar = tint
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    selectionDot(selected)
+                    Text(tint.label)
+                        .font(.system(size: 12, weight: selected ? .bold : .semibold))
+                        .foregroundStyle(selected ? Palette.textPrimary : Palette.textSecondary)
+                    Spacer(minLength: 0)
+                }
+                // Gerçek gradient önizlemesi — seçmeden nasıl duracağı görünür.
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(hex: stops.0), Color(hex: stops.1)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(height: 34)
+            }
+            .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 16))
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // Düz dil: dolgulu kutu ve kontur yok — seçili olan sidebar peçesiyle ayrışır.
+            .selectionRing(selected, cornerRadius: 12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func chartColor(_ t: ChartTint) -> Color {
@@ -1363,9 +1654,9 @@ struct ProfileAppearancePane: View {
             }
             .padding(.init(top: 12, leading: 16, bottom: 10, trailing: 16))
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Palette.fieldFill))
-            .overlay(selectionRing(selected))
-            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            // Düz dil: dolgulu kutu ve kontur yok — seçili olan sidebar peçesiyle ayrışır.
+            .selectionRing(selected, cornerRadius: 12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -1383,9 +1674,9 @@ struct ProfileAppearancePane: View {
         .frame(width: 5, height: 5)
     }
 
-    private func selectionRing(_ selected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 13, style: .continuous)
-            .strokeBorder(selected ? Palette.accent.opacity(0.65) : Palette.border, lineWidth: selected ? 1.5 : 1)
+    private func cardOutline(_ selected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(selected ? Palette.borderStrong : Palette.border, lineWidth: 1)
     }
 }
 

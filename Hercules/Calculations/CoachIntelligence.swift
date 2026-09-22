@@ -149,6 +149,12 @@ enum CoachIntelligence {
             sections.append(review)
         }
 
+        // Mikro besin tahmini (diskte yaşayan aylık tur) — koç eksikleri
+        // konuşabilsin diye bağlama girer.
+        if let micros = MicroNutrientStore.coachSummary() {
+            sections.append(micros)
+        }
+
         guard !sections.isEmpty else { return nil }
         return sections.joined(separator: "\n\n")
     }

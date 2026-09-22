@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftData
 
@@ -35,6 +36,189 @@ struct ChatConversation: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
+/// Uses the space allocated to chat, including when the window changes screens.
+struct ChatPaneLayout {
+    let availableWidth: Double
+    let preferredThreadWidth: Double
+
+    var isCompact: Bool { availableWidth < 860 }
+    var maximumThreadWidth: Double { max(0, availableWidth - 301) }
+    var threadWidth: Double {
+        isCompact ? max(0, availableWidth)
+            : min(max(preferredThreadWidth, 340), maximumThreadWidth)
+    }
+}
+
+/// Günün thread'i: her takvim günü için koçun açtığı, tarih başlıklı konuşma.
+/// Kullanıcı eskiden her sabah kanala "6 eylül" yazıp günün thread'ini elle
+/// açıyordu; artık gece yarısından sonra (ya da o gün ilk açılışta) `ChatStore`
+/// bunu kendisi yapar — bkz. `ChatStore.ensureDailyThread`.
+///
+/// Kimlik TAKVİM GÜNÜNDEN türetilir: aynı gün için nerede/ne zaman üretilirse
+/// üretilsin aynı UUID çıkar. Böylece "bugünün thread'i var mı?" bir id
+/// karşılaştırmasıdır ve Mac ile telefon aynası aynı konuşmayı ikilemez.
+enum ChatDailyThread {
+    static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// Ad-tabanlı (v5 biçimli) UUID: SHA-256("hercules.chat.daily-thread:YYYY-MM-DD")
+    /// özetinin ilk 16 baytı, sürüm ve varyant bitleri RFC 4122'ye göre işaretli.
+    static func id(for date: Date, calendar: Calendar = .current) -> UUID {
+        let name = "hercules.chat.daily-thread:" + dayKey(for: date, calendar: calendar)
+        var bytes = Array(Array(SHA256.hash(data: Data(name.utf8)))[0..<16])
+        bytes[6] = (bytes[6] & 0x0F) | 0x50
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
+
+    static func isDaily(_ conversation: ChatConversation, calendar: Calendar = .current) -> Bool {
+        conversation.id == id(for: conversation.createdAt, calendar: calendar)
+    }
+
+    /// Thread başlığı — kullanıcının elle yazdığı "6 eylül" ile aynı biçim: "7 Eylül".
+    static func title(for date: Date) -> String {
+        Fmt.dayMonth.string(from: date)
+    }
+
+    /// Koçun kök mesajı: "7 Eylül Pazartesi". Kanalda gün başlığı gibi okunur;
+    /// modele de o günün tarihini bağlamda verir.
+    static func openerText(for date: Date) -> String {
+        Fmt.dayMonthWeekday.string(from: date)
+    }
+
+    static func makeConversation(for date: Date) -> ChatConversation {
+        ChatConversation(
+            id: id(for: date),
+            title: title(for: date),
+            messages: [ChatTurn(role: .assistant, text: openerText(for: date), createdAt: date)],
+            createdAt: date,
+            updatedAt: date
+        )
+    }
+
+    /// Yanıtsız günün thread'inin hapı: bugünse "Günün thread'i", gün geçtiyse "Yanıt yok".
+    static func emptyReplyLabel(for conversation: ChatConversation, calendar: Calendar = .current) -> String {
+        calendar.isDateInToday(conversation.createdAt) ? "Günün thread'i" : "Yanıt yok"
+    }
+
+    // MARK: Kayıt günü
+
+    /// Thread'in günü bugüne göre kaç gün geride: 20 Eylül'ün thread'ine 22 Eylül'de
+    /// yazılıyorsa -2. Bugünün thread'i ve serbest sohbetler 0 döner — onlar "şimdi"ye
+    /// yazar. Gün `createdAt`'ten okunur (kök mesaj 7 günlük saklamayla silinebilir).
+    static func logDayOffset(
+        for conversation: ChatConversation?,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> Int {
+        guard let conversation, isDaily(conversation, calendar: calendar) else { return 0 }
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: now),
+            to: calendar.startOfDay(for: conversation.createdAt)
+        ).day ?? 0
+        return min(0, days)
+    }
+
+    /// Bu thread'de kaydedilen öğünün yazılacağı an: thread'in günü + şimdiki saat.
+    /// Saat korunur ki geçmiş güne yazılan öğün o günün akışında makul bir yerde dursun
+    /// (öğün kartındaki gün seçiciyle aynı kural).
+    static func logDate(
+        for conversation: ChatConversation?,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> Date {
+        let offset = logDayOffset(for: conversation, now: now, calendar: calendar)
+        guard offset != 0 else { return now }
+        return calendar.date(byAdding: .day, value: offset, to: now) ?? now
+    }
+
+    /// Geçmiş bir günün thread'inde modele giden bağlam notu. Kayıt gününe model karar
+    /// VERMEZ (host `logDate` ile belirler); not yalnız cevabın "bugüne ekledim" yerine
+    /// doğru günü anmasını sağlar. Bugünün thread'i / serbest sohbet için nil.
+    static func contextNote(
+        for conversation: ChatConversation?,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> String? {
+        guard let conversation,
+              logDayOffset(for: conversation, now: now, calendar: calendar) < 0
+        else { return nil }
+        let day = Fmt.dayMonthWeekday.string(from: conversation.createdAt)
+        return """
+            [THREAD GÜNÜ]
+            - Bu konuşma \(day) gününün thread'i; bugün değil, geçmiş bir gün.
+            - Bu thread'de kaydedilen öğünler uygulama tarafından \(day) gününe yazılır. Kaydı "bugüne" diye değil bu günün tarihiyle an.
+            - Snapshot'taki "bugün" toplamları bu thread'in gününe ait değildir; o gün için kalan kalori hesabını bugünün verisinden yapma.
+            """
+    }
+
+    /// "… bugüne eklendi" / "… 20 Eylül gününe eklendi" — ek, ay adına göre ünlü uyumu
+    /// gerektirmesin diye "gününe" kalıbı kullanılır. `sentenceStart`: cümle başında
+    /// tek başına duracaksa ("Bugüne eklendi").
+    static func loggedPhrase(
+        on date: Date,
+        sentenceStart: Bool = false,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> String {
+        guard calendar.isDate(date, inSameDayAs: now) else {
+            return "\(Fmt.dayMonth.string(from: date)) gününe eklendi"
+        }
+        return sentenceStart ? "Bugüne eklendi" : "bugüne eklendi"
+    }
+}
+
+/// Coalesces cumulative provider updates between display ticks. A retry may
+/// replace the entire answer, including with a longer text of a different prefix.
+struct ChatStreamBuffer {
+    private(set) var latestText = ""
+    private(set) var visibleText = ""
+    private var pendingText: String?
+    private var characters: [Character] = []
+    private var revealed = 0
+
+    var isCaughtUp: Bool { pendingText == nil && revealed == characters.count }
+
+    mutating func update(_ text: String) {
+        latestText = text
+        pendingText = text
+    }
+
+    /// Called at 30 Hz, regardless of how many network chunks arrived.
+    @discardableResult
+    mutating func advance(isComplete: Bool = false) -> String? {
+        let previous = visibleText
+        if let pendingText {
+            let updated = Array(pendingText)
+            if !updated.starts(with: characters.prefix(revealed)) {
+                revealed = min(revealed, updated.count)
+                visibleText = String(updated.prefix(revealed))
+            }
+            characters = updated
+            self.pendingText = nil
+        }
+        let behind = characters.count - revealed
+        if behind > 0 {
+            let step: Int
+            if behind > 600 { step = max(24, behind / 12) }
+            else if behind > 200 { step = 12 }
+            else if behind > 60 { step = 6 }
+            else { step = isComplete ? 8 : 4 }
+            let next = min(characters.count, revealed + step)
+            visibleText.append(contentsOf: characters[revealed..<next])
+            revealed = next
+        }
+        return visibleText == previous ? nil : visibleText
+    }
+}
+
+#if os(macOS)
 /// Model bir tool çağrısı ÜRETEBİLİR; bu ona yazma yetkisi vermez. Otomatik
 /// mutasyon kararı yalnız kullanıcının güncel, ham mesajından host tarafında çıkar.
 enum ChatActionAuthorization {
@@ -165,8 +349,10 @@ enum ChatInlineConfirmation {
 /// conversations) TAŞIMAZ — sadece (action, ctx) alır, sonuç String'i döner. ChatStore bu
 /// motoru çağırır; böylece "veriyi LLM'e göre değiştir" kodu izole + test edilebilir.
 enum ChatActionExecutor {
+    /// `logDate` yalnız `log_food` için anlamlıdır: öğünün yazılacağı an. Günü model
+    /// değil host seçer — geçmiş bir günün thread'inde o gün (bkz. `ChatDailyThread.logDate`).
     @discardableResult
-    static func executeAction(_ action: AIAppAction, ctx: ModelContext) throws -> String {
+    static func executeAction(_ action: AIAppAction, ctx: ModelContext, logDate: Date = .now) throws -> String {
         switch action.tool {
         case .logFood:
             let name = nonEmpty(action.name ?? action.itemName, fallback: "Yemek")
@@ -174,7 +360,7 @@ enum ChatActionExecutor {
                 throw AppToolError.missing("Kalori değeri yok")
             }
             ctx.insert(FoodEntry(
-                date: .now,
+                date: logDate,
                 name: name,
                 grams: action.grams ?? action.amount,
                 calories: calories,
@@ -183,7 +369,7 @@ enum ChatActionExecutor {
                 fat: action.fatG
             ))
             try ctx.saveStamped()
-            return "\(name) bugüne eklendi"
+            return "\(name) \(ChatDailyThread.loggedPhrase(on: logDate))"
 
         case .addRecipe:
             let title = nonEmpty(action.title ?? action.name, fallback: "")
@@ -634,3 +820,4 @@ enum ChatActionExecutor {
         return true
     }
 }
+#endif

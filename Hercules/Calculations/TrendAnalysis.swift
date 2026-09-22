@@ -38,6 +38,49 @@ struct TrendStats {
 }
 
 enum TrendAnalysis {
+    /// Points must be sorted by date. Matches the charts' (date - window, date]
+    /// window, including all readings with the same timestamp.
+    static func trailingAverage(_ points: [TrendPoint], windowDays: Int) -> [TrendPoint] {
+        guard windowDays > 0 else { return points }
+        return windowedAverage(points, includesStart: false) {
+            $0.addingTimeInterval(-Double(windowDays) * 86_400)
+        }
+    }
+
+    /// Sorted daily totals at startOfDay. Missing days are not counted as zero;
+    /// calendar arithmetic preserves the seven-day window across DST changes.
+    static func dailyAverage(_ points: [TrendPoint], windowDays: Int,
+                             calendar: Calendar = .current) -> [TrendPoint] {
+        guard windowDays > 0 else { return points }
+        return windowedAverage(points, includesStart: true) {
+            calendar.date(byAdding: .day, value: 1 - windowDays, to: $0) ?? $0
+        }
+    }
+
+    /// Each sample enters and leaves the running sum once: O(n), not O(n²).
+    private static func windowedAverage(_ points: [TrendPoint], includesStart: Bool,
+                                        startDate: (Date) -> Date) -> [TrendPoint] {
+        var result: [TrendPoint] = []
+        result.reserveCapacity(points.count)
+        var start = 0
+        var end = 0
+        var sum = 0.0
+        for point in points {
+            let cutoff = startDate(point.date)
+            while start < end && (includesStart ? points[start].date < cutoff : points[start].date <= cutoff) {
+                sum -= points[start].value
+                start += 1
+            }
+            if start == end { sum = 0 }
+            while end < points.count && points[end].date <= point.date {
+                sum += points[end].value
+                end += 1
+            }
+            result.append(TrendPoint(date: point.date, value: sum / Double(max(1, end - start))))
+        }
+        return result
+    }
+
     static func points(_ measurements: [Measurement], for kind: MetricKind) -> [TrendPoint] {
         measurements
             .compactMap { m in

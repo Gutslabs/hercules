@@ -25,6 +25,7 @@ struct AIProviderCard: View {
     @State private var gatewayTesting = false
     @State private var gatewayTestOK = false
     @State private var gatewayModelList: [String] = []   // /v1/models'ten canlı liste
+    @State private var harnessStatus: [AIProvider: HarnessAvailability] = [:]
 
     private let pillInk = Palette.btnFg
     private let pillPaper = Palette.btnBg
@@ -41,51 +42,228 @@ struct AIProviderCard: View {
                     .truncationMode(.middle)
             }
 
-            HStack(spacing: 8) {
+            // Buzz "Agent runtimes" listesi: satır = ikon + ad + durum rozeti;
+            // satıra tıklamak aktif sağlayıcıyı seçer.
+            VStack(spacing: 4) {
                 ForEach(AIProvider.selectable) { p in
-                    Button {
-                        provider = p
-                        AIKeyStore.shared.provider = p
-                        model = AIKeyStore.shared.model
-                        if p == .gateway { Task { await reloadGatewayModels() } }
-                        NotificationCenter.default.post(name: .aiClientChanged, object: nil)
-                    } label: {
-                        Text(p.label)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(provider == p ? pillInk : Palette.textSecondary)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(provider == p ? pillPaper : Color.clear)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .strokeBorder(provider == p ? Color.clear : Palette.border, lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    runtimeRow(p)
                 }
-                Spacer(minLength: 0)
             }
             .padding(.top, 13)
+
+            HStack {
+                Spacer(minLength: 0)
+                Button {
+                    HarnessResolver.invalidateCache()
+                    refreshHarnessStatuses()
+                    refreshCodexStatus()
+                } label: {
+                    HStack(spacing: 5) {
+                        Lucide(sf: "arrow.clockwise", size: 10)
+                        Text("Tekrar tara")
+                            .font(.system(size: 10.5, weight: .medium))
+                    }
+                    .foregroundStyle(Palette.textTertiary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("CLI kurulumlarını yeniden tara")
+            }
+            .padding(.top, 8)
+
+            modelRow
+                .padding(.top, 10)
 
             switch provider {
             case .codex:      codexSection
             case .gateway:    gatewaySection
             case .openRouter: openRouterSection
+            case .claudeCode, .cursor, .grok: harnessSection(provider)
             }
         }
         .padding(.init(top: 20, leading: 28, bottom: 18, trailing: 28))
         .onAppear {
             refreshCodexStatus()
+            refreshHarnessStatuses()
             apiKey = AIKeyStore.shared.apiKey   // kayıtlı anahtarı alana yansıt
             gatewayURL = AIKeyStore.shared.gatewayBaseURL
             gatewayKey = AIKeyStore.shared.gatewayKey
             gatewayModel = AIKeyStore.shared.gatewayModel
             gatewayModelList = AIKeyStore.shared.gatewayModels
-            if provider == .gateway { Task { await reloadGatewayModels() } }
+        }
+    }
+
+    // MARK: - Buzz runtime satırları
+
+    private func runtimeRow(_ p: AIProvider) -> some View {
+        let selected = provider == p
+        return Button {
+            provider = p
+            AIKeyStore.shared.provider = p
+            model = AIKeyStore.shared.model
+            NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+        } label: {
+            HStack(spacing: 10) {
+                Lucide(sf: p.systemImage, size: 13)
+                    .foregroundStyle(selected ? Palette.textPrimary : Palette.textTertiary)
+                    .frame(width: 26, height: 26)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.surfaceElevated))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(p.label)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(p.detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+
+                statusBadge(for: p)
+
+                Lucide(sf: "checkmark", size: 11)
+                    .foregroundStyle(Palette.textPrimary)
+                    .opacity(selected ? 1 : 0)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(selected ? Palette.track : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(selected ? Palette.borderStrong : Palette.border.opacity(0.6), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Buzz durum rozeti: Ready yeşil / CLI needed nötr / Adapter needed amber.
+    @ViewBuilder
+    private func statusBadge(for p: AIProvider) -> some View {
+        let (label, tint): (String, Color) = {
+            if p == .codex {
+                // Codex iki koşullu: ChatGPT girişi + (opsiyonel) ACP adaptörü.
+                // Adaptör yoksa çalışır ama streaming/araç olayları olmaz — rozet
+                // bunu açıkça söylesin, "Hazır" deyip yanıltmasın.
+                guard case .ready = codexStatus else { return ("Giriş gerekli", Palette.warning) }
+                switch harnessStatus[p] {
+                case .ready: return ("Hazır · ACP", Palette.positive)
+                case nil:    return ("…", Palette.textQuaternary)
+                default:     return ("Hazır · yerleşik", Palette.textTertiary)
+                }
+            }
+            switch harnessStatus[p] {
+            case .ready:          return ("Hazır", Palette.positive)
+            case .adapterMissing: return ("Adapter gerekli", Palette.warning)
+            case .notInstalled:   return ("CLI gerekli", Palette.textTertiary)
+            case nil:             return ("…", Palette.textQuaternary)
+            }
+        }()
+        Text(label)
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(tint.opacity(0.12)))
+    }
+
+    private func refreshHarnessStatuses() {
+        let targets = AIProvider.selectable.filter(\.isHarness)
+        Task.detached(priority: .utility) {
+            var out: [AIProvider: HarnessAvailability] = [:]
+            for p in targets { out[p] = HarnessResolver.availability(of: p) }
+            let statuses = out
+            await MainActor.run { harnessStatus = statuses }
+        }
+    }
+
+    // MARK: - Global model seçimi
+
+    /// Aktif sağlayıcının modeli — settings'teki tek küresel model seçici.
+    private var modelRow: some View {
+        HStack(spacing: 8) {
+            Text("Model").eyebrow()
+            Spacer(minLength: 6)
+            Menu {
+                ForEach(AIKeyStore.shared.pickerModels(for: provider), id: \.self) { m in
+                    Button {
+                        AIKeyStore.shared.setModel(m, for: provider)
+                        model = AIKeyStore.shared.model
+                        NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+                    } label: {
+                        if m == model { Label(m, systemImage: "checkmark") } else { Text(m) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Text(model)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Lucide(sf: "chevron.up.chevron.down", size: 8)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.fieldFill))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            if provider.supportsIntelligence {
+                Menu {
+                    ForEach(IntelligenceLevel.allCases) { level in
+                        Button {
+                            AIKeyStore.shared.intelligence = level
+                            NotificationCenter.default.post(name: .aiClientChanged, object: nil)
+                        } label: {
+                            if level == AIKeyStore.shared.intelligence {
+                                Label(level.label, systemImage: "checkmark")
+                            } else {
+                                Text(level.label)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Lucide(sf: "gauge.medium", size: 9)
+                        Text(AIKeyStore.shared.intelligence.label)
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(Palette.textSecondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.fieldFill))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Reasoning seviyesi")
+            }
+        }
+    }
+
+    /// Harness kurulu değilse Buzz'daki kurulum ipucunu göster.
+    @ViewBuilder
+    private func harnessSection(_ p: AIProvider) -> some View {
+        if let spec = HarnessSpec.spec(for: p), harnessStatus[p]?.isReady != true {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(harnessStatus[p].flatMap { if case .adapterMissing = $0 { return "ACP adapter'ı eksik — kurulum:" } else { return nil } } ?? "CLI kurulu değil — kurulum:")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.textTertiary)
+                Text(spec.installHint)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(Palette.textSecondary)
+                    .textSelection(.enabled)
+            }
+            .padding(.top, 12)
         }
     }
 
@@ -121,8 +299,8 @@ struct AIProviderCard: View {
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Palette.fieldFill))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.fieldFill))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
             .padding(.top, 14)
 
             Text("openrouter.ai/keys adresinden API key al, buraya yapıştır. Terminal gerekmez.")
@@ -222,8 +400,8 @@ struct AIProviderCard: View {
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Palette.fieldFill))
-        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.fieldFill))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
     }
 
     /// Ayarları kaydedip `<base>/models`'i çeker; listeyi menüye yükler + sonucu raporlar.
@@ -289,8 +467,8 @@ struct AIProviderCard: View {
                 Lucide(sf: "chevron.up.chevron.down", size: 8).foregroundStyle(Palette.textTertiary)
             }
             .padding(.horizontal, 11).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Palette.fieldFill))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.fieldFill))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .menuStyle(.button)
@@ -425,8 +603,8 @@ struct AIProviderCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Palette.surface))
-        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.border.opacity(0.7), lineWidth: 1))
     }
 
     private func helpStep(num: String, text: String) -> some View {

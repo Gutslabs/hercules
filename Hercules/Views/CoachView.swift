@@ -113,11 +113,10 @@ struct CoachView: View {
                 else { Lucide(sf: mode == .analysis ? "sparkles" : "fork.knife", size: 12) }
                 Text(title).font(Typography.bodyBold)
             }
-            .foregroundStyle(generating ? Palette.textSecondary : Palette.background)
+            .foregroundStyle(generating ? Palette.textSecondary : Palette.btnFg)
             .padding(.horizontal, 15).padding(.vertical, 10)
-            .background(Capsule(style: .continuous).fill(generating ? Palette.surfaceElevated : Palette.accent))
-            .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.6))
-            .contentShape(Capsule(style: .continuous))
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(generating ? Palette.surfaceElevated : Palette.btnBg))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain).disabled(generating)
     }
@@ -193,8 +192,7 @@ struct CoachView: View {
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(Spacing.xl).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).fill(Palette.surface.opacity(0.86)))
-        .overlay(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).strokeBorder(Palette.borderStrong, lineWidth: 0.7))
+        .dashboardCard()
     }
 
     @ViewBuilder
@@ -202,7 +200,7 @@ struct CoachView: View {
         let chips: [(String, String, Color)] = [
             r.weight.map { ("Kilo", "\(Fmt.num($0, digits: 1)) kg", Palette.textPrimary) },
             r.weeklyDelta.map { ("Haftalık", "\(Fmt.signed($0, digits: 1)) kg", $0 <= 0 ? Palette.positive : Palette.warning) },
-            r.avgCalories.map { ("Ort. kcal", "\(Fmt.int($0))", Palette.textPrimary) },
+            r.avgCalories.map { ("Ort. kalori", "\(Fmt.int($0))", Palette.textPrimary) },
             r.avgProtein.map { ("Ort. protein", "\(Fmt.int($0)) g", Palette.macroProtein) },
             r.sessionsLast30.map { ("30g antrenman", "\($0)", Palette.accent) }
         ].compactMap { $0 }
@@ -272,7 +270,7 @@ struct CoachView: View {
                     }
                     .foregroundStyle(saved ? Palette.positive : Palette.textPrimary)
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Capsule(style: .continuous).fill(saved ? Palette.positive.opacity(0.12) : Color.white.opacity(0.06)))
+                    .background(Capsule(style: .continuous).fill(saved ? Palette.positive.opacity(0.12) : Palette.fieldFill))
                     .overlay(Capsule(style: .continuous).strokeBorder(Palette.border, lineWidth: 0.6))
                 }
                 .buttonStyle(.plain).disabled(saved)
@@ -280,8 +278,7 @@ struct CoachView: View {
             }
         }
         .padding(Spacing.xl).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).fill(Palette.surface.opacity(0.86)))
-        .overlay(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).strokeBorder(Palette.borderStrong, lineWidth: 0.7))
+        .dashboardCard()
     }
 
     @ViewBuilder
@@ -332,8 +329,8 @@ struct CoachView: View {
                     Lucide(sf: "arrow.up.right", size: 10).foregroundStyle(Palette.accent)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.accent.opacity(0.08)))
-                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.accent.opacity(0.3), lineWidth: 0.6))
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.accent.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.accent.opacity(0.3), lineWidth: 0.6))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -402,7 +399,7 @@ struct CoachView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.surfaceElevated.opacity(0.7)))
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.surfaceElevated.opacity(0.7)))
             }
         }
     }
@@ -426,7 +423,7 @@ struct CoachView: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10).padding(.vertical, 9).frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(isSelected ? Palette.surfaceElevated.opacity(0.92) : Color.clear))
+            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(isSelected ? Palette.track : Color.clear))
             .overlay(alignment: .leading) { if isSelected { Capsule(style: .continuous).fill(Palette.accent).frame(width: 2.5).padding(.vertical, 9) } }
             .contentShape(Rectangle())
         }
@@ -447,8 +444,7 @@ struct CoachView: View {
             generateButton.padding(.top, 4)
         }
         .padding(Spacing.xxl).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).fill(Palette.surface.opacity(0.7)))
-        .overlay(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.55))
+        .dashboardCard()
     }
 
     private func reportPreview(_ narrative: String) -> String {

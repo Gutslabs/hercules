@@ -2,93 +2,19 @@ import SwiftUI
 import LucideKit
 import SwiftData
 
-enum DashboardBalancePeriod: String, CaseIterable, Identifiable {
-    case week, month, threeMonths, year, allTime
+// DashboardBalancePeriod / DashboardBalanceSummary KALDIRILDI: haftalık net enerji
+// dengesini yalnız Genel Bakış V2'nin "Bu hafta" paneli okuyordu; V3 "Sade"de o panel yok
+// (enerji dengesi Analiz'in Yakım kartında).
 
-    var id: String { rawValue }
-
-    var shortLabel: String {
-        switch self {
-        case .week: return "1W"
-        case .month: return "1M"
-        case .threeMonths: return "3M"
-        case .year: return "1Y"
-        case .allTime: return "ALL"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .week: return "Son 7 gün"
-        case .month: return "Son 30 gün"
-        case .threeMonths: return "Son 90 gün"
-        case .year: return "Son 365 gün"
-        case .allTime: return "Tüm zaman"
-        }
-    }
-
-    func startDate(endingAt todayStart: Date, calendar: Calendar) -> Date? {
-        switch self {
-        case .week:
-            return calendar.date(byAdding: .day, value: -6, to: todayStart)
-        case .month:
-            return calendar.date(byAdding: .day, value: -29, to: todayStart)
-        case .threeMonths:
-            return calendar.date(byAdding: .day, value: -89, to: todayStart)
-        case .year:
-            return calendar.date(byAdding: .day, value: -364, to: todayStart)
-        case .allTime:
-            return nil
-        }
-    }
-}
-
-struct DashboardBalanceSummary {
-    let period: DashboardBalancePeriod
-    let startDate: Date
-    let endDate: Date
-    let netDeficit: Double
-    let foodCalories: Double
-    let baseCalories: Double
-    let stepCalories: Double
-    let workoutCalories: Double
-    let stepCount: Int
-    let workoutDays: Int
-    let trackedDays: Int
-    let calendarDays: Int
-
-    var displayValue: String {
-        guard trackedDays > 0 else { return "0" }
-        let value = abs(netDeficit)
-        return netDeficit < 0 ? "+\(Fmt.int(value))" : Fmt.int(value)
-    }
-
-    var resultLabel: String {
-        guard trackedDays > 0 else { return "kcal" }
-        if abs(netDeficit) < 1 { return "kcal dengede" }
-        return netDeficit >= 0 ? "kcal açık" : "kcal fazla"
-    }
-
-    var tint: Color {
-        guard trackedDays > 0 else { return Palette.textTertiary }
-        if netDeficit < 0 { return Palette.negative }
-        if netDeficit < 500 { return Palette.warning }
-        return Palette.positive
-    }
-
-    var detail: String {
-        guard trackedDays > 0 else {
-            return "\(period.title) içinde yemek kaydı olan gün yok; açık hesaplanmadı."
-        }
-        let avg = netDeficit / Double(max(trackedDays, 1))
-        let direction = netDeficit >= 0 ? "ortalama \(Fmt.int(abs(avg))) kcal açık" : "ortalama \(Fmt.int(abs(avg))) kcal fazla"
-        return "\(trackedDays) yemek kayıtlı gün üzerinden \(direction)."
-    }
-}
-
+/// Sayfa zemini: düz renk yerine sidebar'la aynı dilde kademeli gradient
+/// (üstte seçili tonun soluk izi, altta saf zemin).
 struct DashboardBackground: View {
     var body: some View {
-        Palette.background
+        LinearGradient(
+            colors: [BuzzTheme.contentGradientTop, BuzzTheme.contentGradientBottom],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 
@@ -103,34 +29,34 @@ struct CalorieProgressRing: View {
     var labelColor: Color? = nil
 
     var body: some View {
+        // Günlük Plan barlarıyla (BoardStageBars) aynı dil: aynı ray tonu, aynı
+        // dolgu opaklığı, yuvarlak uç, tabular rakam — yalnız şekli çember.
         ZStack {
             Circle()
-                .stroke(Palette.borderStrong, lineWidth: 13)
+                .stroke(Palette.track.opacity(0.55), lineWidth: 10)
             Circle()
                 .trim(from: 0, to: max(0.02, progress))
                 .stroke(
-                    tint,
-                    style: StrokeStyle(lineWidth: 13, lineCap: .round, lineJoin: .round)
+                    tint.opacity(0.9),
+                    style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round)
                 )
                 .rotationEffect(.degrees(-90))
                 .animation(.spring(response: 0.55, dampingFraction: 0.86), value: progress)
-            Circle()
-                .stroke(tint.opacity(0.10), lineWidth: 1)
-                .scaleEffect(0.88)
 
-            VStack(spacing: 3) {
+            VStack(spacing: 4) {
                 Text(value)
-                    .font(Typography.display(34))
+                    .font(.system(size: 38, weight: .semibold).monospacedDigit())
+                    .tracking(-0.6)
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                 Text(label)
-                    .font(Typography.captionBold)
-                    .foregroundStyle(labelColor ?? tint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(labelColor ?? Palette.textTertiary)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(Palette.textQuaternary)
                     .lineLimit(1)
             }
             .padding(.horizontal, 20)
@@ -170,46 +96,20 @@ extension View {
     /// V1 kart kromu + derinlik: opak taban (koyu temada yarı saydam yüzeyin gölgesi
     /// kaybolmasın diye) üzerine çift gölge — yaygın ortam + sıkı temas — ve üstten
     /// alta sönen ışık rim'li kenarlık. Kart "zeminden hafif kalkık" okunur.
-    func dashboardCard(radius: CGFloat = Radius.lg) -> some View {
+    /// Buzz kartı (card.tsx): 12px köşe, 1px border/70 hairline, shadow-xs.
+    /// Koyu temada yükseklik gölgeyle değil, açık yüzey rengiyle taşınır.
+    func dashboardCard(radius: CGFloat = Radius.md) -> some View {
         self
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(Palette.background)
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(Palette.surface)
-                }
-                .compositingGroup()
-                .shadow(color: Palette.cardShadow, radius: 18, x: 0, y: 9)
-                .shadow(color: Palette.cardShadowTight, radius: 3, x: 0, y: 1.5)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Palette.surface)
+                    .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
             )
-
-    }
-}
-
-/// Hero left-column stat (Hedef / Ritim / İlerleme): cap label, value, optional sub.
-struct HeroStatColumn: View {
-    let label: String
-    let value: String
-    var sub: String? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label).eyebrow()
-            Text(value)
-                .font(.system(size: 14.5, weight: .semibold))
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            if let sub, !sub.isEmpty {
-                Text(sub)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Palette.border.opacity(0.7), lineWidth: 1)
+            )
     }
 }
 
@@ -248,19 +148,20 @@ struct HeroMacroRow: View {
                     .foregroundStyle(Palette.textQuaternary)
                     .frame(width: 34, alignment: .trailing)
             }
-            GoalBar(
-                value: consumed,
-                goal: target,
-                tint: tint,
-                height: 8,
-                hatchColor: Color.black.opacity(0.11),
-                hatchSpacing: 5,
-                hatchWidth: 2,
-                headMarker: false,
-                overflowTint: Palette.negative,
-                overflowAt: 1.05,
-                trackColor: Palette.surfaceElevated
-            )
+            // Board hap ilerleme: Palette.track ray + makro renkli kapsül dolgu, 6pt.
+            GeometryReader { geo in
+                let frac = target > 0 ? min(1, consumed / target) : 0
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.track)
+                    if frac > 0 {
+                        Capsule()
+                            .fill(isOver ? Palette.negative : tint)
+                            .frame(width: max(6, geo.size.width * frac))
+                    }
+                }
+            }
+            .frame(height: 6)
+            .animation(.spring(response: 0.45, dampingFraction: 0.86), value: consumed)
         }
     }
 }
@@ -272,7 +173,7 @@ struct HeroMealRow: View {
     @State private var hovering = false
 
     private var detail: String {
-        var parts = ["\(Fmt.int(food.calories)) kcal"]
+        var parts = ["\(Fmt.int(food.calories)) kalori"]
         if let g = food.grams { parts.append("\(Fmt.int(g)) g") }
         if let p = food.protein { parts.append("P \(Fmt.int(p))g") }
         if let c = food.carbs { parts.append("K \(Fmt.int(c))g") }
@@ -281,8 +182,8 @@ struct HeroMealRow: View {
     }
 
     var body: some View {
+        // Board dili: hairline ayırıcı yok — hover'da yuvarlak fayans zemini.
         VStack(spacing: 0) {
-            Hairline().opacity(0.7)
             HStack(spacing: 12) {
                 Text(Fmt.timeShort.string(from: food.date))
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
@@ -310,45 +211,18 @@ struct HeroMealRow: View {
                 .help("Öğünü sil")
             }
             .padding(.vertical, 8)
+            .padding(.horizontal, 8)
         }
-        .background(hovering ? Palette.fieldFill : Color.clear)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(hovering ? Palette.fieldFill : Color.clear)
+        )
         .onHover { hovering = $0 }
     }
 }
 
-/// Goal-aware delta badge (▲/▼ + magnitude); green when the change moves toward the goal.
-struct DeltaBadge: View {
-    let delta: Double?
-    var lowerIsBetter: Bool = false
-    var digits: Int = 1
-
-    private var color: Color {
-        guard let d = delta, d != 0 else { return Palette.textTertiary }
-        let positiveChange = d > 0
-        let good = lowerIsBetter ? !positiveChange : positiveChange
-        return good ? Palette.positive : Palette.negative
-    }
-
-    private var symbol: String {
-        guard let d = delta else { return "—" }
-        if d > 0 { return "▲" }
-        if d < 0 { return "▼" }
-        return "—"
-    }
-
-    var body: some View {
-        if let d = delta {
-            HStack(spacing: 3) {
-                Text(symbol).font(.system(size: 8, weight: .bold))
-                Text(Fmt.num(abs(d), digits: digits))
-                    .font(Typography.captionBold)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-            .foregroundStyle(color)
-        }
-    }
-}
+// DeltaBadge KALDIRILDI: hiçbir sayfa kullanmıyordu — yön çipi işini
+// ChartsComponents'taki BoardDeltaChip görüyor.
 
 /// Compact secondary metric row for the Vücut card — tap promotes it into the big slot.
 struct BodyMetricRow: View {
@@ -361,6 +235,12 @@ struct BodyMetricRow: View {
     let accent: Color
     var onTap: () -> Void = {}
     @State private var hovering = false
+
+    /// Board çipi yönü — hedef yönündeki değişim yeşil (1), tersi bordo (-1), sıfır nötr (0).
+    private var chipDirection: Int {
+        guard let d = delta, d != 0 else { return 0 }
+        return (lowerIsBetter ? d < 0 : d > 0) ? 1 : -1
+    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -387,44 +267,85 @@ struct BodyMetricRow: View {
                 .frame(width: 88, height: 30)
                 .opacity(points.count >= 2 ? 0.9 : 0)
 
-            DeltaBadge(delta: delta, lowerIsBetter: lowerIsBetter)
-                .frame(width: 56, alignment: .trailing)
+            Group {
+                if let d = delta {
+                    BoardDeltaChip(text: Fmt.signed(d, digits: 1), direction: chipDirection)
+                }
+            }
+            .frame(width: 62, alignment: .trailing)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 13)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        // Esnek fayans: önerilen boy doğal boyundan büyükse fayans uzar (içerik
+        // dikeyde ortalanır) — Vücut kolonu yanındaki grafik pencereyle büyürken
+        // satırlar onunla aynı hizada kalsın diye. Doğal boyda hiçbir şey değişmez.
+        .frame(maxHeight: .infinity)
+        // Board fayans kromu: surfaceElevated zemin, 10px köşe — hover'da koyulaşır.
         .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(hovering ? Palette.fieldFill : .clear)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Palette.surfaceElevated.opacity(hovering ? 1 : 0.6))
         )
-        .contentShape(Rectangle())
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture(perform: onTap)
         .onHover { hovering = $0 }
     }
 }
 
-/// Balance accounting column with a leading hairline rule (Tüketim / Adım / Spor / Kayıtlı).
-struct BalanceStatColumn: View {
+/// Buzz KPI grubu: fayans zemini olmayan çıplak stat — renk noktası + soluk
+/// etiket + tabular değer (+ opsiyonel birim/alt satır). Gruplar satırda
+/// `DashboardStatDivider` ile ayrılır; sayı fontları fayans halindekiyle aynı.
+struct DashboardStatGroup: View {
     let label: String
     let value: String
+    var sub: String? = nil
+    var dot: Color? = nil
+    var unit: String? = nil
 
     var body: some View {
-        HStack(spacing: 14) {
-            Rectangle()
-                .fill(Palette.border)
-                .frame(width: 0.5, height: 32)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(label).eyebrow()
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                if let dot {
+                    Circle().fill(dot).frame(width: 6, height: 6)
+                }
+                Text(label)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(Typography.mono)
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                if let unit {
+                    Text(unit)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.textQuaternary)
+                }
             }
-            Spacer(minLength: 0)
+            if let sub {
+                Text(sub)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Palette.textQuaternary)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+/// KPI grupları arasındaki dikey hairline — Buzz: 1pt, border/50, ~28pt boy.
+struct DashboardStatDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Palette.border.opacity(0.5))
+            .frame(width: 1, height: 28)
+    }
+}
+
+// BoardStatCard KALDIRILDI: KPI şeridiyle birlikte tek kullanıcısı gitti —
+// aynı stat, aşağıdaki zengin kartlarda (halka, Vücut, Kalori Dengesi) yaşıyor.
 
 extension View {
     func dashboardReveal(_ visible: Bool, delay: Double) -> some View {

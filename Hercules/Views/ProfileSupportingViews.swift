@@ -32,12 +32,12 @@ struct ProfileEmptyState: View {
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .fill(Palette.surfaceElevated.opacity(0.58))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(Palette.border, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(Palette.border.opacity(0.7), lineWidth: 1)
         )
     }
 }
@@ -64,7 +64,7 @@ struct ProfilePanelModifier: ViewModifier {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: 0.5)
+                    .strokeBorder(Palette.border.opacity(0.7), lineWidth: 1)
             )
     }
 }

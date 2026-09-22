@@ -48,21 +48,21 @@ struct MobileRootView: View {
     @Query(sort: \Recipe.createdAt, order: .reverse) private var recipes: [Recipe]
     @Query(sort: \RecipeVideo.createdAt, order: .reverse) private var recipeVideos: [RecipeVideo]
     @Query(sort: \FoodPreset.sortOrder) private var presets: [FoodPreset]
-    @Query(sort: \FeedItem.createdAt, order: .reverse) private var feedItems: [FeedItem]
 
     /// Mac'ten gelen "Telefona gönder" feed'i (@Observable → akış/badge reaktif).
-    private let feedStore = FeedStore.shared
     @State private var health = HealthService.shared
     @State private var cloudSync = CloudSyncMonitor.shared
 
     @State private var selectedTab: MobileTab = .dashboard
     @State private var showAddMeasurement = false
-    @State private var showFoodAIEstimator = false
     @State private var saveErrors = SaveErrorReporter.shared
     @State private var remoteAIHealth: RemoteAIHealthResponse?
     @State private var remoteAIError: String?
     @State private var remoteAIChecking = false
     @State private var showProfileEditor = false
+    /// Avatar dosyası değişince yüzü tazeleyen sayaç.
+    @State private var profileAvatarEpoch = 0
+    @State private var showIrohPairing = false
     @State private var showRecipeEditor = false
     @State private var recipeToEdit: Recipe?
     @State private var recipeToView: Recipe?
@@ -72,6 +72,8 @@ struct MobileRootView: View {
     /// Tarif videoları (sadece isim + link) ekleme alanı.
     @State private var newVideoTitle = ""
     @State private var newVideoURL = ""
+    /// Tarifler "+" → Video linki sayfası.
+    @State private var showAddVideo = false
     @State private var foodToDelete: FoodEntry?
     @State private var measurementToDelete: Measurement?
     @State private var workoutToDelete: WorkoutSession?
@@ -79,24 +81,12 @@ struct MobileRootView: View {
     /// dinamik Palette renkleri trait değişimiyle otomatik döner.
     @State private var appearance: AppAppearance = ThemeSettings.appearance
 
-    // Bugün (V1 Tek Akış) — açılır bölümler + seçili antrenman günü (nil → bugün/ilk plan).
+    // Bugün (V12 Çizgi) — öğün listesi açık mı + detayı açık hareket (RIR / dinlenme / not).
     @State private var mealsExpanded = false
-    @State private var workoutExpanded = false
-    @State private var selectedWorkoutDayState: Int? = nil
+    @State private var expandedExerciseID: PersistentIdentifier?
 
-    // Akış gelen-kutusu (Bugün başlığındaki butondan sağdan kayar).
-    @State private var showAkisFeed = false
-    @State private var akisOpenId: String? = nil
-    @State private var akisUnreadSnapshot: Set<String> = []
-    @State private var akisDragX: CGFloat = 0
 
-    @State private var aiFoodInput = ""
-    @State private var aiFoodResult: AIFoodResult?
-    @State private var aiFoodStatus: String?
-    @State private var aiFoodError: String?
-    @State private var isEstimatingFood = false
     @State private var aiFoodPickerItems: [PhotosPickerItem] = []
-    @State private var aiFoodImages: [Data] = []
     @FocusState private var aiInputFocused: Bool
 
     @State private var measurementFullCheckIn = false
@@ -110,31 +100,6 @@ struct MobileRootView: View {
 
             mobileBottomBar
 
-            if showAkisFeed {
-                akisFeedOverlay
-                    .offset(x: akisDragX)
-                    .gesture(
-                        // Sağa kaydır → geri (ok'a basmaya gerek yok). Dikey kaydırma ScrollView'da kalsın
-                        // diye yalnız yatay-baskın, sağa hareketle açılır.
-                        DragGesture(minimumDistance: 18)
-                            .onChanged { v in
-                                if v.translation.width > 0, abs(v.translation.width) > abs(v.translation.height) {
-                                    akisDragX = v.translation.width
-                                }
-                            }
-                            .onEnded { v in
-                                if v.translation.width > 90 {
-                                    // Offset geçerli konumda kalsın; move-out transition oradan sağa kaydırıp çıkarır.
-                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { showAkisFeed = false }
-                                } else {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { akisDragX = 0 }
-                                }
-                            }
-                    )
-                    .transition(.move(edge: .trailing))
-                    .shadow(color: .black.opacity(0.25), radius: 24, x: -10, y: 0)
-                    .zIndex(20)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .dynamicTypeSize(.small ... .xLarge)
@@ -147,10 +112,8 @@ struct MobileRootView: View {
         } message: {
             Text(saveErrors.message ?? "")
         }
-        .sheet(isPresented: $showFoodAIEstimator) {
-            foodAIEstimatorSheet
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showIrohPairing) {
+            MobileIrohPairingView()
         }
         .sheet(isPresented: $showAddMeasurement) {
             MobileMeasurementEditor(startFull: measurementFullCheckIn, height: profiles.first?.height) { date, weight, bodyFat, waist, chest, neck, note in
@@ -232,9 +195,6 @@ struct MobileRootView: View {
             if newPhase == .active {
                 Task { @MainActor in await health.synchronize(into: ctx) }
             }
-        }
-        .onChange(of: feedItems.count) { _, _ in
-            FeedStore.deduplicate(feedItems, in: ctx)
         }
     }
 
@@ -337,200 +297,34 @@ struct MobileRootView: View {
         .scrollIndicators(.hidden)
     }
 
-    // MARK: - Akış (gelen kutusu — Bugün başlığındaki butondan sağdan kayar)
+    // MARK: - Bugün (V12 "Çizgi")
 
-    /// Tam ekran kaplayan Akış paneli. Öğeler SwiftData/CloudKit üzerinden gelir;
-    /// okundu bilgisi yalnız bu cihazda tutulur.
-    private var akisFeedOverlay: some View {
-        VStack(spacing: 0) {
-            akisHeader
-            ScrollView {
-                // LazyVStack: akış sınırsız büyüyor ve düz VStack panel açılışında
-                // HER satırı kuruyordu (satır başına RelativeDateTimeFormatter +
-                // karakter karakter mention parse'ı).
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    flowSectionHeader("Bu hafta") { EmptyView() }
-                    if feedItems.isEmpty {
-                        akisEmpty
-                    } else {
-                        ForEach(feedItems) { item in
-                            akisMessageRow(item)
-                        }
-                    }
-                }
-                .padding(.horizontal, 22)
-                .padding(.top, 14)
-                .padding(.bottom, 28)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.background.ignoresSafeArea())
-        .task {
-            feedStore.markAllSeen(feedItems)
-        }
-    }
-
-    private var akisHeader: some View {
-        HStack(spacing: 10) {
-            Button {
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { showAkisFeed = false }
-            } label: {
-                Lucide(sf: "chevron.left", size: 13)
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Palette.surface))
-                    .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            Text("Akış")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(Palette.textPrimary)
-            Spacer(minLength: 0)
-            if !akisUnreadSnapshot.isEmpty {
-                Text("\(akisUnreadSnapshot.count) YENİ")
-                    .font(.system(size: 9.5, weight: .bold))
-                    .tracking(1.4)
-                    .foregroundStyle(Palette.accent)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
-    }
-
-    private func akisMessageRow(_ item: FeedItem) -> some View {
-        let open = akisOpenId == item.id
-        let unread = akisUnreadSnapshot.contains(item.id)
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { akisOpenId = open ? nil : item.id }
-            } label: {
-                HStack(alignment: .top, spacing: 11) {
-                    akisAvatar(item)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 7) {
-                            Text(item.source == "Mac" ? "Mac Hercules" : item.source)
-                                .font(.system(size: 12.5, weight: .bold))
-                                .foregroundStyle(Palette.textPrimary)
-                            Text(Fmt.relative(item.createdAt))
-                                .font(.system(size: 10))
-                                .foregroundStyle(Palette.textQuaternary)
-                            Spacer(minLength: 4)
-                            if unread && !open {
-                                Circle().fill(Palette.accent).frame(width: 6, height: 6)
-                            }
-                            chevron(open: open)
-                        }
-                        if !item.title.isEmpty {
-                            mentionText(item.title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .lineLimit(open ? nil : 1)
-                                .fixedSize(horizontal: false, vertical: open)
-                        }
-                        if !open {
-                            Text(akisPreview(item.body))
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Palette.textSecondary)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if open {
-                HStack(spacing: 0) {
-                    Rectangle().fill(Palette.track).frame(width: 2)
-                    Text(item.body)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 12)
-                }
-                .padding(.leading, 45)
-                .padding(.top, 10)
-            }
-        }
-        .padding(.vertical, 12)
-    }
-
-    private func akisAvatar(_ item: FeedItem) -> some View {
-        Lucide(sf: item.kind == "recipe" ? "fork.knife" : "laptopcomputer", size: 13)
-            .foregroundStyle(Palette.accent)
-            .frame(width: 34, height: 34)
-            .background(Circle().fill(Palette.accentSoft))
-            .overlay(Circle().strokeBorder(Palette.border, lineWidth: 0.5))
-    }
-
-    private var akisEmpty: some View {
-        VStack(spacing: 10) {
-            Lucide(sf: "tray", size: 30)
-                .foregroundStyle(Palette.textTertiary)
-            Text("Akış boş")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(Palette.textPrimary)
-            Text("Mac Hercules'te bir sohbet mesajında \"Telefona gönder\"e bas — burada belirir.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Palette.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 64)
-        .padding(.horizontal, 16)
-    }
-
-    /// Gövdenin ilk dolu satırı — kapalı önizleme için.
-    private func akisPreview(_ body: String) -> String {
-        body.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init)
-            ?? body.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// @etiketleri (ör. @Ölçümler, @Takvim) nötr accent ile vurgular; gerisi birincil metin.
-    private func mentionText(_ string: String) -> Text {
-        var result = Text("")
-        var buffer = ""
-        var inMention = false
-        func flush() {
-            guard !buffer.isEmpty else { return }
-            result = result + Text(buffer).foregroundStyle(inMention ? Palette.accent : Palette.textPrimary)
-            buffer = ""
-        }
-        for ch in string {
-            if ch == "@" {
-                flush(); inMention = true; buffer.append(ch)
-            } else if inMention && (ch.isLetter || ch.isNumber || ch == "_") {
-                buffer.append(ch)
-            } else {
-                if inMention { flush(); inMention = false }
-                buffer.append(ch)
-            }
-        }
-        flush()
-        return result
-    }
-
-    // MARK: - Bugün (V1 "Tek Akış")
-
-    /// Tek akış Bugün sayfası: başlık → kalori bandı + makrolar → sayaç şeridi →
-    /// açılır Yemekler → hafta şeridi + açılır Antrenman → Son ölçüm. Kartsız, bordo'suz.
+    /// Mobil tuvaldeki "Bugün · V12 Çizgi": tarih → büyük kalan kalori → öğünlere bölünmüş
+    /// kalori çizgisi (dokun → öğün listesi, sola kaydır → sil) → makrolar → bugünün
+    /// antrenmanı (bugün plan yoksa Dinlenme + sıradaki seans) → en altta adım · kg · su.
+    /// Öğün ekleme tek yoldan: dock'taki koç.
     private var dashboardPage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            dashHeader
-            dashCalorieGauge
-            dashCounterStrip
-            dashMealsSection
-            dashWorkoutSection
-            dashLastMeasurement
+        VStack(alignment: .leading, spacing: 0) {
+            dashDateLabel
+            dashHero
+            dashMealLine
+            if mealsExpanded {
+                dashMealList
+                    .transition(.opacity)
+            }
+            dashMacros
+            dashWorkout
+            dashCounters
         }
-        .padding(.top, 6)
+        // Tuvalde tarih satırı güvenli alanın 10 pt altında; mobilePage'in üst 18'i fazla
+        // (simülatörde tuvalle piksel ölçümüyle eşlendi).
+        .padding(.top, -15)
     }
+
+    /// Tuvaldeki kenar boşlukları sayfanın 18'lik iç boşluğuna göre: metin 28, çizgi 32, sayılar 20.
+    private static let dashInset: CGFloat = 10
+    private static let dashLineInset: CGFloat = 14
+    private static let dashNumberInset: CGFloat = 2
 
     private static let weekdayUpperFmt: DateFormatter = {
         let f = DateFormatter()
@@ -538,887 +332,612 @@ struct MobileRootView: View {
         f.dateFormat = "EEEE"
         return f
     }()
-    private static let measureDateFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "d MMM yyyy"
-        return f
-    }()
 
-    // ── başlık ──
-    private var dashHeader: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 5) {
-                    Text(Self.weekdayUpperFmt.string(from: Date()).uppercased(with: Locale(identifier: "tr_TR")))
-                        .tracking(1.4)
-                        .foregroundStyle(Palette.textSecondary)
-                    Text("— \(Fmt.dayMonth.string(from: Date()))")
-                        .tracking(1.4)
-                        .foregroundStyle(Palette.textQuaternary)
-                }
-                .font(Typography.label)
-                Text(profileName.isEmpty ? "Hercules" : "Selam, \(profileName)")
-                    .font(.system(size: 25, weight: .semibold))
-                    .tracking(-0.5)
-                    .foregroundStyle(Palette.textPrimary)
-            }
-            Spacer(minLength: 8)
-            headerActions
-        }
+    // ── tarih ──
+    private var dashDateLabel: some View {
+        let text = "\(Self.weekdayUpperFmt.string(from: .now)) · \(Fmt.dayMonth.string(from: .now))"
+        return dashSectionLabel(text)
+            .padding(.horizontal, Self.dashInset)
+            .padding(.top, 10)
     }
 
-    /// Başlık eylemleri: gelen kutusu.
-    private var headerActions: some View {
-        HStack(spacing: 12) {
-            akisInboxButton
-        }
-    }
-
-    /// Başlık eylem kutusu — başlıktaki tüm eylemler bunu kullanır; tek tanım
-    /// olduğu için ikonlar birbirinden kayamaz.
-    private func headerActionBox(_ icon: some View) -> some View {
-        icon
-            .foregroundStyle(Palette.textSecondary)
-            .frame(width: 30, height: 30)
-            .contentShape(Rectangle())
-    }
-
-    /// Akış'ı sağdan kaydıran gelen-kutusu butonu — Bugün ve Tarifler başlıklarında ortak.
-    /// Okunmamış varsa nokta gösterir; açılışta okunmadı kümesini dondurur (panel içi için).
-    private var akisInboxButton: some View {
-        Button {
-            akisUnreadSnapshot = Set(feedItems.lazy.filter { !feedStore.isSeen($0.id) }.map(\.id))
-            akisOpenId = nil
-            akisDragX = 0
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { showAkisFeed = true }
-        } label: {
-            headerActionBox(
-                Lucide(sf: "tray", size: 17)
-                    .overlay(alignment: .topTrailing) {
-                        if feedStore.unseenCount(in: feedItems) > 0 {
-                            Circle()
-                                .fill(Palette.accent)
-                                .frame(width: 6, height: 6)
-                                .offset(x: 3, y: -2)
-                        }
-                    }
+    // ── kalan kalori ──
+    private var dashHero: some View {
+        let intake = todayCalories
+        let goal = calorieResult?.goalCalories
+        let over = goal.map { intake > $0 } ?? false
+        let caption = goal == nil ? "kcal yenen" : (over ? "kcal fazla" : "kcal kaldı")
+        return VStack(spacing: 0) {
+            CountUpText(
+                value: (goal.map { abs($0 - intake) } ?? intake).rounded(),
+                font: .system(size: 116, weight: .thin),
+                color: over ? Palette.negative : Palette.textPrimary,
+                tracking: -5.5
             )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Akış — gelen kutusu")
-    }
-
-    // ── kalori bandı + makrolar ──
-    @ViewBuilder
-    private var dashCalorieGauge: some View {
-        if let plan = calorieResult {
-            let intake = todayCalories
-            let goal = plan.goalCalories
-            let over = max(0, intake - goal)
-            let remaining = max(0, goal - intake)
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline) {
-                    CountUpText(
-                        value: intake,
-                        font: .system(size: 46, weight: .semibold),
-                        tracking: -1.4
-                    )
-                    Text("/ \(Fmt.int(goal)) kcal")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Palette.textTertiary)
-                    Spacer(minLength: 8)
-                    calorieChip(over: over, remaining: remaining)
-                }
-                calorieBar(intake: intake, goal: goal)
-                    .padding(.top, 14)
-                HStack {
-                    Text("\(Fmt.int(remaining)) kcal kaldı")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                    Spacer()
-                    Text("hedef \(Fmt.int(goal))")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                }
-                .padding(.top, 7)
-                dashMacros(plan: plan)
-                    .padding(.top, 16)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    CountUpText(
-                        value: todayCalories,
-                        font: .system(size: 46, weight: .semibold),
-                        tracking: -1.4
-                    )
-                    Text("kcal")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Palette.textTertiary)
-                }
-                Text("Profilini doldur — günlük kalori ve makro hedefin burada belirir.")
+            // Tuvalde satır yüksekliği = punto; SF'nin doğal satırı ~22 pt daha uzun.
+            .padding(.top, -9)
+            .padding(.bottom, -13.5)
+            Text(caption)
+                .font(.system(size: 16))
+                .foregroundStyle(Palette.textTertiary)
+            if goal == nil {
+                Text("Profilini doldur — günlük hedefin burada belirir.")
                     .font(Typography.caption)
                     .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private func calorieChip(over: Double, remaining: Double) -> some View {
-        let isOver = over > 0
-        // Hedef üstü = dikkat (pirinç/negative). Altı = olumlu/sakin. Bordo yok.
-        let color = isOver ? Palette.negative : Palette.positive
-        return Text(isOver ? "+\(Fmt.int(over)) üstü" : "\(Fmt.int(remaining)) kaldı")
-            .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(color.opacity(0.14)))
-    }
-
-    /// Yatay kalori bandı: taranmış mürekkep dolgu + ucunda "şu andasın" işareti.
-    /// Hedef aşılınca bant dolar ve pirinç/negative'e döner (üstü ne kadar aştığını
-    /// başlıktaki `calorieChip` söylüyor).
-    private func calorieBar(intake: Double, goal: Double) -> some View {
-        GoalBar(
-            value: intake,
-            goal: goal,
-            tint: Palette.textPrimary,
-            height: 10,
-            hatchColor: Palette.background.opacity(0.22),
-            hatchSpacing: 6,
-            hatchWidth: 2.5,
-            overflowTint: Palette.negative,
-            trackColor: Palette.track
-        )
-    }
-
-    private func dashMacros(plan: CalorieResult) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            macroColumn("PROTEIN", todayProtein, plan.protein.grams, Palette.macroProtein)
-            macroColumn("KARB", todayCarbs, plan.carbs.grams, Palette.macroCarbs)
-            macroColumn("YAĞ", todayFat, plan.fat.grams, Palette.macroFat)
-        }
-    }
-
-    private func macroColumn(_ label: String, _ value: Double, _ target: Double, _ color: Color) -> some View {
-        let over = value > target
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(label)
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(1.0)
-                    .foregroundStyle(Palette.textTertiary)
-                Spacer(minLength: 4)
-                Text(Fmt.int(value))
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(over ? color : Palette.textSecondary)
-                Text("/\(Fmt.int(target))")
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(Palette.textQuaternary)
-            }
-            GoalBar(
-                value: value,
-                goal: target,
-                tint: color,
-                height: 4,
-                hatched: false,
-                headMarker: false,
-                overflowTint: color,
-                trackColor: Palette.track
-            )
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // ── sayaç şeridi (Adım / Kilo / Su) ──
-    private var dashCounterStrip: some View {
-        HStack(spacing: 0) {
-            counterCell("ADIM", Fmt.int(Double(todaySteps)), "")
-            counterDivider
-            counterCell("KİLO", measurements.first?.weight.map { Fmt.num($0, digits: 1) } ?? "—", "kg")
-            counterDivider
-            counterCell("SU", calorieResult.map { Fmt.num($0.water, digits: 1) } ?? "—", "L")
-        }
-        .padding(.vertical, 11)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .top)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
-    }
-
-    private var counterDivider: some View {
-        Rectangle().fill(Palette.border).frame(width: 1, height: 22)
-    }
-
-    private func counterCell(_ key: String, _ value: String, _ unit: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(key)
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(1.0)
-                .foregroundStyle(Palette.textTertiary)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value)
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(Palette.textPrimary)
-                if !unit.isEmpty {
-                    Text(unit)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Palette.textTertiary)
-                }
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 10)
             }
         }
         .frame(maxWidth: .infinity)
+        .padding(.top, 30)
     }
 
-    // ── Yemekler (açılır) ──
-    private var dashMealsSection: some View {
-        return VStack(alignment: .leading, spacing: 0) {
-            flowSectionHeader("Yemekler") {
-                Button {
-                    showFoodAIEstimator = true
-                } label: {
-                    Lucide(sf: "plus", size: 12)
+    // ── öğün çizgisi (dokun → öğün listesi) ──
+    private var dashMealLine: some View {
+        let intake = todayCalories
+        let goal = calorieResult?.goalCalories ?? 0
+        let meals = todayFoods.reversed().map {
+            MealLineSegment(time: $0.date, calories: $0.calories)
+        }
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) { mealsExpanded.toggle() }
+        } label: {
+            VStack(spacing: 12) {
+                MealSegmentLine(meals: meals, intake: intake, goal: goal)
+                HStack(alignment: .center, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(Fmt.int(intake))
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Palette.textSecondary)
+                        Text("yenen")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                    Lucide(sf: mealsExpanded ? "chevron.up" : "chevron.down", size: 12)
                         .foregroundStyle(Palette.textTertiary)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("AI ile yemek ekle")
-            }
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { mealsExpanded.toggle() }
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(todayFoods.count) kayıt")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Palette.textPrimary)
                     Spacer(minLength: 8)
-                    Text("\(Fmt.int(todayCalories)) kcal")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Palette.textTertiary)
-                    chevron(open: mealsExpanded)
-                }
-                .padding(.top, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if mealsExpanded {
-                VStack(spacing: 0) {
-                    if todayFoods.isEmpty {
-                        rowEmpty("Bugün yemek kaydı yok.")
-                    } else {
-                        ForEach(todayFoods.prefix(12), id: \.persistentModelID) { food in
-                            mealRow(food)
+                    if goal > 0 {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            Text("hedef")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Palette.textTertiary)
+                            Text(Fmt.int(goal))
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Palette.textSecondary)
                         }
                     }
                 }
-                .padding(.top, 3)
+                .monospacedDigit()
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Öğünler: \(todayFoods.count) kayıt, \(Fmt.int(intake)) kalori")
+        .accessibilityHint(mealsExpanded ? "Listeyi kapatır" : "Öğün listesini açar")
+        .padding(.horizontal, Self.dashLineInset)
+        .padding(.top, 24)
     }
 
-    /// Sola kaydır → Sil (foodToDelete → onay alert'i → deleteFood). Akış sayfasıyla aynı
+    private var dashMealList: some View {
+        VStack(spacing: 0) {
+            if todayFoods.isEmpty {
+                Text("Bugün öğün kaydı yok.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 11)
+            } else {
+                ForEach(Array(todayFoods.reversed().enumerated()), id: \.element.persistentModelID) { index, food in
+                    if index > 0 { dashHairline }
+                    mealRow(food)
+                }
+            }
+        }
+        .padding(.horizontal, Self.dashInset)
+        .padding(.top, 14)
+    }
+
+    /// Sola kaydır → Sil (foodToDelete → onay alert'i → deleteFood). Aynı
     /// renkte kalsın diye rowBackground = page background.
     private func mealRow(_ food: FoodEntry) -> some View {
         MobileSwipeToDelete(onDelete: { foodToDelete = food }, rowBackground: Palette.background) {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text(Fmt.timeShort.string(from: food.date))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.textQuaternary)
+                    .frame(width: 40, alignment: .leading)
                 Text(food.name)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 15))
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
-                    .layoutPriority(1)
-                if let grams = food.grams {
-                    Text("\(Fmt.int(grams)) g")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Palette.textQuaternary)
-                        .fixedSize()
-                        .layoutPriority(1)
-                }
-                DottedLeader()
-                Text("\(Fmt.int(food.calories))")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(Palette.textPrimary)
-                    .fixedSize()
+                Spacer(minLength: 8)
+                Text(Fmt.int(food.calories))
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.textSecondary)
             }
-            .padding(.vertical, 7)
-            .padding(.horizontal, 2)
+            .monospacedDigit()
+            .padding(.vertical, 11)
         }
     }
 
-    // ── Antrenman (hafta şeridi + açılır program) ──
-    private var dashWorkoutSection: some View {
-        let selected = dashSelectedWorkout
-        return VStack(alignment: .leading, spacing: 0) {
-            flowSectionHeader("Antrenman") {
-                Text("\(activeWorkouts.count) gün / hafta")
-                    .font(Typography.caption)
+    // ── makrolar ──
+    private var dashMacros: some View {
+        let plan = calorieResult
+        return HStack(spacing: 0) {
+            dashStat(Fmt.int(todayProtein), "protein", target: plan?.protein.grams, value: todayProtein)
+            dashStat(Fmt.int(todayCarbs), "karb", target: plan?.carbs.grams, value: todayCarbs)
+            dashStat(Fmt.int(todayFat), "yağ", target: plan?.fat.grams, value: todayFat)
+        }
+        .padding(.horizontal, Self.dashNumberInset)
+        .padding(.top, mealsExpanded ? 28 : 32)
+    }
+
+    /// İnce büyük sayı + altında etiket ("/ hedef" soluk). Hedef aşılınca sayı kırmızı.
+    private func dashStat(_ text: String, _ label: String, target: Double? = nil, value: Double = 0, color: Color? = nil) -> some View {
+        let over = target.map { value > $0 } ?? false
+        return VStack(spacing: 3) {
+            Text(text)
+                .font(.system(size: 28, weight: .light))
+                .tracking(-0.5)
+                .monospacedDigit()
+                .foregroundStyle(color ?? (over ? Palette.negative : Palette.textPrimary))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(label)
                     .foregroundStyle(Palette.textTertiary)
+                if let target {
+                    Text("/ \(Fmt.int(target))")
+                        .foregroundStyle(Palette.textQuaternary)
+                }
             }
-            dashWeekStrip
-                .padding(.top, 10)
-            Button {
-                guard selected != nil else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { workoutExpanded.toggle() }
-            } label: {
+            .font(.system(size: 13))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // ── bugünün antrenmanı (yoksa Dinlenme + sıradaki seans) ──
+    @ViewBuilder
+    private var dashWorkout: some View {
+        if let session = todayWorkout {
+            VStack(alignment: .leading, spacing: 0) {
+                dashSectionLabel("Antrenman")
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(selected?.name ?? "Antrenman yok")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(selected == nil ? Palette.textTertiary : Palette.textPrimary)
+                    Text(session.name)
+                        .font(.system(size: 21, weight: .medium))
+                        .foregroundStyle(Palette.textPrimary)
                         .lineLimit(1)
-                        .layoutPriority(1)
-                    if let selected, selected.weekday == todayWeekday {
-                        Text("BUGÜN")
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(0.6)
-                            .foregroundStyle(Palette.textSecondary)
-                    }
                     Spacer(minLength: 8)
-                    Text(workoutSummaryText(selected))
-                        .font(.system(size: 10, design: .monospaced))
+                    Text("\(session.durationMinutes) dk")
+                        .font(.system(size: 13))
                         .foregroundStyle(Palette.textTertiary)
                         .fixedSize()
-                    chevron(open: workoutExpanded)
-                        .opacity(selected == nil ? 0 : 1)
                 }
-                .padding(.top, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if workoutExpanded, let selected {
-                VStack(spacing: 0) {
-                    let exercises = selected.sortedTemplateExercises
-                    if exercises.isEmpty {
-                        rowEmpty("Egzersizler senkronda — Mac'ten gelecek.")
-                    } else {
-                        ForEach(exercises, id: \.persistentModelID) { exercise in
-                            exerciseRow(exercise)
-                        }
+                .padding(.vertical, 6)
+                let exercises = session.sortedTemplateExercises
+                if exercises.isEmpty {
+                    Text("Hareketler senkronda — Mac'ten gelecek.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.vertical, 11)
+                } else {
+                    ForEach(Array(exercises.enumerated()), id: \.element.persistentModelID) { index, exercise in
+                        if index > 0 { dashHairline }
+                        exerciseRow(exercise)
                     }
                 }
-                .padding(.top, 3)
             }
-        }
-    }
-
-    private var dashWeekStrip: some View {
-        // Pazartesi→Pazar; etiketler takvimle birebir (Pz, "Pa" değil).
-        let week: [(Int, String)] = [(2, "Pt"), (3, "Sa"), (4, "Ça"), (5, "Pe"), (6, "Cu"), (7, "Ct"), (1, "Pz")]
-        return HStack(spacing: 0) {
-            ForEach(week, id: \.0) { wd, label in
-                let has = activeWorkouts.contains { $0.weekday == wd }
-                let isToday = wd == todayWeekday
-                let isSel = wd == dashSelectedWorkoutDay
-                VStack(spacing: 5) {
-                    Text(label)
-                        .font(.system(size: 9, weight: isToday ? .bold : .semibold))
-                        .tracking(0.6)
-                        .foregroundStyle(isSel ? Palette.textPrimary : (isToday ? Palette.textSecondary : Palette.textTertiary))
-                        .overlay(alignment: .bottom) {
-                            Rectangle()
-                                .fill(isSel ? Palette.accent : .clear)
-                                .frame(height: 1)
-                                .offset(y: 3)
-                        }
-                    Circle()
-                        .fill(isToday ? Palette.accent : (has ? Palette.track : .clear))
-                        .frame(width: 3.5, height: 3.5)
-                        .overlay(
-                            Circle().strokeBorder(isToday ? Palette.accentSoft : .clear, lineWidth: 1)
-                        )
+            .padding(.horizontal, Self.dashInset)
+            .padding(.top, 39)
+        } else if let next = nextWorkout {
+            VStack(alignment: .leading, spacing: 0) {
+                dashSectionLabel("Antrenman")
+                HStack(spacing: 10) {
+                    Lucide(sf: "moon.fill", size: 17)
+                        .foregroundStyle(Palette.textSecondary)
+                    Text("Dinlenme")
+                        .font(.system(size: 21, weight: .medium))
+                        .foregroundStyle(Palette.textPrimary)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .opacity(isSel || has || isToday ? 1 : 0.5)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    // Her güne tıklanabilir. Dolu gün → programı aç; boş gün → seç ama açma
-                    // (antrenman yok satırı görünür, egzersiz listesi çıkmaz).
-                    selectedWorkoutDayState = wd
-                    withAnimation(.easeInOut(duration: 0.18)) { workoutExpanded = has }
+                .padding(.top, 6)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(workoutDayLabel(next))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                    Text(next.name)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text("\(next.durationMinutes) dk")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize()
+                }
+                .padding(.top, 18)
+                .padding(.bottom, 4)
+                if let names = exerciseNamesText(next) {
+                    names
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineSpacing(3.5)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.horizontal, Self.dashInset)
+            .padding(.top, 39)
         }
     }
 
-    private func exerciseRow(_ exercise: WorkoutTemplateExercise) -> some View {
-        // İsim her zaman tam (öncelik 2), reçete kalanı alır ve uzunsa KISALIR (fixedSize yok —
-        // yoksa uzun reçete satırı ekran genişliğini aşıp tüm sayfayı kaydırıyor). İsimsiz
-        // (koç notu) hareketlerde isim+lider atlanır, reçete tam genişlik kullanır.
-        let name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return HStack(alignment: .firstTextBaseline, spacing: 9) {
-            exerciseRowLink(exercise.sourceURL)
-            if !name.isEmpty {
-                Text(name)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .layoutPriority(2)
-                DottedLeader()
-            }
-            Text(exercise.prescriptionText)
-                .font(.system(size: 9.5, design: .monospaced))
-                .foregroundStyle(Palette.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(1)
-        }
-        .padding(.vertical, 6.5)
-    }
-
-    /// Egzersiz satırının başındaki numara (1,2,3…) yerine teknik linki.
-    /// URL varsa dokunulabilir zincir ikonu; yoksa hizayı koruyan soluk ikon.
+    /// Hareket satırı: set×tekrar · ad · yük · teknik linki (Mac'teki "Kaynak"). Satıra
+    /// dokununca reçetenin geri kalanı açılır: RIR, dinlenme, hareket notu.
     @ViewBuilder
-    private func exerciseRowLink(_ raw: String?) -> some View {
+    private func exerciseRow(_ exercise: WorkoutTemplateExercise) -> some View {
+        let name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = exerciseDetail(exercise)
+        let isOpen = detail != nil && expandedExerciseID == exercise.persistentModelID
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+                if name.isEmpty {
+                    // İsimsiz satır (koç notu): reçete tam genişlik.
+                    Text(exercise.prescriptionText)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(setsRepsText(exercise))
+                        .font(.system(size: 13))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textQuaternary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .frame(width: 52, alignment: .leading)
+                    Text(name)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let load = exercise.load?.nilIfBlank {
+                        Text(load)
+                            .font(.system(size: 15))
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                exerciseLink(exercise.sourceURL)
+            }
+            .padding(.vertical, 11.5)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard detail != nil else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    expandedExerciseID = isOpen ? nil : exercise.persistentModelID
+                }
+            }
+            if isOpen, let detail {
+                Text(detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 66)
+                    .padding(.top, -3)
+                    .padding(.bottom, 11)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    /// Teknik linki. Dokunma alanı 36 pt, satır yüksekliğini büyütmez; link yoksa
+    /// hizayı koruyan boş yer.
+    @ViewBuilder
+    private func exerciseLink(_ raw: String?) -> some View {
         if let url = normalizedURL(raw) {
             Link(destination: url) {
-                Lucide(sf: "link", size: 10)
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(width: 14, alignment: .leading)
+                Lucide(sf: "link", size: 14)
+                    .foregroundStyle(Palette.textTertiary)
+                    .frame(width: 16, height: 16, alignment: .trailing)
+                    .padding(10)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .padding(-10)
             .accessibilityLabel("Hareket tekniği linkini aç")
         } else {
-            Lucide(sf: "link", size: 10)
-                .foregroundStyle(Palette.textQuaternary.opacity(0.6))
-                .frame(width: 14, alignment: .leading)
+            Color.clear
+                .frame(width: 16, height: 16)
+                .accessibilityHidden(true)
         }
     }
 
-    private func workoutSummaryText(_ workout: WorkoutSession?) -> String {
-        guard let workout else { return "" }
-        let count = workout.sortedTemplateExercises.count
-        return count > 0 ? "\(count) hareket · \(workout.durationMinutes) dk" : "\(workout.durationMinutes) dk"
+    private func setsRepsText(_ exercise: WorkoutTemplateExercise) -> String {
+        switch (exercise.sets, exercise.reps?.nilIfBlank) {
+        case let (sets?, reps?): return "\(sets)×\(reps)"
+        case let (sets?, nil): return "\(sets) set"
+        case let (nil, reps?): return reps
+        default: return ""
+        }
     }
 
-    // ── Son ölçüm ──
-    private var dashLastMeasurement: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            flowSectionHeader("Son ölçüm") {
-                if let date = measurements.first?.date {
-                    Text(Self.measureDateFmt.string(from: date))
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                }
+    private func exerciseDetail(_ exercise: WorkoutTemplateExercise) -> String? {
+        var parts: [String] = []
+        if let rir = exercise.rir?.nilIfBlank { parts.append("RIR \(rir)") }
+        if let rest = exercise.rest?.nilIfBlank { parts.append("dinlenme \(rest)") }
+        var lines = parts.isEmpty ? [] : [parts.joined(separator: " · ")]
+        if let note = exercise.notes?.nilIfBlank { lines.append(note) }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    /// Dinlenme gününde sıradaki seansın hareketleri tek cümle ("Squat · Leg Press · …");
+    /// ad ortadan bölünmesin diye içindeki boşluklar bölünmez boşluk.
+    private func exerciseNamesText(_ session: WorkoutSession) -> Text? {
+        let names = session.sortedTemplateExercises
+            .compactMap { $0.name.nilIfBlank }
+            .map { $0.replacingOccurrences(of: " ", with: "\u{00A0}") }
+        guard let first = names.first else { return nil }
+        return names.dropFirst().reduce(Text(first)) { text, name in
+            text + Text(" · ").foregroundStyle(Palette.textQuaternary) + Text(name)
+        }
+    }
+
+    /// "Yarın" ya da gün adı ("Perşembe").
+    private func workoutDayLabel(_ session: WorkoutSession) -> String {
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now
+        return session.weekday == Calendar.current.component(.weekday, from: tomorrow)
+            ? "Yarın"
+            : WorkoutSession.weekdayName(session.weekday)
+    }
+
+    // ── en alt: adım · kg · su (eski sayaç şeridi) ──
+    private var dashCounters: some View {
+        VStack(spacing: 26) {
+            dashHairline
+                .padding(.horizontal, Self.dashInset)
+            HStack(spacing: 0) {
+                dashStat(Fmt.int(Double(todaySteps)), "adım")
+                dashStat(measurements.first?.weight.map { Fmt.num($0, digits: 1) } ?? "—", "kg")
+                dashStat(calorieResult.map { Fmt.num($0.water, digits: 1) } ?? "—", "L su")
             }
-            if let m = measurements.first {
-                HStack(alignment: .firstTextBaseline, spacing: 18) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(m.weight.map { Fmt.num($0, digits: 1) } ?? "—")
-                            .font(.system(size: 21, weight: .semibold))
-                            .foregroundStyle(Palette.textPrimary)
-                        Text("kg")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                    measureSub("Yağ", m.bodyFat.map { "\(Fmt.num($0, digits: 1)) %" })
-                    measureSub("Bel", m.waist.map { "\(Fmt.num($0, digits: 1)) cm" })
-                    Spacer(minLength: 0)
-                }
-                .padding(.top, 10)
-
-                if let flow = dashWeightFlow {
-                    TrendSpark(
-                        values: flow.values,
-                        calloutValue: flow.deltaText,
-                        showDropLine: false,
-                        height: 76
-                    )
-                    .padding(.top, 6)
-                }
-            } else {
-                rowEmpty("Ölçüm kaydı yok.")
-                    .padding(.top, 6)
-            }
+            .padding(.horizontal, Self.dashNumberInset)
         }
+        .padding(.top, 30)
     }
 
-    /// "Son ölçüm" altındaki kilo akışı: son 30 günün kiloları (eskiden yeniye) +
-    /// çizginin ucuna yazılacak pencere farkı. 30 günde 2 kayda ulaşılamazsa tüm seri.
-    private var dashWeightFlow: (values: [Double], deltaText: String)? {
-        let asc = measurements.sorted { $0.date < $1.date }
-        let all = asc.compactMap(\.weight)
-        guard all.count >= 2 else { return nil }
-
-        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? .distantPast
-        let recent = asc.filter { $0.date >= cutoff }.compactMap(\.weight)
-        let values = recent.count >= 2 ? recent : all
-
-        let delta = values[values.count - 1] - values[0]
-        let window = recent.count >= 2 ? "30 gün" : "tüm kayıt"
-        let sign = delta < 0 ? "−" : "+"
-        let text = abs(delta) < 0.05
-            ? "\(window) · sabit"
-            : "\(window) · \(sign)\(Fmt.num(abs(delta), digits: 1)) kg"
-        return (values, text)
+    // ── ortak parçalar ──
+    private var dashHairline: some View {
+        Rectangle()
+            .fill(Palette.textPrimary.opacity(0.06))
+            .frame(height: 1)
     }
 
-    private func measureSub(_ label: String, _ value: String?) -> some View {
-        HStack(spacing: 4) {
-            Text(label)
-                .font(.system(size: 11.5))
-                .foregroundStyle(Palette.textSecondary)
-            Text(value ?? "—")
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(value == nil ? Palette.textQuaternary : Palette.textTertiary)
-        }
-    }
-
-    // ── ortak V1 parçaları ──
-    private func flowSectionHeader<Trailing: View>(_ title: String, @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .font(Typography.label)
-                .tracking(1.4)
-                .textCase(.uppercase)
-                .foregroundStyle(Palette.textQuaternary)
-                .fixedSize()
-            Rectangle()
-                .fill(Palette.border)
-                .frame(height: 1)
-                .frame(maxWidth: .infinity)
-            trailing()
-                .fixedSize()
-        }
-    }
-
-    private func chevron(open: Bool) -> some View {
-        Lucide(sf: "chevron.right", size: 10)
+    private func dashSectionLabel(_ title: String) -> some View {
+        Text(title.uppercased(with: Locale(identifier: "tr_TR")))
+            .font(.system(size: 12.5, weight: .medium))
+            .tracking(1.6)
             .foregroundStyle(Palette.textTertiary)
-            .rotationEffect(.degrees(open ? 90 : 0))
-    }
-
-    private func rowEmpty(_ text: String) -> some View {
-        Text(text)
-            .font(Typography.caption)
-            .foregroundStyle(Palette.textTertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 8)
     }
 
     private var todayWeekday: Int { Calendar.current.component(.weekday, from: .now) }
 
-    /// Varsayılan seçili antrenman günü: bugün plan varsa bugün, yoksa ilk plan günü.
-    private var defaultWorkoutDay: Int {
-        if activeWorkouts.contains(where: { $0.weekday == todayWeekday }) { return todayWeekday }
-        return activeWorkouts.first?.weekday ?? todayWeekday
+    private var todayWorkout: WorkoutSession? {
+        activeWorkouts.first { $0.weekday == todayWeekday }
     }
 
-    private var dashSelectedWorkoutDay: Int { selectedWorkoutDayState ?? defaultWorkoutDay }
+    // MARK: - Ölçümler (V2 "İzleme")
 
-    private var dashSelectedWorkout: WorkoutSession? {
-        activeWorkouts.first { $0.weekday == dashSelectedWorkoutDay }
-    }
-
-    // MARK: - Ölçümler (V1 — swipe'lı 7 serili trend karuseli + defter kayıtları)
-
+    /// Mobil tuvaldeki "Ölçümler · V2 İzleme": seçili serinin büyük değeri + değişimi, kenardan
+    /// kenara borsa çizgisi (basılı tut → gez) ve dönem seçici; altında 7 serinin izleme listesi
+    /// (dokun → üstteki grafik o seri), en altta kayıtlar (sola kaydır → sil). Sayfa bütün kayar.
     private var measurementsPage: some View {
-        VStack(spacing: 0) {
-            measurementsHeader
-            measurementCadenceReminder
-            measurementCarousel
-            measurementRecordsHeader
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if measurements.isEmpty {
-                        Text("Ölçüm kaydı yok. ＋ EKLE ile başla.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Palette.textTertiary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 28)
-                    } else {
-                        ForEach(measurements.prefix(60), id: \.persistentModelID) { m in
-                            measurementNotebookRow(m)
-                        }
-                    }
+        let all = measurementSeries
+        let index = min(selectedSeriesIndex, max(all.count - 1, 0))
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                measurementsHead
+                if all.isEmpty {
+                    Text("Ölçüm yok — + ile ekle.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 40)
+                } else {
+                    let series = all[index]
+                    MeasurementTrendPanel(
+                        series: series,
+                        lowerIsBetter: measurementLowerIsBetter(series.kind),
+                        goalDistance: series.kind == .weight ? measurementGoalDistance : nil,
+                        cadenceToday: MeasurementCadence.isFullCheckInDay()
+                    )
+                    .padding(.top, 16)
+                    measurementWatchlist(all, selected: index)
+                        .padding(.top, 14)
+                    measurementRecords
+                        .padding(.top, 30)
                 }
-                .padding(.horizontal, 22)
-                .padding(.top, 2)
-                .padding(.bottom, MobileChrome.dockClearance)
             }
+            .padding(.bottom, MobileChrome.dockClearance)
         }
+        .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.background.ignoresSafeArea())
     }
 
-    private var measurementsHeader: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                HStack(spacing: 5) {
-                    Text("Defter").foregroundStyle(Palette.textSecondary)
-                    Text("— \(measurementSeries.count) seri · \(measurements.count) kayıt").foregroundStyle(Palette.textQuaternary)
-                }
-                .font(Typography.label)
-                .tracking(1.4)
-                Spacer(minLength: 8)
-                headerActions
+    /// Tuvalde kenar boşluğu 28.
+    private static let measureInset: CGFloat = 28
+
+    private var measurementsHead: some View {
+        HStack {
+            dashSectionLabel("Ölçümler")
+            Spacer(minLength: 8)
+            Button {
+                // Cumartesi tam ölçüm günü: editör o gün Tam Ölçüm modunda açılır.
+                measurementFullCheckIn = MeasurementCadence.isFullCheckInDay()
+                showAddMeasurement = true
+            } label: {
+                // Satır tuvaldeki gibi 19 pt; dokunma alanı 29 pt.
+                Lucide(sf: "plus", size: 19)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: 28, height: 19, alignment: .trailing)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                    .padding(.vertical, -5)
             }
-            HStack(alignment: .firstTextBaseline) {
-                Text("Ölçümler")
-                    .font(.system(size: 25, weight: .semibold))
-                    .tracking(-0.5)
-                    .foregroundStyle(Palette.textPrimary)
-                Spacer()
+            .buttonStyle(.plain)
+            .accessibilityLabel("Ölçüm ekle")
+        }
+        .padding(.horizontal, Self.measureInset)
+        .padding(.top, 2)
+    }
+
+    /// true = düşük iyi, false = yüksek iyi, nil = nötr (göğüs, boyun). Kilo hedefe göre:
+    /// hedef kilo varsa ona doğru, yoksa profildeki amaç (ver / al / koru).
+    private func measurementLowerIsBetter(_ kind: MetricKind) -> Bool? {
+        switch kind {
+        case .bodyFat, .fatMass, .waist: return true
+        case .leanMass: return false
+        case .chest, .neck: return nil
+        case .weight:
+            if let target = profiles.first?.targetWeight,
+               let now = measurements.first?.weight,
+               abs(target - now) >= 0.1 {
+                return target < now
+            }
+            let adjustment = profiles.first?.goal.calorieAdjustment ?? 0
+            return adjustment == 0 ? nil : adjustment < 0
+        }
+    }
+
+    private var measurementGoalDistance: Double? {
+        guard let weight = measurements.first?.weight,
+              let target = profiles.first?.targetWeight else { return nil }
+        return abs(weight - target)
+    }
+
+    // ── izleme listesi ──
+    private func measurementWatchlist(_ all: [MeasurementSeries], selected: Int) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(all.enumerated()), id: \.element.id) { index, series in
+                if index > 0 { dashHairline }
                 Button {
-                    // Cumartesi → Tam ölçümle başla; editör içinde segmentle değiştirilebilir.
-                    measurementFullCheckIn = MeasurementCadence.isFullCheckInDay()
-                    showAddMeasurement = true
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedSeriesIndex = index }
                 } label: {
-                    Text("＋ EKLE")
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(0.6)
-                        .foregroundStyle(Palette.accent)
-                        .contentShape(Rectangle())
+                    measurementWatchRow(series, selected: index == selected)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 6)
+        .padding(.horizontal, Self.measureInset)
     }
 
-    private var measurementCadenceReminder: some View {
-        let isFullDay = MeasurementCadence.isFullCheckInDay()
-        let nextFull = MeasurementCadence.nextFullCheckIn()
-        let body: Text = {
-            if isFullDay {
-                return Text("Bugün tam ölçüm günü — ")
-                    + Text("yağ %, bel, göğüs, boyun").foregroundStyle(Palette.textPrimary).fontWeight(.semibold)
-                    + Text(" da gir.")
-            } else {
-                return Text("Bugün hızlı tartı yeterli — sıradaki ")
-                    + Text("tam ölçüm \(Self.weekdayUpperFmt.string(from: nextFull))").foregroundStyle(Palette.textPrimary).fontWeight(.semibold)
-                    + Text(", ")
-                    + Text(Fmt.date.string(from: nextFull)).font(.system(size: 11, design: .monospaced))
-            }
-        }()
-        return HStack(alignment: .top, spacing: 8) {
-            Circle().fill(Palette.accent).frame(width: 5, height: 5).padding(.top, 5)
-            body
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.textSecondary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 22)
-        .padding(.top, 13)
-    }
-
-    @ViewBuilder
-    private var measurementCarousel: some View {
-        let series = measurementSeries
-        if series.isEmpty {
-            Text("Trend için en az bir ölçüm ekle.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Palette.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 22)
-                .padding(.top, 18)
-        } else {
-            let idx = min(selectedSeriesIndex, series.count - 1)
-            VStack(spacing: 0) {
-                TabView(selection: Binding(
-                    get: { min(selectedSeriesIndex, series.count - 1) },
-                    set: { selectedSeriesIndex = $0 }
-                )) {
-                    ForEach(Array(series.enumerated()), id: \.offset) { i, s in
-                        seriesCarouselPage(s).tag(i)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: 180)
-                seriesDots(count: series.count, index: idx)
-                    .padding(.top, 2)
-                seriesStatStrip(series[idx])
-                    .padding(.top, 11)
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 14)
-        }
-    }
-
-    private func seriesCarouselPage(_ s: MeasurementSeries) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                HStack(spacing: 4) {
-                    Text(s.grup.uppercased(with: Locale(identifier: "tr_TR")))
-                        .foregroundStyle(Palette.textTertiary)
-                    Text("— \(s.kind.label)")
-                        .foregroundStyle(Palette.textSecondary)
-                }
-                .font(.system(size: 9.5, weight: .semibold))
-                .tracking(1.0)
-                Spacer()
-                if let last = s.lastDate {
-                    Text(Fmt.date.string(from: last))
-                        .font(.system(size: 10))
-                        .foregroundStyle(Palette.textQuaternary)
-                }
-            }
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text(Fmt.num(s.current ?? 0, digits: 1))
-                    .font(.system(size: 42, weight: .semibold))
-                    .tracking(-1.4)
-                    .foregroundStyle(Palette.textPrimary)
-                Text(s.kind.unit)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.textQuaternary)
-                Spacer()
-                seriesDeltaChip(s)
-            }
-            .padding(.top, 8)
-            MeasurementLineChart(values: s.values)
-                .padding(.top, 12)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func seriesDeltaChip(_ s: MeasurementSeries) -> some View {
-        let color = measurementTrendColor(s.improving)
-        let val = s.deltaAbs.map { Fmt.num($0, digits: 1) } ?? "0,0"
-        return Text("\(s.isDown ? "▼" : "▲") \(val)")
-            .font(.system(size: 10.5, weight: .bold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(s.improving == nil ? Palette.track : color.opacity(0.14)))
-    }
-
-    private func seriesDots(count: Int, index: Int) -> some View {
-        HStack(spacing: 7) {
-            Button { selectedSeriesIndex = max(0, index - 1) } label: {
-                Text("‹")
-                    .font(.system(size: 14))
-                    .foregroundStyle(index > 0 ? Palette.textSecondary : Palette.textQuaternary.opacity(0.4))
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(.plain)
-            .disabled(index == 0)
-            ForEach(Array(0..<count), id: \.self) { j in
-                Capsule()
-                    .fill(j == index ? Palette.accent : Palette.track)
-                    .frame(width: j == index ? 14 : 4.5, height: 4.5)
-                    .contentShape(Rectangle())
-                    .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { selectedSeriesIndex = j } }
-            }
-            Button { selectedSeriesIndex = min(count - 1, index + 1) } label: {
-                Text("›")
-                    .font(.system(size: 14))
-                    .foregroundStyle(index < count - 1 ? Palette.textSecondary : Palette.textQuaternary.opacity(0.4))
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(.plain)
-            .disabled(index >= count - 1)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func seriesStatStrip(_ s: MeasurementSeries) -> some View {
-        HStack(spacing: 0) {
-            statCell("HAFTALIK", weeklyText(s), color: measurementTrendColor(s.weeklyImproving))
-            counterDivider
-            statCell("ORTALAMA", s.average.map { Fmt.num($0, digits: 1) } ?? "—", color: Palette.textPrimary)
-            counterDivider
-            statCell("ARALIK", rangeText(s), color: Palette.textPrimary)
-        }
-        .padding(.vertical, 10)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .top)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
-    }
-
-    private func statCell(_ key: String, _ value: String, color: Color) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(key)
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(1.0)
-                .foregroundStyle(Palette.textTertiary)
-            Text(value)
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(color)
+    private func measurementWatchRow(_ series: MeasurementSeries, selected: Bool) -> some View {
+        let delta = series.delta ?? 0
+        let trend = MeasurementTrendPanel.trend(delta, lowerIsBetter: measurementLowerIsBetter(series.kind))
+        let color = MeasurementTrendPanel.color(trend)
+        let spark = series.kind == .weight
+            ? MeasurementTrendPanel.weeklyAverage(series.dates, series.values).suffix(30).map(\.value)
+            : Array(series.values.suffix(30))
+        return HStack(spacing: 12) {
+            Text(MeasurementTrendPanel.sentenceCase(series.kind.label))
+                .font(.system(size: 15, weight: selected ? .medium : .regular))
+                .foregroundStyle(selected ? Palette.textPrimary : Palette.textSecondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func weeklyText(_ s: MeasurementSeries) -> String {
-        guard let wk = s.weeklyChange else { return "—" }
-        return "\(Fmt.signed(wk, digits: 2)) \(s.kind.unit)/hf"
-    }
-
-    private func rangeText(_ s: MeasurementSeries) -> String {
-        guard let mn = s.minValue, let mx = s.maxValue else { return "—" }
-        return "\(Fmt.num(mn, digits: 1))–\(Fmt.num(mx, digits: 1))"
-    }
-
-    private var measurementRecordsHeader: some View {
-        flowSectionHeader("Son kayıtlar") {
-            if let goal = goalDistanceText {
-                Text(goal)
-                    .font(Typography.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            MeasurementSparkline(values: spark, color: trend == nil ? Palette.textTertiary : color)
+                .frame(width: 58, height: 22)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(series.current.map { Fmt.num($0, digits: 1) } ?? "—")
+                    .font(.system(size: 15))
+                    .foregroundStyle(selected ? Palette.textPrimary : Palette.textSecondary)
+                Text(series.kind.unit)
+                    .font(.system(size: 12))
                     .foregroundStyle(Palette.textTertiary)
             }
+            .frame(width: 74, alignment: .trailing)
+            Text(MeasurementTrendPanel.signedText(delta))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 58)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(trend == nil ? Palette.textPrimary.opacity(0.06) : color.opacity(0.16))
+                )
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 14)
-        .padding(.bottom, 2)
+        .monospacedDigit()
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
     }
 
-    private var goalDistanceText: String? {
-        guard let target = profiles.first?.targetWeight, let current = measurements.first?.weight else { return nil }
-        return "hedefe \(Fmt.num(abs(current - target), digits: 1)) kg"
-    }
-
-    private func measurementNotebookRow(_ m: Measurement) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Fmt.date.string(from: m.date))
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(Palette.textPrimary)
-                    .frame(width: 46, alignment: .leading)
-                Text(m.isFullCheckIn ? "TAM" : "TARTI")
-                    .font(.system(size: 8.5, weight: .bold))
-                    .tracking(1.0)
-                    .foregroundStyle(m.isFullCheckIn ? Palette.accent : Palette.textQuaternary)
-                Text(Fmt.timeShort.string(from: m.date))
-                    .font(.system(size: 10))
+    // ── kayıtlar ──
+    private var measurementRecords: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                dashSectionLabel("Kayıtlar")
+                Spacer(minLength: 8)
+                Text("\(measurements.count)")
+                    .font(.system(size: 13))
                     .foregroundStyle(Palette.textQuaternary)
-                Spacer(minLength: 4)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(m.weight.map { Fmt.num($0, digits: 1) } ?? "—")
-                        .font(.system(size: 12.5, design: .monospaced))
-                        .foregroundStyle(Palette.textPrimary)
-                    Text("kg")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Palette.textQuaternary)
-                }
-                Button {
-                    measurementToDelete = m
-                } label: {
-                    Lucide(sf: "trash", size: 10.5)
-                        .foregroundStyle(Palette.textQuaternary)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Ölçümü sil")
             }
-            if m.isFullCheckIn {
-                Text(measurementDetailLine(m))
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(Palette.textSecondary)
-                    .padding(.leading, 54)
-                    .lineLimit(1)
+            .padding(.bottom, 4)
+            ForEach(Array(measurements.prefix(60).enumerated()), id: \.element.persistentModelID) { index, m in
+                if index > 0 { dashHairline }
+                measurementRow(m)
             }
         }
-        .padding(.vertical, 8)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
+        .padding(.horizontal, Self.measureInset)
+    }
+
+    /// Tarih · saat · TAM · kilo; tam ölçümde yağ/bel/göğüs/boyun, varsa not. Sola kaydır → sil
+    /// (measurementToDelete → onay).
+    private func measurementRow(_ m: Measurement) -> some View {
+        let detail = measurementDetailLine(m)
+        return MobileSwipeToDelete(onDelete: { measurementToDelete = m }, rowBackground: Palette.background) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    Text(Fmt.date.string(from: m.date))
+                        .foregroundStyle(Palette.textQuaternary)
+                        .frame(width: 48, alignment: .leading)
+                    Text(Fmt.timeShort.string(from: m.date))
+                        .foregroundStyle(Palette.textQuaternary)
+                    if !detail.isEmpty {
+                        Text("TAM")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .tracking(1)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                    Spacer(minLength: 8)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(m.weight.map { Fmt.num($0, digits: 1) } ?? "—")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Palette.textPrimary)
+                        Text("kg")
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+                .font(.system(size: 13))
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.leading, 62)
+                }
+                if let note = m.note?.nilIfBlank {
+                    Text(note)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 62)
+                }
+            }
+            .monospacedDigit()
+            .padding(.vertical, 11)
+        }
     }
 
     private func measurementDetailLine(_ m: Measurement) -> String {
-        [m.bodyFat.map { "Yağ \(Fmt.num($0, digits: 1))%" },
+        [m.bodyFat.map { "Yağ \(Fmt.num($0, digits: 1))" },
          m.waist.map { "Bel \(Fmt.num($0, digits: 1))" },
          m.chest.map { "Göğüs \(Fmt.num($0, digits: 1))" },
          m.neck.map { "Boyun \(Fmt.num($0, digits: 1))" }]
@@ -1439,167 +958,416 @@ struct MobileRootView: View {
         }
     }
 
+    // MARK: - Profil (V6 "Yolculuk")
+
+    /// Mobil tuvaldeki "Profil · V6 Yolculuk": kimlik → "N gündür yolda" → başlangıç · bugün ·
+    /// hedef çizgisi (tahmini varış) → verilen kilo · yol · kalan hafta → günlük plan →
+    /// Koç / Health / iCloud çipleri (dokun → işlemler). Kaydırınca görünüm ve veri sayımı.
     private var profilePage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                profileHeader
-                profileIdentityStrip
-                profileDailyPlan
-                profileSystemSection
-                profileAppearanceSection
-                profileDataCount
+                profileHead
+                profileIdentity
+                    .padding(.top, 18)
+                profileJourneySection
+                profilePlanRow
+                    .padding(.top, 30)
+                profileStatusChips
+                    .padding(.top, 30)
+                profileAppearanceRow
+                    .padding(.top, 40)
+                profileDataLine
+                    .padding(.top, 26)
             }
             .padding(.bottom, MobileChrome.dockClearance)
         }
+        .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.background.ignoresSafeArea())
     }
 
-    private var profileHeader: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                HStack(spacing: 5) {
-                    Text("Profil").foregroundStyle(Palette.textSecondary)
-                    if let p = profiles.first {
-                        Text("— \(p.goal.label) · \(p.activity.label)").foregroundStyle(Palette.textQuaternary)
-                    }
-                }
-                .font(Typography.label).tracking(1.2).textCase(.uppercase).lineLimit(1)
-                Spacer(minLength: 8)
-                headerActions
+    /// Tuvalde kenar boşluğu 28.
+    private static let profileInset: CGFloat = 28
+
+    private var profileHead: some View {
+        HStack {
+            dashSectionLabel("Profil")
+            Spacer(minLength: 8)
+            // Profil satırı henüz yoksa (taze kurulum, CloudKit inmemiş) editör açılmaz.
+            Button { showProfileEditor = true } label: {
+                Lucide(sf: "pencil", size: 18)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: 28, height: 19, alignment: .trailing)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                    .padding(.vertical, -5)
             }
-            HStack(alignment: .firstTextBaseline) {
+            .buttonStyle(.plain)
+            .disabled(profiles.first == nil)
+            .accessibilityLabel("Profili düzenle")
+        }
+        .padding(.horizontal, Self.profileInset)
+        .padding(.top, 2)
+    }
+
+    private var profileIdentity: some View {
+        HStack(spacing: 14) {
+            profileAvatar(size: 48)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(profileName.isEmpty ? "İsimsiz" : profileName)
-                    .font(.system(size: 25, weight: .semibold)).tracking(-0.5)
+                    .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(Palette.textPrimary)
-                Spacer()
-                Button { showProfileEditor = true } label: {
-                    Text("✎ DÜZENLE")
-                        .font(.system(size: 11, weight: .bold)).tracking(0.6)
-                        .foregroundStyle(Palette.accent).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 22).padding(.top, 6)
-    }
-
-    private var profileIdentityStrip: some View {
-        HStack(spacing: 0) {
-            counterCell("YAŞ", profiles.first.map { "\($0.age)" } ?? "—", "")
-            counterDivider
-            counterCell("BOY", profiles.first.map { Fmt.int($0.height) } ?? "—", "cm")
-            counterDivider
-            counterCell("HEDEF", profiles.first?.targetWeight.map { Fmt.num($0, digits: 1) } ?? "—", "kg")
-        }
-        .padding(.vertical, 10)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .top)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
-        .padding(.horizontal, 22).padding(.top, 14)
-    }
-
-    private var profileDailyPlan: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            flowSectionHeader("Günlük plan") {
-                Text("hedefler").font(Typography.caption).foregroundStyle(Palette.textTertiary)
-            }
-            if let plan = calorieResult {
-                HStack(alignment: .top, spacing: 0) {
-                    planCell("Günlük", Fmt.int(plan.goalCalories), "kcal", dot: nil, divider: false)
-                    planCell("Protein", Fmt.int(plan.protein.grams), "g", dot: Palette.macroProtein, divider: true)
-                    planCell("Karb", Fmt.int(plan.carbs.grams), "g", dot: Palette.macroCarbs, divider: true)
-                    planCell("Yağ", Fmt.int(plan.fat.grams), "g", dot: Palette.macroFat, divider: true)
-                }
-                .padding(.top, 11)
-            } else {
-                Text("Profilini doldur — günlük kalori ve makro hedefi burada görünür.")
-                    .font(Typography.caption).foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
-            }
-        }
-        .padding(.horizontal, 22).padding(.top, 16)
-    }
-
-    private func planCell(_ key: String, _ value: String, _ unit: String, dot: Color?, divider: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 5) {
-                if let dot { Circle().fill(dot).frame(width: 5, height: 5) }
-                Text(key).font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(Palette.textTertiary)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value).font(.system(size: 15, design: .monospaced)).foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                Text(unit).font(.system(size: 10, design: .monospaced)).foregroundStyle(Palette.textQuaternary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, divider ? 12 : 0)
-        .overlay(alignment: .leading) {
-            if divider { Rectangle().fill(Palette.border).frame(width: 1, height: 28) }
-        }
-    }
-
-    private var profileSystemSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            flowSectionHeader("Sistem") { EmptyView() }
-            profileAIBlock.padding(.top, 12)
-            profileHealthBlock.padding(.top, 16)
-            profileSyncStatusBlock.padding(.top, 16)
-        }
-        .padding(.horizontal, 22).padding(.top, 18)
-    }
-
-    private var profileSyncStatusBlock: some View {
-        let statusColor: Color = {
-            switch cloudSync.state {
-            case .ready: return Palette.positive
-            case .checking, .syncing: return Palette.warning
-            case .unavailable, .error: return Palette.negative
-            }
-        }()
-
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Senkron").font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.textPrimary)
-                Spacer()
-                Text("● \(cloudSync.statusText)")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(statusColor)
-            }
-            Text(cloudSync.detailText)
-                .font(.system(size: 10.5))
-                .foregroundStyle(Palette.textTertiary)
-                .lineSpacing(2).padding(.top, 4).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var profileHealthBlock: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Apple Health")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                Spacer()
-                Text(health.statusText)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(healthStatusColor)
                     .lineLimit(1)
+                if let p = profiles.first {
+                    Text("\(MeasurementTrendPanel.sentenceCase(p.goal.label)) · \(MeasurementTrendPanel.sentenceCase(p.activity.label))")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                }
             }
-            HStack(spacing: 10) {
-                Text("Bugün \(Fmt.int(Double(todaySteps))) adım")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Palette.textTertiary)
-                Spacer()
-                Button {
-                    Task { @MainActor in await health.requestAccessAndSync(into: ctx) }
-                } label: {
-                    Text("Yenile")
-                        .font(.system(size: 10.5, weight: .semibold))
+        }
+        .padding(.horizontal, Self.profileInset)
+    }
+
+    /// Mac'teki profil fotoğrafı (telefonda seçilmez). Yoksa ada göre renkli baş harf.
+    private func profileAvatar(size: CGFloat) -> some View {
+        Group {
+            if profileAvatarEpoch >= 0, let img = ProfileAvatarStore.image() {
+                Image(platform: img).resizable().scaledToFill()
+            } else {
+                InitialFace(name: profileName, fontSize: size * 0.42)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .onReceive(NotificationCenter.default.publisher(for: ProfileAvatarStore.changed)) { _ in
+            profileAvatarEpoch += 1
+        }
+    }
+
+    // ── yolculuk ──
+    private struct ProfileJourney {
+        let startDate: Date
+        let startWeight: Double
+        let currentWeight: Double
+        let target: Double?
+        let days: Int
+        /// 0…1 — başlangıçtan hedefe alınan yol.
+        let progress: Double?
+        let weeksLeft: Double?
+        let eta: Date?
+
+        var change: Double { currentWeight - startWeight }
+        /// Değişim hedefe doğru mu (hedef yoksa nil).
+        var towardTarget: Bool? {
+            guard let target, abs(change) >= 0.05 else { return nil }
+            return (target - startWeight) * change > 0
+        }
+    }
+
+    /// İlk tartıdan bugüne. Tahmini varış: toplam haftalık hız hedefe doğruysa (≥ 2 hafta veri).
+    private var profileJourney: ProfileJourney? {
+        // `measurements` yeniden eskiye sıralı.
+        let weighed = measurements.compactMap { m in m.weight.map { (date: m.date, weight: $0) } }
+        guard let latest = weighed.first, let first = weighed.last else { return nil }
+        let calendar = Calendar.current
+        let days = max(0, calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: first.date),
+            to: calendar.startOfDay(for: .now)
+        ).day ?? 0)
+        let target = profiles.first?.targetWeight
+        var progress: Double?
+        if let target, abs(first.weight - target) >= 0.1 {
+            progress = min(max((first.weight - latest.weight) / (first.weight - target), 0), 1)
+        }
+        var weeksLeft: Double?
+        var eta: Date?
+        let spanDays = latest.date.timeIntervalSince(first.date) / 86_400
+        if let target, spanDays >= 14 {
+            let perWeek = (latest.weight - first.weight) / (spanDays / 7)
+            let remaining = target - latest.weight
+            if abs(remaining) < 0.05 {
+                weeksLeft = 0
+            } else if perWeek != 0, remaining / perWeek > 0, remaining / perWeek < 520 {
+                weeksLeft = remaining / perWeek
+                eta = calendar.date(byAdding: .day, value: Int((remaining / perWeek * 7).rounded()), to: .now)
+            }
+        }
+        return ProfileJourney(
+            startDate: first.date,
+            startWeight: first.weight,
+            currentWeight: latest.weight,
+            target: target,
+            days: days,
+            progress: progress,
+            weeksLeft: weeksLeft,
+            eta: eta
+        )
+    }
+
+    private static let etaFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "MMMM yyyy"
+        return f
+    }()
+
+    @ViewBuilder
+    private var profileJourneySection: some View {
+        if let journey = profileJourney {
+            VStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    Text("\(journey.days)")
+                        .font(.system(size: 116, weight: .thin))
+                        .tracking(-5.5)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .padding(.top, -9)
+                        .padding(.bottom, -13.5)
+                    Text("gündür yolda")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .frame(maxWidth: .infinity)
+                if let target = journey.target, let progress = journey.progress {
+                    journeyLine(journey, target: target, progress: progress)
+                        .padding(.top, 28)
+                    journeyNumbers(journey, progress: progress)
+                        .padding(.top, 30)
+                } else {
+                    Button { showProfileEditor = true } label: {
+                        HStack(spacing: 6) {
+                            Lucide(sf: "target", size: 13)
+                            Text("Hedef kilo belirle")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Palette.textPrimary.opacity(0.06)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(profiles.first == nil)
+                    .padding(.top, 24)
+                }
+            }
+            .padding(.top, 34)
+        } else {
+            Text("İlk tartınla yolculuk başlar.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.textTertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+        }
+    }
+
+    /// Başlangıç ● ━━ bugün ● ┄┄┄ ○ hedef. Üstünde "bugün", altında tarih/kilo uçları.
+    private func journeyLine(_ journey: ProfileJourney, target: Double, progress: Double) -> some View {
+        VStack(spacing: 12) {
+            GeometryReader { geo in
+                let width = geo.size.width
+                let x = width * progress
+                ZStack(alignment: .topLeading) {
+                    Text("bugün")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize()
+                        .position(x: min(max(x, 18), width - 18), y: 8)
+                    Path { p in
+                        p.move(to: CGPoint(x: 0, y: 28))
+                        p.addLine(to: CGPoint(x: width, y: 28))
+                    }
+                    .stroke(Palette.textPrimary.opacity(0.16), style: StrokeStyle(lineWidth: 2, dash: [3, 4]))
+                    Capsule()
+                        .fill(Palette.textPrimary)
+                        .frame(width: max(x, 0), height: 2)
+                        .offset(y: 27)
+                    Circle()
+                        .fill(Palette.textPrimary)
+                        .frame(width: 8, height: 8)
+                        .position(x: 0, y: 28)
+                    Circle()
+                        .strokeBorder(Palette.positive, lineWidth: 1.5)
+                        .frame(width: 10, height: 10)
+                        .position(x: width, y: 28)
+                    Circle()
+                        .fill(Palette.textPrimary)
+                        .frame(width: 12, height: 12)
+                        .shadow(color: Palette.textPrimary.opacity(0.45), radius: 7)
+                        .position(x: x, y: 28)
+                }
+            }
+            .frame(height: 34)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Fmt.date.string(from: journey.startDate))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                    Text("\(Fmt.num(journey.startWeight, digits: 1)) kg")
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Palette.textSecondary)
                 }
-                .buttonStyle(.plain)
-                .disabled(health.status == .syncing)
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let eta = journey.eta {
+                        Text("~\(Self.etaFmt.string(from: eta))")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.positive)
+                    } else {
+                        Text("hedef")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                    Text("\(Fmt.num(target, digits: 1)) kg")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Palette.textSecondary)
+                }
             }
-            .padding(.top, 4)
+            .monospacedDigit()
+        }
+        .padding(.horizontal, 32)
+    }
+
+    private func journeyNumbers(_ journey: ProfileJourney, progress: Double) -> some View {
+        let change = journey.change
+        let changeLabel = abs(change) < 0.05 ? "kg değişim" : (change < 0 ? "kg verildi" : "kg alındı")
+        let changeColor: Color = {
+            guard let toward = journey.towardTarget else { return Palette.textPrimary }
+            return toward ? Palette.positive : Palette.negative
+        }()
+        return HStack(spacing: 0) {
+            dashStat(MeasurementTrendPanel.signedText(change), changeLabel, color: changeColor)
+            dashStat("%\(Int((progress * 100).rounded()))", "yol")
+            dashStat(journey.weeksLeft.map { "\(Int($0.rounded()))" } ?? "—", "hafta kaldı")
+        }
+        .padding(.horizontal, Self.dashNumberInset)
+    }
+
+    // ── günlük plan (tek satır) ──
+    @ViewBuilder
+    private var profilePlanRow: some View {
+        if let plan = calorieResult {
+            HStack(alignment: .center) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(Fmt.int(plan.goalCalories))
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("kcal / gün")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .monospacedDigit()
+                Spacer(minLength: 12)
+                RecipeMacroBar(
+                    protein: plan.protein.grams,
+                    carbs: plan.carbs.grams,
+                    fat: plan.fat.grams,
+                    width: 150,
+                    height: 4,
+                    spacing: 3
+                )
+            }
+            .padding(.horizontal, Self.profileInset)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Günlük hedef \(Fmt.int(plan.goalCalories)) kalori, protein \(Fmt.int(plan.protein.grams)) gram, karbonhidrat \(Fmt.int(plan.carbs.grams)) gram, yağ \(Fmt.int(plan.fat.grams)) gram")
+        } else {
+            Text("Profilini doldur — günlük hedef burada görünür.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.textTertiary)
+                .padding(.horizontal, Self.profileInset)
+        }
+    }
+
+    // ── Koç · Health · iCloud (dokun → işlemler) ──
+    private var profileStatusChips: some View {
+        HStack(spacing: 0) {
+            Menu {
+                Section(remoteAIStatusText) {
+                    Button {
+                        showIrohPairing = true
+                    } label: {
+                        Label(
+                            HerculesIrohTransport.isAvailable ? "Telefon bağlantısı ✓" : "Telefon bağlantısı kur",
+                            systemImage: "qrcode.viewfinder"
+                        )
+                    }
+                    Button {
+                        Task { await refreshRemoteAIHealth() }
+                    } label: {
+                        Label("Bağlantıyı kontrol et", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(remoteAIChecking)
+                }
+            } label: {
+                profileStatusChip("Koç", status: coachChipText, color: coachChipColor)
+            }
+            Menu {
+                Section(health.statusText) {
+                    Button {
+                        Task { @MainActor in await health.requestAccessAndSync(into: ctx) }
+                    } label: {
+                        Label("Yenile", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(health.status == .syncing)
+                }
+            } label: {
+                profileStatusChip("Health", status: healthChipText, color: healthStatusColor)
+            }
+            Menu {
+                Section(cloudSync.statusText) {
+                    Text(cloudSync.detailText)
+                }
+            } label: {
+                profileStatusChip("iCloud", status: cloudChipText, color: cloudChipColor)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func profileStatusChip(_ name: String, status: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: color.opacity(0.6), radius: 3)
+                Text(name)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            Text(status)
+                .font(.system(size: 12.5))
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    private var coachChipText: String {
+        if remoteAIChecking { return "kontrol…" }
+        if remoteAIHealth != nil { return "bağlı" }
+        return remoteAIError != nil ? "ulaşılamıyor" : "kontrol edilmedi"
+    }
+
+    private var coachChipColor: Color {
+        if remoteAIChecking { return Palette.warning }
+        if remoteAIHealth != nil { return Palette.positive }
+        return remoteAIError != nil ? Palette.negative : Palette.textTertiary
+    }
+
+    private var healthChipText: String {
+        switch health.status {
+        case .ready: return "\(Fmt.int(Double(todaySteps))) adım"
+        case .syncing: return "okunuyor…"
+        case .notDetermined: return "izin bekliyor"
+        case .empty: return "veri yok"
+        case .unavailable: return "kullanılamıyor"
+        case .error: return "hata"
         }
     }
 
@@ -1614,96 +1382,79 @@ struct MobileRootView: View {
         }
     }
 
-    private var profileAIBlock: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Koç bağlantısı").font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.textPrimary)
-                Spacer()
-                Text(remoteAIChecking ? "… Kontrol" : (remoteAIHealth != nil ? "● Bağlı" : "○ Ulaşılamıyor"))
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(remoteAIHealth != nil ? Palette.positive : (remoteAIChecking ? Palette.warning : Palette.negative))
-            }
-            Text(remoteAIStatusText)
-                .font(.system(size: 10.5)).foregroundStyle(Palette.textQuaternary)
-                .padding(.top, 2).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 10) {
-                Spacer()
-                Button {
-                    Task { await refreshRemoteAIHealth() }
-                } label: {
-                    Text("Bağlantıyı kontrol et")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(Palette.textSecondary)
-                }
-                .buttonStyle(.plain)
-                .disabled(remoteAIChecking)
-            }
-            .padding(.top, 10).padding(.bottom, 7)
-            .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
+    private var cloudChipText: String {
+        switch cloudSync.state {
+        case .ready(let date): return date.map { Fmt.relative($0) } ?? "hazır"
+        case .checking: return "kontrol…"
+        case .syncing: return "senkronlanıyor…"
+        case .unavailable: return "kullanılamıyor"
+        case .error: return "hata"
         }
     }
 
-    private var profileAppearanceSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            flowSectionHeader("Görünüm") {
-                Text(appearance == .light ? "Fildişi" : "Mürekkep")
-                    .font(Typography.caption).foregroundStyle(Palette.textTertiary)
-            }
-            HStack(spacing: 18) {
-                appearanceCap(.dark, "Koyu", swatch: Charcoal.bg)
-                appearanceCap(.light, "Açık", swatch: Color(hex: 0xF2EFE8))
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 11)
+    private var cloudChipColor: Color {
+        switch cloudSync.state {
+        case .ready: return Palette.positive
+        case .checking, .syncing: return Palette.warning
+        case .unavailable, .error: return Palette.negative
         }
-        .padding(.horizontal, 22).padding(.top, 18)
     }
 
-    private func appearanceCap(_ mode: AppAppearance, _ label: String, swatch: Color) -> some View {
+    // ── görünüm + veri (aşağıda) ──
+    private var profileAppearanceRow: some View {
+        HStack {
+            dashSectionLabel("Görünüm")
+            Spacer(minLength: 8)
+            HStack(spacing: 2) {
+                appearanceOption(.dark, "Koyu")
+                appearanceOption(.light, "Açık")
+            }
+            .padding(3)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.textPrimary.opacity(0.05)))
+        }
+        .padding(.horizontal, Self.profileInset)
+    }
+
+    private func appearanceOption(_ mode: AppAppearance, _ title: String) -> some View {
         let on = appearance == mode
         return Button {
             ThemeSettings.appearance = mode
             withAnimation(.easeInOut(duration: 0.2)) { appearance = mode }
         } label: {
-            HStack(spacing: 6) {
-                Circle().fill(swatch).frame(width: 9, height: 9)
-                    .overlay(Circle().strokeBorder(Palette.borderStrong, lineWidth: 1))
-                Text(label).font(.system(size: 9.5, weight: .bold)).tracking(1.2).textCase(.uppercase)
-                    .foregroundStyle(on ? Palette.textPrimary : Palette.textTertiary)
-            }
-            .padding(.bottom, 4)
-            .overlay(Rectangle().fill(on ? Palette.accent : Color.clear).frame(height: 1.5), alignment: .bottom)
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain)
+            Text(title)
+                .font(.system(size: 13, weight: on ? .medium : .regular))
+                .foregroundStyle(on ? Palette.textPrimary : Palette.textTertiary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(on ? Palette.textPrimary.opacity(0.10) : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
-    private var profileDataCount: some View {
-        let total = (profiles.first != nil ? 1 : 0) + measurements.count + foods.count + recipes.count + activeWorkouts.count + steps.count + archives.count
-        return VStack(alignment: .leading, spacing: 0) {
-            flowSectionHeader("Veri sayımı") {
-                Text("\(total) kayıt").font(Typography.caption).foregroundStyle(Palette.textTertiary)
-            }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 12) {
-                dataCell("Profil", profiles.first != nil ? "1" : "0")
-                dataCell("Ölçüm", "\(measurements.count)")
-                dataCell("Yemek", "\(foods.count)")
-                dataCell("Tarif", "\(recipes.count)")
-                dataCell("Antrenman", "\(activeWorkouts.count)")
-                dataCell("Adım günü", "\(steps.count)")
-                dataCell("Arşiv", "\(archives.count)")
-            }
-            .padding(.top, 12)
+    private var profileDataLine: some View {
+        let items: [(Int, String)] = [
+            (measurements.count, "ölçüm"), (foods.count, "yemek"), (recipes.count, "tarif"),
+            (activeWorkouts.count, "antrenman"), (steps.count, "adım günü"), (archives.count, "arşiv"),
+        ]
+        let text = items.enumerated().reduce(Text("")) { acc, pair in
+            let (index, item) = pair
+            let piece = Text("\(item.0)").foregroundStyle(Palette.textSecondary)
+                + Text("\u{00A0}\(item.1.replacingOccurrences(of: " ", with: "\u{00A0}"))")
+            return index == 0 ? piece : acc + Text(" · ").foregroundStyle(Palette.textQuaternary) + piece
         }
-        .padding(.horizontal, 22).padding(.top, 18)
-    }
-
-    private func dataCell(_ key: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(key).font(.system(size: 8.5, weight: .bold)).tracking(0.9).textCase(.uppercase)
-                .foregroundStyle(Palette.textQuaternary).lineLimit(1).minimumScaleFactor(0.8)
-            Text(value).font(.system(size: 14, design: .monospaced)).foregroundStyle(Palette.textPrimary)
+        return VStack(alignment: .leading, spacing: 8) {
+            dashSectionLabel("Veri")
+            text
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.textTertiary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Self.profileInset)
     }
 
     private var remoteAIStatusText: String {
@@ -1734,545 +1485,255 @@ struct MobileRootView: View {
         .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
     }
 
-    /// Yemek sekmesi başında bugünkü kalori/makro özeti (Dashboard hero'sunun kompakt hali).
-    /// "Öğün ekle" — Bugün/Yemek sekmesinden açılan AI yemek hesaplama penceresi (sheet).
-    private var foodAIEstimatorSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    aiSheetIntro
-                    aiSheetInputSection
-                    if aiFoodResult == nil {
-                        aiSheetSuggestions
-                    }
-                    aiSheetCTA
-                    if let result = aiFoodResult {
-                        aiFoodResultCard(result)
-                    }
-                    aiSheetStatus
-                    if aiFoodResult == nil && aiFoodError == nil {
-                        aiSheetTip
-                    }
-                }
-                .padding(16)
-                .padding(.bottom, 24)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.background.ignoresSafeArea())
-            .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Öğün ekle")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Kapat") { showFoodAIEstimator = false }
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button {
-                        aiInputFocused = false
-                        Task { await estimateFoodWithAI() }
-                    } label: {
-                        Label { Text("Hesapla") } icon: { Lucide(sf: "wand.and.stars") }
-                    }
-                    .disabled((aiFoodInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && aiFoodImages.isEmpty) || isEstimatingFood)
-                }
-            }
-        }
-        .preferredColorScheme(appearance.colorScheme)
-    }
+    // MARK: - Tarifler (V1 "Arama")
 
-    /// Dostça başlık — nav title "Öğün ekle" ile tekrar etmesin diye "Ne yedin?" sorusu.
-    private var aiSheetIntro: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Palette.accentSoft)
-                Lucide(sf: "sparkles", size: 24)
-                    .foregroundStyle(Palette.accent)
-            }
-            .frame(width: 56, height: 56)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Ne yedin?")
-                    .font(Typography.hero(26))
-                    .foregroundStyle(Palette.textPrimary)
-                Text("Doğal dille yaz; AI kcal ve makroyu hesaplayıp bugüne eklesin.")
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    /// Büyük, odaklanınca accent çerçeveli giriş + bugünkü kalan bütçe çipleri.
-    private var aiSheetInputSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField("örn: 160g pişmiş pirinç + 500g tavuk göğsü", text: $aiFoodInput, axis: .vertical)
-                .font(Typography.body)
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(3...7)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($aiInputFocused)
-                .padding(14)
-                .frame(minHeight: 104, alignment: .topLeading)
-                .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .strokeBorder(aiInputFocused ? Palette.accent : Palette.borderStrong, lineWidth: aiInputFocused ? 1.5 : 0.5)
-                )
-                .animation(.easeInOut(duration: 0.15), value: aiInputFocused)
-
-            HStack(spacing: 8) {
-                PhotosPicker(selection: $aiFoodPickerItems, maxSelectionCount: 2, matching: .images) {
-                    HStack(spacing: 6) {
-                        Lucide(sf: "camera.fill", size: 12)
-                        Text(aiFoodImages.isEmpty ? "Fotoğraf ekle" : "\(aiFoodImages.count) foto")
-                            .font(Typography.captionBold)
-                    }
-                    .foregroundStyle(Palette.accent)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Capsule().fill(Palette.accent.opacity(0.12)))
-                }
-                .buttonStyle(.plain)
-                Spacer(minLength: 0)
-            }
-
-            if !aiFoodImages.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(aiFoodImages.enumerated()), id: \.offset) { idx, data in
-                            if let image = mobileImage(from: data) {
-                                ZStack(alignment: .topTrailing) {
-                                    image.resizable().scaledToFill()
-                                        .frame(width: 66, height: 66)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                    Button {
-                                        if aiFoodImages.indices.contains(idx) { aiFoodImages.remove(at: idx) }
-                                    } label: {
-                                        Lucide(sf: "xmark.circle.fill", size: 16)
-                                            .foregroundStyle(.white, .black.opacity(0.5))
-                                    }
-                                    .buttonStyle(.plain).padding(2)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let plan = calorieResult {
-                HStack(spacing: 8) {
-                    aiBudgetPill(icon: "flame.fill", label: "Kalan", value: "\(Fmt.int(max(0, plan.goalCalories - todayCalories))) kcal")
-                    aiBudgetPill(icon: "bolt.fill", label: "Protein", value: "\(Fmt.int(todayProtein))/\(Fmt.int(plan.protein.grams))g")
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .onChange(of: aiFoodPickerItems) { _, items in loadFoodImages(items) }
-    }
-
-    private func mobileImage(from data: Data) -> Image? {
-        UIImage(data: data).map { Image(uiImage: $0) }
-    }
-
-    private func loadFoodImages(_ items: [PhotosPickerItem]) {
-        guard !items.isEmpty else { return }
-        Task {
-            var datas: [Data] = []
-            for item in items {
-                if let data = try? await item.loadTransferable(type: Data.self) { datas.append(data) }
-            }
-            await MainActor.run {
-                aiFoodImages.append(contentsOf: datas)
-                aiFoodPickerItems = []
-            }
-        }
-    }
-
-    private func aiBudgetPill(icon: String, label: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Lucide(sf: icon, size: 10)
-                .foregroundStyle(Palette.accent)
-            Text(label)
-                .font(Typography.label)
-                .foregroundStyle(Palette.textQuaternary)
-            Text(value)
-                .font(Typography.captionBold)
-                .foregroundStyle(Palette.textSecondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Capsule().fill(Palette.surfaceElevated))
-    }
-
-    /// 2 sütunlu örnek öğün ızgarası — dokununca girişi doldurup odaklar.
-    private var aiSheetSuggestions: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("HIZLI ÖRNEKLER")
-                .font(Typography.label)
-                .foregroundStyle(Palette.textQuaternary)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                ForEach(foodAISuggestions, id: \.self) { suggestion in
-                    Button {
-                        aiFoodInput = suggestion
-                        aiInputFocused = true
-                    } label: {
-                        HStack(spacing: 7) {
-                            Lucide(sf: "plus.circle.fill", size: 13)
-                                .foregroundStyle(Palette.accent)
-                            Text(suggestion)
-                                .font(Typography.caption)
-                                .foregroundStyle(Palette.textSecondary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 11)
-                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(Palette.surfaceElevated))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    /// Tam genişlik büyük hesapla butonu.
-    private var aiSheetCTA: some View {
-        Button {
-            aiInputFocused = false
-            Task { await estimateFoodWithAI() }
-        } label: {
-            HStack(spacing: 8) {
-                if isEstimatingFood {
-                    ProgressView().controlSize(.small).tint(.white)
-                } else {
-                    Lucide(sf: "wand.and.stars")
-                }
-                Text(isEstimatingFood ? "Hesaplanıyor..." : "Hesapla")
-            }
-            .font(Typography.bodyBold)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .disabled((aiFoodInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && aiFoodImages.isEmpty) || isEstimatingFood)
-    }
-
-    @ViewBuilder
-    private var aiSheetStatus: some View {
-        if let aiFoodStatus {
-            HStack(spacing: 7) {
-                if isEstimatingFood { ProgressView().controlSize(.small) }
-                Text(aiFoodStatus)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-        }
-        if let aiFoodError {
-            HStack(alignment: .top, spacing: 7) {
-                Lucide(sf: "exclamationmark.triangle.fill", size: 12)
-                    .foregroundStyle(Palette.negative)
-                Text(aiFoodError)
-                    .font(Typography.caption)
-                    .foregroundStyle(Palette.negative)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    /// Alttaki boşluğu dolduran kısa ipucu (sonuç/hata yokken).
-    private var aiSheetTip: some View {
-        HStack(alignment: .top, spacing: 9) {
-            Lucide(sf: "lightbulb.fill", size: 12)
-                .foregroundStyle(Palette.warning)
-            Text("İpucu: pişmiş mi çiğ mi belirt, markayı yaz. Birden fazla yiyeceği + ile ayır — AI tek kayıtta toplar.")
-                .font(Typography.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.border, lineWidth: 0.5))
-    }
-
-    /// Tek dokunuşla giriş kutusunu dolduran örnek yemekler.
-    private var foodAISuggestions: [String] {
-        [
-            "2 yumurta + 1 dilim tam buğday ekmek",
-            "100g yulaf + 1 muz",
-            "200g ızgara tavuk + 150g pirinç",
-            "1 kase mercimek çorbası"
-        ]
-    }
-
-    private func aiFoodResultCard(_ result: AIFoodResult) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("AI TAHMİNİ")
-                        .font(Typography.label)
-                        .foregroundStyle(Palette.accent)
-                    Text(result.name?.nilIfBlank ?? "Yemek tahmini")
-                        .font(Typography.titleSmall)
-                        .foregroundStyle(Palette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let message = result.message.nilIfBlank {
-                        Text(message)
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text("\(Fmt.int(result.calories ?? 0))")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundStyle(Palette.textPrimary)
-                    Text("kcal")
-                        .font(Typography.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                }
-            }
-
-            HStack(spacing: 6) {
-                macroPill("P", result.protein_g, color: Palette.accent)
-                macroPill("K", result.carbs_g, color: Palette.positive)
-                macroPill("Y", result.fat_g, color: Palette.warning)
-                if let grams = result.grams {
-                    macroPill("g", grams, color: Palette.textSecondary)
-                }
-                Spacer(minLength: 0)
-            }
-
-            Button {
-                addAIFoodResult(result)
-            } label: {
-                Label { Text("Bugüne ekle") } icon: { Lucide(sf: "plus.circle.fill") }
-                    .font(Typography.bodyBold)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled((result.calories ?? 0) <= 0)
-        }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(Palette.accent.opacity(0.4), lineWidth: 1))
-    }
-
-    private var presetCard: some View {
-        MobileCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Presetler")
-                        .font(Typography.titleSmall)
-                        .foregroundStyle(Palette.textPrimary)
-                    Spacer()
-                    Text("\(presets.count)")
-                        .font(Typography.captionBold)
-                        .foregroundStyle(Palette.textTertiary)
-                }
-
-                ForEach(presetItems) { item in
-                    presetRow(item.preset)
-                }
-            }
-        }
-    }
-
-    // MARK: - Tarifler sekmesi (Mac paritesi: özet + arama + kategori filtresi + favori + detay)
-
-    // MARK: - Tarifler (V1 defter dili — sabit başlık + arama/filtre, kayan liste)
-
+    /// Mobil tuvaldeki "Tarifler · V1 Arama": sabit baş (TARİFLER + "+", büyük ince arama,
+    /// sayılı kategori sekmeleri + yalnız-favori kalbi) ve kayan liste (makro lejantı →
+    /// tarif satırları → Videolar). Tarife dokun → detay; kalbe dokun → favori.
     private var recipesPage: some View {
         VStack(spacing: 0) {
             recipesHeader
-            recipesCounterStrip
             recipesSearchField
-            recipesCategoryFilter
+            recipesCategoryTabs
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if filteredRecipes.isEmpty {
-                        Text(recipes.isEmpty
-                             ? "Tarif kaydı yok. Mac Hercules'ten ekle ya da AI koçtan iste — senkronla buraya gelir."
-                             : "Bu aramada tarif yok.")
-                            .font(.system(size: 11.5))
+                        Text(recipes.isEmpty ? "Tarif yok — + ile ekle ya da koça sor." : "Bu aramada tarif yok.")
+                            .font(.system(size: 13))
                             .foregroundStyle(Palette.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 28)
                     } else {
-                        ForEach(filteredRecipes, id: \.persistentModelID) { recipe in
-                            recipeNotebookRow(recipe)
+                        recipeMacroLegend
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 12)
+                            .padding(.bottom, 4)
+                        ForEach(Array(filteredRecipes.enumerated()), id: \.element.persistentModelID) { index, recipe in
+                            if index > 0 { dashHairline }
+                            recipeRow(recipe)
                         }
                     }
-                    recipeVideosSection
+                    if !recipeVideos.isEmpty {
+                        recipeVideosSection
+                            .padding(.top, 26)
+                    }
                 }
-                .padding(.horizontal, 22)
-                .padding(.top, 4)
+                .padding(.horizontal, Self.recipeInset)
                 .padding(.bottom, MobileChrome.dockClearance)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.background.ignoresSafeArea())
+        .sheet(isPresented: $showAddVideo) {
+            addVideoSheet
+                .presentationDetents([.height(300)])
+                .presentationDragIndicator(.visible)
+        }
     }
+
+    /// Tuvalde kenar boşluğu 28.
+    private static let recipeInset: CGFloat = 28
 
     private var recipesHeader: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                HStack(spacing: 5) {
-                    Text("Defter").foregroundStyle(Palette.textSecondary)
-                    Text("— \(recipes.count) tarif").foregroundStyle(Palette.textQuaternary)
+        HStack {
+            dashSectionLabel("Tarifler")
+            Spacer(minLength: 8)
+            // Mobilde tarif eklemenin tek yolu buydu (editör vardı ama açılmıyordu) + video linki.
+            Menu {
+                Button {
+                    recipeToEdit = nil
+                    showRecipeEditor = true
+                } label: {
+                    Label("Tarif", systemImage: "fork.knife")
                 }
-                .font(Typography.label)
-                .tracking(1.4)
-                Spacer(minLength: 8)
-                headerActions
+                Button {
+                    showAddVideo = true
+                } label: {
+                    Label("Video linki", systemImage: "play.rectangle")
+                }
+            } label: {
+                Lucide(sf: "plus", size: 19)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: 28, height: 28, alignment: .trailing)
+                    .contentShape(Rectangle())
             }
-            Text("Tarifler")
-                .font(.system(size: 25, weight: .semibold))
-                .tracking(-0.5)
-                .foregroundStyle(Palette.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Ekle")
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 6)
-    }
-
-    private var recipesCounterStrip: some View {
-        let favorites = recipes.filter(\.isFavorite).count
-        let detailed = recipes.filter(\.hasDetail).count
-        return HStack(spacing: 0) {
-            counterCell("TOPLAM", "\(recipes.count)", "")
-            counterDivider
-            counterCell("FAVORİ", "\(favorites)", "")
-            counterDivider
-            counterCell("DETAYLI", "\(detailed)", "")
-        }
-        .padding(.vertical, 10)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .top)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
-        .padding(.horizontal, 22)
-        .padding(.top, 16)
+        .padding(.horizontal, Self.recipeInset)
+        .padding(.top, 2)
     }
 
     private var recipesSearchField: some View {
-        HStack(spacing: 9) {
-            Lucide(sf: "magnifyingglass", size: 12)
+        HStack(spacing: 12) {
+            Lucide(sf: "magnifyingglass", size: 22)
                 .foregroundStyle(Palette.textTertiary)
-            TextField("Tarif, malzeme veya özet ara", text: $recipeSearch)
-                .font(.system(size: 12.5))
-                .foregroundStyle(Palette.textPrimary)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            TextField(
+                "",
+                text: $recipeSearch,
+                prompt: Text("Tarif ara").foregroundStyle(Palette.textTertiary)
+            )
+            .font(.system(size: 28, weight: .light))
+            .tracking(-0.4)
+            .foregroundStyle(Palette.textPrimary)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .submitLabel(.search)
             if !recipeSearch.isEmpty {
                 Button { recipeSearch = "" } label: {
-                    Lucide(sf: "xmark", size: 10)
+                    Lucide(sf: "xmark", size: 14)
                         .foregroundStyle(Palette.textTertiary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Aramayı temizle")
             }
         }
-        .padding(.bottom, 8)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
-        .padding(.horizontal, 22)
-        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .overlay(alignment: .bottom) { dashHairline }
+        .padding(.horizontal, Self.recipeInset)
+        .padding(.top, 22)
     }
 
-    private var recipesCategoryFilter: some View {
-        HStack(spacing: 18) {
-            recipeFilterCap("Tümü", active: selectedRecipeCategory == nil) { selectedRecipeCategory = nil }
+    /// Tümü · Kahvaltı · Akşam · Tatlı (yanında sayısı) + sağda yalnız-favoriler kalbi.
+    private var recipesCategoryTabs: some View {
+        HStack(alignment: .bottom, spacing: 20) {
+            recipeTab("Tümü", count: recipes.count, active: selectedRecipeCategory == nil) {
+                selectedRecipeCategory = nil
+            }
             ForEach(RecipeCategory.allCases) { category in
-                recipeFilterCap(category == .dinner ? "Akşam" : category.label, active: selectedRecipeCategory == category) {
+                recipeTab(
+                    category == .dinner ? "Akşam" : category.label,
+                    count: recipes.filter { $0.category == category }.count,
+                    active: selectedRecipeCategory == category
+                ) {
                     selectedRecipeCategory = (selectedRecipeCategory == category) ? nil : category
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
+            Button {
+                showFavoriteRecipesOnly.toggle()
+            } label: {
+                Lucide(sf: "heart", size: 15)
+                    .foregroundStyle(showFavoriteRecipesOnly ? Palette.warning : Palette.textTertiary)
+                    .padding(.bottom, 7)
+                    .overlay(alignment: .bottom) { recipeTabUnderline(showFavoriteRecipesOnly) }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showFavoriteRecipesOnly ? "Tüm tarifler" : "Yalnız favoriler")
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 12)
-        .padding(.bottom, 2)
+        .padding(.horizontal, Self.recipeInset)
+        // Tuvalde sekme çizgisi ekran boyu (arama çizgisi ise içeride).
+        .overlay(alignment: .bottom) { dashHairline }
+        .padding(.top, 18)
     }
 
-    private func recipeFilterCap(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func recipeTab(_ title: String, count: Int, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 9.5, weight: .bold))
-                .tracking(1.2)
-                .textCase(.uppercase)
-                .foregroundStyle(active ? Palette.textPrimary : Palette.textTertiary)
-                .padding(.bottom, 4)
-                .overlay(Rectangle().fill(active ? Palette.accent : Color.clear).frame(height: 1.5), alignment: .bottom)
-                .contentShape(Rectangle())
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 14, weight: active ? .medium : .regular))
+                    .foregroundStyle(active ? Palette.textPrimary : Palette.textTertiary)
+                Text("\(count)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.textQuaternary)
+            }
+            .fixedSize()
+            .padding(.bottom, 7)
+            .overlay(alignment: .bottom) { recipeTabUnderline(active) }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private func recipeNotebookRow(_ recipe: Recipe) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(recipe.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Palette.textPrimary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    if let summary = recipe.summary?.nilIfBlank {
-                        Text(summary)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.textSecondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+    private func recipeTabUnderline(_ active: Bool) -> some View {
+        Rectangle()
+            .fill(active ? Palette.textPrimary : .clear)
+            .frame(height: 1.5)
+    }
+
+    private var recipeMacroLegend: some View {
+        HStack(spacing: 14) {
+            ForEach([("protein", Palette.macroProtein), ("karb", Palette.macroCarbs), ("yağ", Palette.macroFat)], id: \.0) { name, color in
+                HStack(spacing: 5) {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                    Text(name)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.textTertiary)
                 }
-                Spacer(minLength: 4)
-                Button {
-                    toggleRecipeFavorite(recipe)
-                } label: {
-                    Lucide(sf: recipe.isFavorite ? "heart.fill" : "heart", size: 13)
-                        .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textQuaternary)
-                        .frame(width: 26, height: 22, alignment: .top)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
             }
-            recipeMetaLine(recipe)
         }
-        .padding(.vertical, 12)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
+    }
+
+    /// Satır: kalp · ad · kcal; altında makro çubuğu (P/K/Y kalori payı) + protein · süre,
+    /// sağda kategori ikonu.
+    private func recipeRow(_ recipe: Recipe) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                toggleRecipeFavorite(recipe)
+            } label: {
+                Lucide(sf: "heart", size: 14)
+                    .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textQuaternary)
+                    .padding(8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(-8)
+            .padding(.top, 2)
+            .accessibilityLabel(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text(recipe.title)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                HStack(spacing: 10) {
+                    RecipeMacroBar(protein: recipe.protein, carbs: recipe.carbs, fat: recipe.fat)
+                    recipeFacts(recipe)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(recipe.calories.map(Fmt.int) ?? "—")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Palette.textSecondary)
+                    Text("kcal")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                Lucide(sf: recipe.category.icon, size: 13)
+                    .foregroundStyle(Palette.textQuaternary)
+            }
+        }
+        .monospacedDigit()
+        .padding(.vertical, 12.75)
         .contentShape(Rectangle())
         .onTapGesture { recipeToView = recipe }
     }
 
-    private func recipeMetaLine(_ recipe: Recipe) -> some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 0) {
-                Text(recipe.calories.map(Fmt.int) ?? "—").foregroundStyle(Palette.textPrimary)
-                Text(" kcal").foregroundStyle(Palette.textQuaternary)
+    /// "58 g protein · 35 dk" — olmayan parça atlanır.
+    @ViewBuilder
+    private func recipeFacts(_ recipe: Recipe) -> some View {
+        let protein = recipe.protein.map(Fmt.int)
+        let minutes = recipe.prepMinutes
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            if let protein {
+                Text(protein).foregroundStyle(Palette.textSecondary)
+                Text("g protein").foregroundStyle(Palette.textTertiary)
             }
-            Text("·").foregroundStyle(Palette.textQuaternary)
-            Text("P \(recipe.protein.map(Fmt.int) ?? "—")").foregroundStyle(Palette.textSecondary)
-            Text("·").foregroundStyle(Palette.textQuaternary)
-            Text(recipe.prepMinutes.map { "\($0)′" } ?? "—").foregroundStyle(Palette.textSecondary)
-            Spacer(minLength: 6)
-            Text((recipe.category == .dinner ? "Akşam" : recipe.category.label).uppercased(with: Locale(identifier: "tr_TR")))
-                .font(.system(size: 9, weight: .bold))
-                .tracking(0.8)
-                .foregroundStyle(Palette.textQuaternary)
-            Text(Fmt.date.string(from: recipe.createdAt)).foregroundStyle(Palette.textQuaternary)
+            if protein != nil, minutes != nil {
+                Text("·").foregroundStyle(Palette.textQuaternary)
+            }
+            if let minutes {
+                Text("\(minutes)").foregroundStyle(Palette.textSecondary)
+                Text("dk").foregroundStyle(Palette.textTertiary)
+            }
         }
-        .font(.system(size: 10, design: .monospaced))
+        .font(.system(size: 13))
         .lineLimit(1)
     }
 
@@ -2308,91 +1769,43 @@ struct MobileRootView: View {
         !newVideoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// "Videolar" rafı — sadece isim + link. Mac ile senkron; telefonda bulduğun
-    /// tarifli videoyu isimlendirip sakla, tıkla aç, uzun bas → sil.
+    /// "Videolar" rafı — sadece isim + link, Mac ile senkron. Dokun → aç, uzun bas → sil.
+    /// Ekleme "+" menüsünden (`addVideoSheet`).
     private var recipeVideosSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 5) {
-                Text("Videolar").foregroundStyle(Palette.textSecondary)
-                Text("— \(recipeVideos.count)").foregroundStyle(Palette.textQuaternary)
+            HStack(alignment: .firstTextBaseline) {
+                dashSectionLabel("Videolar")
                 Spacer(minLength: 8)
+                Text("\(recipeVideos.count)")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.textQuaternary)
             }
-            .font(Typography.label)
-            .tracking(1.4)
-            .padding(.top, 22)
             .padding(.bottom, 4)
-
-            Text("Sadece isim + video linki. Mac ve telefon senkron.")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Palette.textQuaternary)
-                .padding(.bottom, 12)
-
-            VStack(spacing: 8) {
-                TextField("İsim (ör: Fırında tavuk)", text: $newVideoTitle)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Palette.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: Radius.md).fill(Palette.surfaceElevated))
-                HStack(spacing: 8) {
-                    TextField("Video linki", text: $newVideoURL)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.textPrimary)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .submitLabel(.done)
-                        .onSubmit { addRecipeVideo() }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: Radius.md).fill(Palette.surfaceElevated))
-                    Button { addRecipeVideo() } label: {
-                        Lucide(sf: "plus", size: 15)
-                            .foregroundStyle(canAddVideo ? Palette.btnFg : Palette.textQuaternary)
-                            .frame(width: 46, height: 42)
-                            .background(RoundedRectangle(cornerRadius: Radius.md).fill(canAddVideo ? Palette.accent : Palette.surfaceElevated))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddVideo)
-                }
-            }
-            .padding(.bottom, 14)
-
-            if recipeVideos.isEmpty {
-                Text("Henüz video yok.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.textTertiary)
-                    .padding(.bottom, 10)
-            } else {
-                ForEach(recipeVideos, id: \.persistentModelID) { video in
-                    recipeVideoRow(video)
-                }
+            ForEach(Array(recipeVideos.enumerated()), id: \.element.persistentModelID) { index, video in
+                if index > 0 { dashHairline }
+                recipeVideoRow(video)
             }
         }
     }
 
     @ViewBuilder
     private func recipeVideoRow(_ video: RecipeVideo) -> some View {
-        let row = HStack(spacing: 10) {
-            Lucide(sf: "link", size: 12)
+        let row = HStack(spacing: 14) {
+            Lucide(sf: "play.rectangle", size: 15)
                 .foregroundStyle(Palette.textTertiary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(video.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.leading)
-                Text(video.sourceHost ?? video.urlString)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Palette.textQuaternary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 6)
-            Lucide(sf: "arrow.up.right", size: 11)
+            Text(video.title)
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(video.sourceHost ?? video.urlString)
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+            Lucide(sf: "arrow.up.right", size: 14)
                 .foregroundStyle(Palette.textQuaternary)
         }
         .padding(.vertical, 11)
-        .overlay(Rectangle().fill(Palette.border).frame(height: 1), alignment: .bottom)
         .contentShape(Rectangle())
 
         Group {
@@ -2411,6 +1824,54 @@ struct MobileRootView: View {
         }
     }
 
+    /// "+" → Video linki: isim + link, Ekle.
+    private var addVideoSheet: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            dashSectionLabel("Video ekle")
+            addVideoField("İsim", text: $newVideoTitle, isURL: false)
+                .padding(.top, 22)
+            addVideoField("Link", text: $newVideoURL, isURL: true)
+                .padding(.top, 18)
+            Button {
+                addRecipeVideo()
+                showAddVideo = false
+            } label: {
+                Text("Ekle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(canAddVideo ? Palette.btnFg : Palette.textQuaternary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(Capsule().fill(canAddVideo ? Palette.accent : Palette.surfaceElevated))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canAddVideo)
+            .padding(.top, 28)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Self.recipeInset)
+        .padding(.top, 30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Palette.background.ignoresSafeArea())
+    }
+
+    private func addVideoField(_ title: String, text: Binding<String>, isURL: Bool) -> some View {
+        TextField("", text: text, prompt: Text(title).foregroundStyle(Palette.textTertiary))
+            .font(.system(size: 17))
+            .foregroundStyle(Palette.textPrimary)
+            .keyboardType(isURL ? .URL : .default)
+            .textInputAutocapitalization(isURL ? .never : .sentences)
+            .autocorrectionDisabled(isURL)
+            .submitLabel(isURL ? .done : .next)
+            .onSubmit {
+                if isURL, canAddVideo {
+                    addRecipeVideo()
+                    showAddVideo = false
+                }
+            }
+            .padding(.bottom, 10)
+            .overlay(alignment: .bottom) { dashHairline }
+    }
+
     private func presetRow(_ preset: FoodPreset) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
@@ -2423,7 +1884,7 @@ struct MobileRootView: View {
                         .foregroundStyle(Palette.textPrimary)
                 }
                 Spacer()
-                Text("\(Fmt.int(preset.calories(for: preset.defaultServings))) kcal")
+                Text("\(Fmt.int(preset.calories(for: preset.defaultServings))) kalori")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Palette.textPrimary)
             }
@@ -2656,80 +2117,6 @@ struct MobileRootView: View {
         ctx.saveOrReport()
     }
 
-    @MainActor
-    private func estimateFoodWithAI() async {
-        let raw = aiFoodInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let images = aiFoodImages
-        guard (!raw.isEmpty || !images.isEmpty), !isEstimatingFood else { return }
-        let outboundImages = images.compactMap { ChatImageStore.downscaledJPEG(from: $0) ?? $0 }
-
-        aiFoodResult = nil
-        aiFoodError = nil
-        aiFoodStatus = images.isEmpty ? "AI yemeği hesaplıyor..." : "AI fotoğrafı analiz ediyor..."
-        isEstimatingFood = true
-        defer { isEstimatingFood = false }
-
-        let prompt = """
-        MOBIL YEMEK HESAPLAMA KARTI:
-        \(images.isEmpty ? "Aşağıdaki metni" : "Ekteki fotoğraf(lar)daki yemeği (varsa metinle birlikte)") tek bir yemek kaydı olarak hesapla.
-        Sadece YEMEK MODU top-level JSON dön: name, grams, calories, protein_g, carbs_g, fat_g, message.
-        actions üretme; kaydı kullanıcı mobil UI'daki "Bugüne ekle" butonuyla yapacak.
-        Eğer birden fazla yiyecek varsa aynı kayıtta toplamla. Fotoğraftan porsiyon/gramajı makul tahmin et.
-
-        \(raw.isEmpty ? "(Metin yok — yalnız fotoğraf)" : "Kullanıcı metni: \(raw)")
-        """
-
-        do {
-            let (result, searchEvidence) = try await RemoteAIClient().send(
-                history: [],
-                newUserText: prompt,
-                userContext: mobileFoodAIContext,
-                images: outboundImages,
-                onSearchStart: { query in
-                    aiFoodStatus = "Aranıyor: \(query)"
-                },
-                onMessageUpdate: { _ in }
-            )
-
-            if let normalized = normalizedFoodResult(from: result) {
-                aiFoodResult = normalized
-                aiFoodStatus = searchEvidence.map { "Arama ile güncellendi: \($0.query)" } ?? "Tahmin hazır."
-            } else {
-                aiFoodError = result.message.nilIfBlank ?? "AI yemek tahmini çıkaramadı. Miktarı biraz daha net yaz."
-                aiFoodStatus = nil
-            }
-        } catch {
-            aiFoodError = mobileAIErrorMessage(error)
-            aiFoodStatus = nil
-        }
-    }
-
-    private var mobileFoodAIContext: String {
-        let profile = profiles.first
-        let latestWeight = measurements.first?.weight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "yok"
-        let latestBodyFat = measurements.first?.bodyFat.map { "\(Fmt.num($0, digits: 1))%" } ?? "yok"
-        let target = profile?.targetWeight.map { "\(Fmt.num($0, digits: 1)) kg" } ?? "yok"
-        let supplements = profile?.effectiveSupplements
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " + ")
-        let supplementLine = supplements?.isEmpty == false ? (supplements ?? "yok") : "yok"
-        let todaySummary = "\(Fmt.int(todayCalories)) kcal, \(Fmt.int(todayProtein))g protein"
-        return """
-        MOBIL FOOD AI CONTEXT:
-        - Bu istek sadece yemek/makro tahmini icin. App action üretme.
-        - Kullanici hedefi: \(profile?.goal.label ?? "bilinmiyor"), hedef kilo: \(target)
-        - Kullanici supplementleri: \(supplementLine)
-        - Son kilo: \(latestWeight), son yag orani: \(latestBodyFat)
-        - Bugun simdiye kadar: \(todaySummary)
-        - Çiğ/pişmiş ayrımına dikkat et. Kullanıcı pişmiş diyorsa pişmiş değerleri kullan.
-        - Emin olmadığın marka/üründe web_search kullanabilirsin; temel yiyeceklerde hızlı tahmin yap.
-        """
-    }
-
-    /// Telefonun o an gördüğü taze özet. Mac sunucusu bunu kendi SwiftData
-    /// snapshot'ı ve agent skill context'iyle birleştirir.
     private var mobileAIChatContext: String {
         let profile = profiles.first
         let latest = measurements.first
@@ -2760,53 +2147,6 @@ struct MobileRootView: View {
             remoteAIHealth = nil
             remoteAIError = "Koç'a ulaşılamıyor. Tailscale bağlantını kontrol et."
         }
-    }
-
-    private func normalizedFoodResult(from result: AIFoodResult) -> AIFoodResult? {
-        if result.isFood {
-            return result
-        }
-        guard let action = result.actionList.first(where: { $0.tool == .logFood }) else {
-            return nil
-        }
-        return AIFoodResult(
-            name: action.name ?? action.summary ?? "AI yemek",
-            grams: action.grams ?? action.amount,
-            calories: action.calories,
-            protein_g: action.proteinG,
-            carbs_g: action.carbsG,
-            fat_g: action.fatG,
-            message: result.message.nilIfBlank ?? action.summary ?? "Tahmini değerler hazır."
-        )
-    }
-
-    private func addAIFoodResult(_ result: AIFoodResult) {
-        let entry = FoodEntry(
-            date: .now,
-            name: result.name?.nilIfBlank ?? "AI yemek",
-            grams: result.grams,
-            calories: result.calories ?? 0,
-            protein: result.protein_g,
-            carbs: result.carbs_g,
-            fat: result.fat_g
-        )
-        ctx.insert(entry)
-        ctx.saveOrReport()
-        aiFoodInput = ""
-        aiFoodResult = nil
-        aiFoodError = nil
-        aiFoodStatus = "Bugüne eklendi."
-        // Bugün sekmesinin + sheet'inden eklendiyse kapat; inline kartta no-op.
-        showFoodAIEstimator = false
-    }
-
-    private func mobileAIErrorMessage(_ error: Error) -> String {
-        let message = error.localizedDescription
-        if let urlError = error as? URLError,
-           [.notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .timedOut].contains(urlError.code) {
-            return "Koç'a ulaşılamadı. Tailscale bağlantını kontrol edip tekrar dene."
-        }
-        return "Koç hatası: \(message)"
     }
 
     private func number(_ raw: String) -> Double? {
@@ -3563,7 +2903,7 @@ struct MobileRecipeDetailSheet: View {
 
     private var macroRow: some View {
         HStack(spacing: 10) {
-            macroBox("Kalori", recipe.calories.map { Fmt.int($0) } ?? "—", "kcal")
+            macroBox("Kalori", recipe.calories.map { Fmt.int($0) } ?? "—", "kalori")
             macroBox("Protein", recipe.protein.map { Fmt.int($0) } ?? "—", "g")
             macroBox("Karb", recipe.carbs.map { Fmt.int($0) } ?? "—", "g")
             macroBox("Yağ", recipe.fat.map { Fmt.int($0) } ?? "—", "g")

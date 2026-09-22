@@ -47,6 +47,8 @@ struct HerculesMobileApp: App {
                 WorkoutExerciseEntry.self,
                 ExerciseSet.self,
                 FeedItem.self,
+                LabPanel.self,
+                LabResult.self,
             ]
             container = try ModelContainer(for: Schema(models), configurations: config)
 
@@ -57,6 +59,11 @@ struct HerculesMobileApp: App {
             CloudSyncMonitor.shared.start(container: container)
             DemoSeed.seedIfEmpty(ctx)
             DemoSeed.dedupUserProfiles(ctx)
+            #if DEBUG && targetEnvironment(simulator)
+            // Yalnız simülatörde ve yalnız açıkça istendiğinde: tasarım üstünde
+            // çalışırken boş ekranlara bakmamak için gerçekçi demo store.
+            DemoSeed.seedSampleDataIfRequested(ctx)
+            #endif
             // Kalan bakım işleri İLK KAREDEN SONRA: bunlar filtresiz tam-tablo
             // fetch'leri (StepEntry yılların satırını tutabilir) ve hepsi ilk body
             // çalışmadan önce ana thread'i bloke ediyordu → uzun cold launch,
@@ -65,8 +72,10 @@ struct HerculesMobileApp: App {
             Task { @MainActor in
                 let bootCtx = bootContainer.mainContext
                 FoodPresetSeed.upsertDefaults(bootCtx)
-                FeedStore.migrateLegacyFile(into: bootCtx)
                 SyncDataReconciler.reconcile(in: bootCtx)
+                // Koç adı ve avatarlar Mac'ten gelir; koç sekmesine girilmesini
+                // beklemeden açılışta çekiyoruz (profil sayfası da bunu gösteriyor).
+                await MobileChatStore.shared.syncIdentityFromMac()
             }
         } catch {
             fatalError("ModelContainer init failed: \(error)")

@@ -234,6 +234,7 @@ struct ChatPageView: View {
 
     // Hızlı ekle: veriden türetilen "sık girdiklerin" + elle presetler (composer'daki "+")
     @Query(sort: \FoodEntry.date, order: .reverse) private var foodEntries: [FoodEntry]
+    @Query private var profiles: [UserProfile]
     @Query(sort: \FoodPreset.sortOrder) private var foodPresets: [FoodPreset]
     @State private var showingQuickAdd = false
     @State private var quickAddQuery = ""
@@ -242,7 +243,6 @@ struct ChatPageView: View {
     // Mesaj etkileşimleri: hover'da kopyala / telefona gönder + zaman damgası
     @State private var hoveredMessageID: UUID? = nil
     @State private var copiedMessageID: UUID? = nil
-    @State private var sharedMessageID: UUID? = nil
     // Akıllı oto-takip: kullanıcı yukarı kaydırıp okuyorsa typewriter onu geri çekmez
     @State private var autoFollow = true
     @State private var nearBottom = true
@@ -251,30 +251,100 @@ struct ChatPageView: View {
     @State private var lastFollowScroll = Date.distantPast
     // Rail'de hover-ile-sil
     @State private var hoveredConversationID: UUID? = nil
+    // Buzz kanal+thread modeli: sağ panel bir "Geçmiş listesi" değil, seçili
+    // konuşmanın THREAD'i. Kanal akışı kök mesajları + yanıt haplarını gösterir.
+    @State private var threadOpen = false
+    @State private var channelDraft = ""
+    @FocusState private var channelComposerFocused: Bool
+    // Buzz thread paneli boyutlandırması: sol kenardan sürüklenir, çift tık
+    // varsayılana döner; genişlik oturumlar arası kalıcı (auxiliaryPanelLayout.ts).
+    @State private var hoveredReplyPillID: UUID? = nil
+    @State private var confirmingArchive = false
+    @State private var sendStartedAt: Date? = nil
+    private let activity = AgentActivityCenter.shared
+    @AppStorage("hercules.chat.threadPanelWidth") private var threadPanelWidth: Double = 380
+    @State private var threadResizeStartWidth: Double? = nil
+    @State private var threadResizeHovering = false
+    private static let threadPanelMinWidth: Double = 340
+    private static let threadPanelDefaultWidth: Double = 380
     @State private var confirmingDeleteID: UUID? = nil
+    @State private var showingDeleteConfirmation = false
 
     private static let bottomID = "chatpage-bottom"
     private static let scrollSpace = "chatpage-scroll-space"
 
     var body: some View {
-        HStack(spacing: 0) {
-            mainColumn
-                .frame(maxWidth: .infinity)
-            Rectangle().fill(ChatChrome.border).frame(width: 0.5)
-            // Geçmiş rayı sağda: sohbet sola yaslı ana kolonda kalır, ray sağ kenarda.
-            conversationRail
-                .frame(width: 236)
+        GeometryReader { geometry in
+            let layout = ChatPaneLayout(availableWidth: geometry.size.width, preferredThreadWidth: threadPanelWidth)
+            HStack(spacing: 0) {
+                if !layout.isCompact || !threadOpen {
+                    channelColumn
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                }
+                if threadOpen {
+                    if !layout.isCompact { threadResizeHandle(layout: layout) }
+                    threadPanel(compact: layout.isCompact)
+                        .frame(width: layout.threadWidth)
+                        .animation(nil, value: threadPanelWidth)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(ChatChrome.background.ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        // Koç sayfası da aynı kademeli zemin (diğer sayfalarla tek dil).
+        .background(DashboardBackground().ignoresSafeArea())
+        .alert(
+            "Bu sohbet silinsin mi?",
+            isPresented: $showingDeleteConfirmation,
+            presenting: confirmingDeleteID
+        ) { id in
+            Button("Sohbeti sil", role: .destructive) {
+                let wasCurrent = id == store.currentConversationID
+                if store.deleteConversation(id), wasCurrent { threadOpen = false }
+            }
+            Button("İptal", role: .cancel) {}
+        } message: { id in
+            Text(store.isSending && id == store.currentConversationID
+                 ? "Devam eden yanıt durdurulur ve bu sohbetteki tüm mesajlar kalıcı olarak silinir."
+                 : "Bu sohbetteki tüm mesajlar kalıcı olarak silinir.")
+        }
+        .alert("Kanal arşivlensin mi?", isPresented: $confirmingArchive) {
+            Button("Arşivle ve sıfırla", role: .destructive) {
+                withAnimation(.easeOut(duration: 0.18)) { threadOpen = false }
+                store.archiveAllConversations()
+            }
+            Button("İptal", role: .cancel) {}
+        } message: {
+            Text("Geçmiş, tarihli bir arşiv dosyasına kopyalanır ve kanal sıfırdan başlar.")
+        }
+        .onChange(of: store.isSending) { _, sending in
+            sendStartedAt = sending ? .now : nil
+        }
+        #if os(macOS)
+        // Thread paneli sonradan açılır — scroll view'ları Buzz overlay stiline çek.
+        .background(BuzzScrollerStyler().id(threadOpen))
+        #endif
+        // preferredColorScheme sunum-kapsamlıydı: açık temada TÜM pencereyi (gradient
+        // dahil) koyuya çeviriyordu. environment yalnız bu alt-ağacı koyu bırakır.
+        .environment(\.colorScheme, .dark)
         .onAppear {
             provider = AIKeyStore.shared.provider
             model = AIKeyStore.shared.model
             intelligence = AIKeyStore.shared.intelligence
             // Gateway seçiliyse havuz model listesini tazele (chat menüsü dolsun).
             if provider == .gateway { Task { await AIKeyStore.shared.refreshGatewayModels() } }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { inputFocused = true }
+            // Başka bir sayfadan hazır istem gelmiş olabilir (Tahliller ▸ "Koça analiz
+            // ettir", Fotoğraflar ▸ "Koça gönder"). Onlar `store.input`'a yazıyor ama
+            // KANAL görünümünde composer `channelDraft` kullanır — taşımazsak istem
+            // ekrana hiç gelmeden kaybolur.
+            let handoff = store.input.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !store.isSending, !threadOpen, !handoff.isEmpty {
+                channelDraft = store.input
+                store.input = ""
+            }
+            let startedInChannel = !channelDraft.isEmpty
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                if startedInChannel { channelComposerFocused = true } else { inputFocused = true }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .aiClientChanged)) { _ in
             provider = AIKeyStore.shared.provider
@@ -289,134 +359,93 @@ struct ChatPageView: View {
         }
     }
 
-    // MARK: - Conversation rail
+    // MARK: - Kanal kolonu (Buzz: kök mesajlar + yanıt hapları + hızlı composer)
 
-    private var conversationRail: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Geçmiş")
-                    .font(.system(size: 9.5, weight: .medium))
-                    .tracking(1.1)
-                    .textCase(.uppercase)
-                    .foregroundStyle(ChatChrome.quaternary)
-                Spacer()
-                Text("\(store.conversationList.count)")
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(ChatChrome.quaternary)
+    private var channelColumn: some View {
+        let conversations = channelConversations
+        return VStack(spacing: 0) {
+            chatHeader
+            Rectangle().fill(ChatChrome.border).frame(height: 0.5)
+            if conversations.isEmpty {
+                emptyState
+            } else {
+                channelTimeline(conversations)
             }
-            .padding(.horizontal, 14).padding(.top, 18).padding(.bottom, 12)
-
-            Button { store.newChat(); inputFocused = true } label: {
-                HStack(spacing: 8) {
-                    Lucide(sf: "plus", size: 11)
-                    Text("Yeni sohbet")
-                        .font(.system(size: 12.5, weight: .medium))
-                    Spacer(minLength: 0)
-                    Text("⌘N")
-                        .font(.system(size: 9.5, design: .monospaced))
-                        .foregroundStyle(ChatChrome.quaternary)
-                }
-                    .foregroundStyle(ChatChrome.secondary)
-                    .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity, minHeight: 34)
-                    // Ray artık `panel` zeminde → buton bir kademe yukarıda olmalı.
-                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(ChatChrome.card))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(store.isSending)
-            .padding(.horizontal, 10)
-            .padding(.bottom, 12)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    if store.conversationList.isEmpty {
-                        Text("Geçmiş yok. İlk mesajını yaz.")
-                            .font(Typography.caption).foregroundStyle(ChatChrome.quaternary)
-                            .padding(.horizontal, 12).padding(.vertical, 8)
-                    } else {
-                        ForEach(store.conversationList) { conversation in
-                            conversationRow(conversation)
-                        }
-                    }
-                }
-                .padding(.horizontal, 8).padding(.bottom, Spacing.lg)
-            }
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-        // Yan kolon → içerik zemininden tam basamak (%34 opaklık fark yaratmıyordu).
-        .background(ChatChrome.panel)
-        .confirmationDialog(
-            "Bu sohbet silinsin mi?",
-            isPresented: Binding(
-                get: { confirmingDeleteID != nil },
-                set: { if !$0 { confirmingDeleteID = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Sohbeti sil", role: .destructive) {
-                if let id = confirmingDeleteID { store.deleteConversation(id) }
-                confirmingDeleteID = nil
-            }
-            Button("İptal", role: .cancel) { confirmingDeleteID = nil }
-        } message: {
-            Text("Bu sohbetteki tüm mesajlar kalıcı olarak silinir.")
+            channelComposer
         }
     }
 
-    private func conversationRow(_ conversation: ChatConversation) -> some View {
-        let active = conversation.id == store.currentConversationID
-        let hovered = hoveredConversationID == conversation.id
-        return ZStack(alignment: .trailing) {
-            Button {
-                store.selectConversation(conversation.id)
-                inputFocused = true
-            } label: {
-                HStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(conversation.title.isEmpty ? "Yeni sohbet" : conversation.title)
-                            .font(.system(size: 12, weight: active ? .semibold : .medium))
-                            .foregroundStyle(active ? ChatChrome.primary : ChatChrome.secondary)
-                            .lineLimit(1)
-                        Text(Fmt.relative(conversation.updatedAt))
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(ChatChrome.quaternary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: hovered ? 26 : 0)
-                }
-                .padding(.horizontal, 11).padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(active ? ChatChrome.panelRaised : (hovered ? ChatChrome.card : Color.clear))
-                )
-                .overlay(alignment: .leading) {
-                    if active {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(ChatChrome.primary)
-                            .frame(width: 1.5)
-                            .padding(.vertical, 7)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(store.isSending)
+    /// Kanal akışı kronolojik (eski üstte, yeni altta) — Buzz timeline düzeni.
+    /// Henüz mesajı olmayan taslak konuşmalar kanalda çizilmez.
+    private var channelConversations: [ChatConversation] {
+        store.conversations
+            .filter { !$0.messages.isEmpty }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
 
-            if hovered && !store.isSending {
-                Button { confirmingDeleteID = conversation.id } label: {
-                    Lucide(sf: "trash", size: 10)
-                        .foregroundStyle(ChatChrome.tertiary)
-                        .frame(width: 24, height: 24)
-                        .background(Circle().fill(ChatChrome.panelPressed))
-                        .overlay(Circle().strokeBorder(ChatChrome.border, lineWidth: 0.5))
-                        .contentShape(Circle())
+    private func showsChannelDaySeparator(at index: Int, in list: [ChatConversation]) -> Bool {
+        guard list.indices.contains(index) else { return false }
+        if index == 0 { return true }
+        return !Calendar.current.isDate(list[index].createdAt, inSameDayAs: list[index - 1].createdAt)
+    }
+
+    private func channelTimeline(_ conversations: [ChatConversation]) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(conversations.enumerated()), id: \.element.id) { index, convo in
+                    if showsChannelDaySeparator(at: index, in: conversations) {
+                        daySeparator(convo.createdAt)
+                    }
+                    conversationRootRow(convo)
                 }
-                .buttonStyle(.plain)
-                .padding(.trailing, 7)
-                .help("Sohbeti sil")
-                .transition(.opacity)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
+            .padding(.vertical, Spacing.lg)
+        }
+        .defaultScrollAnchor(.bottom)
+        .background(ChatChrome.background)
+    }
+
+    /// Kanal satırı: konuşmanın KÖK mesajı + Buzz yanıt hapı. Satır tıklanmaz
+    /// (metin seçilebilir kalır) — thread'e giriş yanıt hapı ve hover'daki
+    /// aksiyon çubuğundan olur (MessageRow.tsx + MessageActionBar.tsx davranışı).
+    private func conversationRootRow(_ conversation: ChatConversation) -> some View {
+        let hovered = hoveredConversationID == conversation.id
+        let isCurrent = conversation.id == store.currentConversationID
+        let root = conversation.messages.first
+        let replyCount = max(0, conversation.messages.count - 1)
+        let streaming = isCurrent && store.isSending
+        return VStack(alignment: .leading, spacing: 4) {
+            if let root {
+                MessageBubble(turn: root, isStreaming: false, userName: chatUserName) { _ in
+                } onConfirmAction: { _ in
+                } onRejectAction: { _ in
+                }
+            } else {
+                Text(conversation.title.isEmpty ? "Yeni sohbet" : conversation.title)
+                    .font(ChatChrome.messageBody)
+                    .foregroundStyle(ChatChrome.secondary)
+            }
+            // Günün thread'i yanıtsızken de hapını gösterir: kanaldan thread'e tek
+            // giriş kapısı bu (satır tıklanmaz, aksiyon çubuğu hover'da gizli).
+            if replyCount > 0 || streaming || ChatDailyThread.isDaily(conversation) {
+                replyPill(conversation, replyCount: streaming ? max(replyCount, 1) : replyCount, streaming: streaming)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(hovered ? ChatChrome.panelRaised.opacity(0.45) : Color.clear)
+        )
+        .overlay(alignment: .topTrailing) {
+            if hovered {
+                rootActionBar(conversation)
+                    .padding(.top, 4)
+                    .padding(.trailing, 8)
+                    .transition(.opacity)
             }
         }
         .onHover { hovering in
@@ -424,29 +453,340 @@ struct ChatPageView: View {
             else if hoveredConversationID == conversation.id { hoveredConversationID = nil }
         }
         .animation(.easeInOut(duration: 0.12), value: hovered)
+        .contextMenu {
+            Button("Thread'i aç") { openThread(conversation.id) }
+            Button("Sohbeti sil", role: .destructive) { requestDelete(conversation.id) }
+        }
     }
 
-    // MARK: - Main column
+    /// Buzz MessageActionBar: satırın üst kenarına oturan yüzen aksiyon hapı —
+    /// thread'i aç · kopyala · sil.
+    private func rootActionBar(_ conversation: ChatConversation) -> some View {
+        let copied = copiedMessageID == conversation.messages.first?.id
+        return HStack(spacing: 2) {
+            Button { openThread(conversation.id) } label: {
+                Lucide(sf: "text.bubble", size: 12)
+                    .foregroundStyle(ChatChrome.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Thread'i aç")
 
-    private var mainColumn: some View {
+            Button {
+                guard let root = conversation.messages.first else { return }
+                copyToClipboard(root.text)
+                copiedMessageID = root.id
+                let id = root.id
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    if copiedMessageID == id { copiedMessageID = nil }
+                }
+            } label: {
+                Lucide(sf: copied ? "checkmark" : "doc.on.doc", size: 11)
+                    .foregroundStyle(copied ? ChatChrome.positive : ChatChrome.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Kök mesajı kopyala")
+
+            Button { requestDelete(conversation.id) } label: {
+                Lucide(sf: "trash", size: 11)
+                    .foregroundStyle(ChatChrome.tertiary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Sohbeti sil")
+        }
+        .padding(.horizontal, 3)
+        .background(Capsule().fill(ChatChrome.whiteSoft))
+    }
+
+    /// Buzz MessageThreadSummaryRow: 30pt rounded-full hap — facepile + "N yanıt ·
+    /// son yanıt X"; hapın KENDİ hover'ında yüzey belirir ve etiket "Thread'i aç"
+    /// olur; tıklamak thread panelini açar.
+    private func replyPill(_ conversation: ChatConversation, replyCount: Int, streaming: Bool) -> some View {
+        let hovered = hoveredReplyPillID == conversation.id
+        return Button {
+            openThread(conversation.id)
+        } label: {
+            HStack(spacing: 6) {
+                HStack(spacing: -4) {
+                    ChatUserAvatar(name: chatUserName, size: 20)
+                    AssistantMark(size: 20, cornerRadius: 10)
+                }
+                HStack(spacing: 4) {
+                    Text(replyCount == 0 ? ChatDailyThread.emptyReplyLabel(for: conversation) : "\(replyCount) yanıt")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(hovered ? ChatChrome.primary : ChatChrome.secondary)
+                    Text("·")
+                        .font(.system(size: 12))
+                        .foregroundStyle(ChatChrome.quaternary)
+                    Text(streaming ? "yazıyor…" : ((hovered || replyCount == 0) ? "Thread'i aç" : "son yanıt \(Fmt.relative(conversation.updatedAt))"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(streaming ? ChatChrome.positive : ChatChrome.tertiary)
+                }
+                .lineLimit(1)
+            }
+            .padding(.leading, 4)
+            .padding(.trailing, 12)
+            .frame(height: 30)
+            .background(Capsule().fill(hovered ? ChatChrome.background.opacity(0.95) : Color.clear))
+            .overlay(Capsule().strokeBorder(hovered ? ChatChrome.borderStrong.opacity(0.7) : Color.clear, lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering { hoveredReplyPillID = conversation.id }
+            else if hoveredReplyPillID == conversation.id { hoveredReplyPillID = nil }
+        }
+        // Gövde hizası: avatar (32) + boşluk (10).
+        .padding(.leading, 42)
+        .help("Thread'i aç")
+        .accessibilityIdentifier("chat-thread-\(conversation.id.uuidString)")
+    }
+
+    private func openThread(_ id: UUID) {
+        guard store.selectConversation(id) else { return }
+        // Repeated clicks keep the thread open. During streaming, insert the panel
+        // immediately so text-update transactions cannot interrupt its transition.
+        if store.isSending {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { threadOpen = true }
+        } else {
+            withAnimation(.easeOut(duration: 0.22)) { threadOpen = true }
+        }
+        channelComposerFocused = false
+        inputFocused = true
+    }
+
+    private func requestDelete(_ id: UUID) {
+        confirmingDeleteID = id
+        showingDeleteConfirmation = true
+    }
+
+    /// Kanal composer'ı: Buzz "Message #kanal" — buradan yazmak YENİ konuşma
+    /// (kök mesaj) başlatır; tam donanımlı composer thread'dedir.
+    private var channelComposer: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            TextField("\(CoachIdentity.dative) yeni bir soru başlat…", text: $channelDraft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...4)
+                // Alan gönder butonuyla aynı boyda: tek satır metin kutunun
+                // ortasında durur. Boyu vermeden `.bottom` hizası metni
+                // butonun altına düşürüyordu.
+                .frame(minHeight: 30)
+                .font(ChatChrome.messageBody)
+                .foregroundStyle(ChatChrome.primary)
+                .focused($channelComposerFocused)
+                .onSubmit { startConversationFromChannel() }
+
+            Button { startConversationFromChannel() } label: {
+                Lucide(sf: "arrow.up", size: 14)
+                    .foregroundStyle(channelDraftSendable ? ChatChrome.ink : ChatChrome.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(channelDraftSendable ? ChatChrome.white : ChatChrome.whiteSoft))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!channelDraftSendable || store.isSending)
+            .help("Yeni konuşma başlat (↵)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        // Düz dil: kutu yerine odak durumunda beliren yumuşak peçe.
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(channelComposerFocused ? ChatChrome.accentSoft : ChatChrome.whiteSoft)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 14)
+        .animation(.easeInOut(duration: 0.15), value: channelComposerFocused)
+    }
+
+    private var channelDraftSendable: Bool {
+        !channelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func startConversationFromChannel() {
+        let text = channelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !store.isSending else { return }
+        // Buzz davranışı: kanala yazmak thread AÇMAZ — kök mesaj kanala düşer,
+        // koç arkada yanıtlar (hap "yazıyor…" gösterir). Açık panel varsa kapat:
+        // store tek-güncel-konuşma tuttuğu için panel yeni konuşmaya zıplardı.
+        store.newChat()
+        store.input = text
+        channelDraft = ""
+        withAnimation(.easeOut(duration: 0.18)) { threadOpen = false }
+        sendWithContext()
+    }
+
+    // MARK: - Thread paneli (Buzz MessageThreadPanel: başlık + transkript + composer)
+
+    /// Buzz resize kolu (auxiliaryPanelLayout.ts): layout'ta yalnız 1px hairline
+    /// durur; 13pt'lik görünmez tutma alanı kenarın ÜSTÜNE biner (görünür boşluk
+    /// yok). Sürükleme GLOBAL uzayda mutlak imleç konumundan hesaplanır — panel
+    /// büyürken tutamacın kendisi kaydığı için lokal translation zıplatıyordu.
+    /// Çift tık varsayılan genişliğe döner.
+    private func threadResizeHandle(layout: ChatPaneLayout) -> some View {
+        Rectangle()
+            .fill((threadResizeHovering || threadResizeStartWidth != nil)
+                  ? ChatChrome.borderStrong.opacity(0.9)
+                  : ChatChrome.borderStrong.opacity(0.45))
+            .frame(width: 1)
+            .overlay(
+                Color.clear
+                    .frame(width: 13)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        threadResizeHovering = hovering
+                        #if os(macOS)
+                        if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                        #endif
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                if threadResizeStartWidth == nil { threadResizeStartWidth = layout.threadWidth }
+                                // Sol kenar: imleç sola gittikçe panel büyür. Anlık clamp,
+                                // sınırda birikip geri dönerken oluşan "yapışmayı" önler.
+                                let proposed = (threadResizeStartWidth ?? Self.threadPanelDefaultWidth)
+                                    - Double(value.location.x - value.startLocation.x)
+                                threadPanelWidth = min(max(proposed, Self.threadPanelMinWidth), layout.maximumThreadWidth)
+                            }
+                            .onEnded { _ in
+                                threadResizeStartWidth = nil
+                            }
+                    )
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            threadPanelWidth = Self.threadPanelDefaultWidth
+                        }
+                    )
+            )
+            .help("Sürükleyerek genişlet · çift tık: sıfırla")
+    }
+
+    private func threadPanel(compact: Bool) -> some View {
         VStack(spacing: 0) {
-            chatHeader
+            threadHeader(compact: compact)
             Rectangle().fill(ChatChrome.border).frame(height: 0.5)
             if store.messages.isEmpty {
                 emptyState
             } else {
                 conversation
             }
+            if store.isSending {
+                activityRail
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             composer
         }
+        .background(ChatChrome.background)
+        .animation(.easeOut(duration: 0.2), value: store.isSending)
+    }
+
+    /// Buzz ComposerActivityAccessory: composer üstünde ince aktivite rayı —
+    /// nabız + "çalışıyor · geçen süre" + ACP'den akan son araç çağrısı.
+    private var activityRail: some View {
+        HStack(spacing: 7) {
+            TimelineView(.animation(minimumInterval: 0.6)) { context in
+                Circle()
+                    .fill(ChatChrome.positive)
+                    .frame(width: 5, height: 5)
+                    .opacity(0.45 + 0.55 * abs(sin(context.date.timeIntervalSinceReferenceDate * 2)))
+            }
+
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let elapsed = Int(context.date.timeIntervalSince(sendStartedAt ?? context.date))
+                Text("\(CoachIdentity.name) çalışıyor · \(max(0, elapsed))sn")
+                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .foregroundStyle(ChatChrome.secondary)
+            }
+
+            if let tool = activity.toolEvents.last {
+                Text("·")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(ChatChrome.quaternary)
+                HStack(spacing: 4) {
+                    Lucide(sf: tool.status == "completed" ? "checkmark" : "wrench.and.screwdriver", size: 9)
+                    Text(tool.title)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(ChatChrome.tertiary)
+            } else if activity.thinking {
+                Text("· düşünüyor…")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(ChatChrome.tertiary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 6)
+    }
+
+    private func threadHeader(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            if compact {
+                Button { threadOpen = false } label: {
+                    Lucide(sf: "chevron.left", size: 14)
+                        .frame(width: 40, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Tüm sohbetlere dön")
+                .accessibilityLabel("Tüm sohbetlere dön")
+            }
+            Text("Thread")
+                .font(.system(size: 15, weight: .semibold))
+                .tracking(-0.2)
+                .foregroundStyle(ChatChrome.primary)
+            if store.currentConversationTitle != "Yeni sohbet" {
+                Text(store.currentConversationTitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(ChatChrome.quaternary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Button {
+                if let id = store.currentConversationID { requestDelete(id) }
+            } label: {
+                Lucide(sf: "trash", size: 13)
+                    .foregroundStyle(ChatChrome.secondary)
+                    .frame(width: 40, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Sohbeti sil")
+            .accessibilityLabel("Sohbeti sil")
+            Button { withAnimation(.easeOut(duration: 0.18)) { threadOpen = false } } label: {
+                Lucide(sf: "xmark", size: 12)
+                    .foregroundStyle(ChatChrome.secondary)
+                    .frame(width: 40, height: 44)
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("Thread'i kapat")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .frame(minHeight: 52)
+        .background(ChatChrome.background)
     }
 
     private var chatHeader: some View {
         HStack(spacing: 10) {
             AssistantMark(size: 24, cornerRadius: 6)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Koç")
-                    .font(.system(size: 13.5, weight: .medium))
+                Text(CoachIdentity.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .tracking(-0.2)
                     .foregroundStyle(ChatChrome.primary)
                 if store.currentConversationTitle != "Yeni sohbet" {
                     Text(store.currentConversationTitle)
@@ -465,9 +805,26 @@ struct ChatPageView: View {
                     .foregroundStyle(ChatChrome.tertiary)
                     .lineLimit(1)
             }
+
+            // Minimal kanal menüsü: tek eylem — arşivle ve sıfırdan başla.
+            Menu {
+                Button(role: .destructive) { confirmingArchive = true } label: {
+                    Label("Arşivle ve sıfırla", systemImage: "archivebox")
+                }
+            } label: {
+                Lucide(sf: "ellipsis", size: 13)
+                    .foregroundStyle(ChatChrome.tertiary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(store.isSending)
+            .help("Kanalı arşivle ve sıfırdan başla")
         }
-        .padding(.horizontal, 18)
-        .frame(minHeight: 54)
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
         .background(ChatChrome.background)
     }
 
@@ -475,7 +832,7 @@ struct ChatPageView: View {
         ScrollViewReader { proxy in
             GeometryReader { viewport in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, turn in
                             // Boş asistan turu (ilk-token öncesi placeholder / durdurulmuş üretim) çizilmez
                             // → yalnız aşağıdaki TypingIndicator durur; yoksa yalnız/yetim bir avatar belirir.
@@ -502,16 +859,15 @@ struct ChatPageView: View {
                                 }
                             )
                     }
-                    .frame(maxWidth: 760)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.xl)
+                    // Buzz kanal akışı: kolon ortalanmaz — sola yaslı, tam genişlik,
+                    // dar gutter (MessageTimeline px-2 + satır mx/px'i).
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, Spacing.lg)
                 }
                 .defaultScrollAnchor(.bottom)   // kısa sohbet alta yaslanır (boşluk üstte kalır)
                 .coordinateSpace(name: Self.scrollSpace)
                 .background(ChatChrome.background)
-                .contentShape(Rectangle())
-                .onTapGesture { inputFocused = false }   // mesaj alanına tıkla → input focus bırak
                 .onPreferenceChange(ChatNearBottomKey.self) { value in
                     nearBottom = value
                     if value {
@@ -551,9 +907,8 @@ struct ChatPageView: View {
                             Lucide(sf: "arrow.down", size: 13)
                                 .foregroundStyle(ChatChrome.primary)
                                 .frame(width: 34, height: 34)
-                                .background(Circle().fill(ChatChrome.panelRaised))
-                                .overlay(Circle().strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
-                                .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+                                .background(Circle().fill(ChatChrome.whiteSoft))
+                                .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
                         }
                         .buttonStyle(.plain)
                         .padding(.trailing, Spacing.xl)
@@ -575,27 +930,52 @@ struct ChatPageView: View {
         }
     }
 
-    // MARK: - Message row (bubble + zaman damgası + hover kopyala)
+    // MARK: - Message row (Buzz kanal satırı: hover yüzeyi + sağ üstte kopyala)
+
+    private var chatUserName: String {
+        let name = profiles.first?.name.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? "Sen" : name
+    }
 
     private func messageRow(_ turn: ChatTurn) -> some View {
         let streaming = store.isSending && turn.id == store.messages.last?.id && turn.role == .assistant
+        let hovered = hoveredMessageID == turn.id
         return VStack(alignment: .leading, spacing: 3) {
             if let ids = turn.imageIDs, !ids.isEmpty { attachmentRow(ids) }
-            MessageBubble(turn: turn, isStreaming: streaming) {
-                store.saveFood(in: turn, ctx: ctx)
+            MessageBubble(
+                turn: turn,
+                isStreaming: streaming,
+                userName: chatUserName,
+                // Geçmiş bir günün thread'inde kart o güne ayarlı açılır, bugüne değil.
+                defaultDayOffset: store.currentLogDayOffset
+            ) { date in
+                store.saveFood(in: turn, ctx: ctx, on: date)
             } onConfirmAction: { action in
                 store.confirmAction(turnID: turn.id, actionID: action.id, ctx: ctx)
             } onRejectAction: { action in
                 store.rejectAction(turnID: turn.id, actionID: action.id)
             }
-            if !turn.text.isEmpty {
-                metaRow(turn)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        // Buzz satır hover'ı: rounded-2xl, muted/50.
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(hovered ? ChatChrome.panelRaised.opacity(0.45) : Color.clear)
+        )
+        .overlay(alignment: .topTrailing) {
+            if hovered && !turn.text.isEmpty {
+                copyButton(turn)
+                    .padding(.top, 4)
+                    .padding(.trailing, 6)
+                    .transition(.opacity)
             }
         }
         .onHover { hovering in
             if hovering { hoveredMessageID = turn.id }
             else if hoveredMessageID == turn.id { hoveredMessageID = nil }
         }
+        .animation(.easeInOut(duration: 0.12), value: hovered)
     }
 
     /// Kullanıcının mesaja iliştirdiği görseller — balonun üstünde, sağa hizalı küçük resimler.
@@ -603,41 +983,13 @@ struct ChatPageView: View {
     /// diskten okuyup tam çözünürlük decode ediyordu.
     private func attachmentRow(_ ids: [String]) -> some View {
         HStack(spacing: 6) {
-            Spacer(minLength: 0)
             ForEach(ids, id: \.self) { id in
                 CoachStoredThumb(id: id)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.trailing, 2)
-    }
-
-    /// Mesaj altında mono zaman damgası + kopyala — sahibine göre hizalı.
-    /// Asistan tarafında sol girinti = nokta işareti (6) + boşluk (13).
-    ///
-    /// "Telefona gönder" kaldırıldı (artık gerekmiyor) ve kopyala hover'dan çıkarıldı:
-    /// tek bir buton için mesajın üstüne gelmeyi beklemek gereksiz bir gizleme.
-    private func metaRow(_ turn: ChatTurn) -> some View {
-        let isUser = turn.role == .user
-        let actions = copyButton(turn)
-        let timestamp = Text(Fmt.timeShort.string(from: turn.createdAt))
-            .font(.system(size: 10, weight: .regular, design: .monospaced))
-            .foregroundStyle(ChatChrome.quaternary)
-        return HStack(spacing: 10) {
-            if isUser {
-                Spacer(minLength: 0)
-                actions
-                timestamp
-            } else {
-                timestamp
-                actions
-                Spacer(minLength: 0)
-            }
-        }
-        // Asistan tarafında sol girinti = avatar (28) + boşluk (10) → metnin altına hizalanır.
-        .padding(.leading, isUser ? 0 : 38)
-        .padding(.trailing, isUser ? 2 : 0)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Satır anatomisiyle hizalı: avatar (32) + boşluk (10).
+        .padding(.leading, 42)
     }
 
     private func copyButton(_ turn: ChatTurn) -> some View {
@@ -650,16 +1002,15 @@ struct ChatPageView: View {
                 if copiedMessageID == id { copiedMessageID = nil }
             }
         } label: {
-            HStack(spacing: 3) {
-                Lucide(sf: copied ? "checkmark" : "doc.on.doc", size: 9)
-                Text(copied ? "Kopyalandı" : "Kopyala")
-                    .font(Typography.label)
-            }
-            .foregroundStyle(copied ? ChatChrome.positive : ChatChrome.tertiary)
-            .contentShape(Rectangle())
+            // Buzz hover aksiyon çubuğu dili: satır köşesinde border'lı opak hap.
+            Lucide(sf: copied ? "checkmark" : "doc.on.doc", size: 11)
+                .foregroundStyle(copied ? ChatChrome.positive : ChatChrome.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(ChatChrome.whiteSoft))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help("Mesajı kopyala")
+        .help(copied ? "Kopyalandı" : "Mesajı kopyala")
     }
 
     private func copyToClipboard(_ text: String) {
@@ -667,45 +1018,6 @@ struct ChatPageView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         #endif
-    }
-
-    // MARK: - Telefona gönder (mobil Akış feed'i)
-
-    private func shareButton(_ turn: ChatTurn) -> some View {
-        let shared = sharedMessageID == turn.id
-        return Button {
-            shareToPhone(turn)
-        } label: {
-            HStack(spacing: 3) {
-                Lucide(sf: shared ? "checkmark.circle.fill" : "iphone.and.arrow.forward", size: 9)
-                Text(shared ? "Telefona gönderildi" : "Telefona gönder")
-                    .font(Typography.label)
-            }
-            .foregroundStyle(shared ? ChatChrome.positive : ChatChrome.tertiary)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Telefondaki Hercules Akış sekmesine gönder")
-    }
-
-    private func shareToPhone(_ turn: ChatTurn) {
-        let convo = store.currentConversationTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasConvo = !convo.isEmpty && convo != "Yeni sohbet"
-        let title = hasConvo ? convo : String(turn.text.prefix(48))
-        let item = FeedItem(
-            title: title,
-            body: turn.text,
-            kind: turn.food != nil ? "recipe" : "chat",
-            source: "Mac",
-            conversationTitle: hasConvo ? convo : nil
-        )
-        ctx.insert(item)
-        ctx.saveOrReport()
-        sharedMessageID = turn.id
-        let id = turn.id
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-            if sharedMessageID == id { sharedMessageID = nil }
-        }
     }
 
     // MARK: - Gün ayracı (Bugün / Dün / tarih)
@@ -719,24 +1031,25 @@ struct ChatPageView: View {
         )
     }
 
+    /// Buzz gün ayracı: ortalanmış pill chip — 11pt medium, çizgi yok
+    /// (DayDivider.tsx: rounded-full, border/70, opak zemin, muted %70 metin).
     private func daySeparator(_ date: Date) -> some View {
-        HStack(spacing: 10) {
-            Rectangle().fill(ChatChrome.border).frame(height: 0.5)
-            Text(dayLabel(date))
-                .font(Typography.label)
-                .tracking(0.6)
-                .foregroundStyle(ChatChrome.tertiary)
-                .fixedSize()
-            Rectangle().fill(ChatChrome.border).frame(height: 0.5)
-        }
-        .padding(.vertical, 4)
+        Text(dayLabel(date))
+            .font(.system(size: 11, weight: .medium))
+            .tracking(0.22)
+            .foregroundStyle(ChatChrome.tertiary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(ChatChrome.whiteSoft))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
     }
 
     private func dayLabel(_ date: Date) -> String {
         let cal = Calendar.current
-        if cal.isDateInToday(date) { return "BUGÜN" }
-        if cal.isDateInYesterday(date) { return "DÜN" }
-        return Fmt.dateLong.string(from: date).uppercased(with: Locale(identifier: "tr_TR"))
+        if cal.isDateInToday(date) { return "Bugün" }
+        if cal.isDateInYesterday(date) { return "Dün" }
+        return Fmt.dateLong.string(from: date)
     }
 
     // MARK: - Empty state
@@ -750,13 +1063,13 @@ struct ChatPageView: View {
                     Spacer(minLength: 52)
                     AssistantMark(size: 30, cornerRadius: 8)
                     Text("Bugün neye bakalım?")
-                        .font(.system(size: 25, weight: .medium))
-                        .tracking(-0.55)
+                        .font(.system(size: 24, weight: .semibold))
+                        .tracking(-0.4)
                         .foregroundStyle(ChatChrome.primary)
                         .padding(.top, 17)
                     Text("Yemeğini, ölçümlerini ve antrenman geçmişini birlikte okuyabilirim.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(ChatChrome.tertiary)
+                        .font(.system(size: 13))
+                        .foregroundStyle(ChatChrome.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 480, alignment: .leading)
                         .padding(.top, 6)
@@ -766,8 +1079,8 @@ struct ChatPageView: View {
                     ], alignment: .leading, spacing: 8) {
                         ForEach(Self.starterPrompts, id: \.self) { prompt in
                             CoachSuggestionChip(text: prompt, compact: false) {
-                                store.input = prompt
-                                inputFocused = true
+                                channelDraft = prompt
+                                channelComposerFocused = true
                             }
                         }
                     }
@@ -775,8 +1088,8 @@ struct ChatPageView: View {
                     Spacer(minLength: 52)
                 }
                 .frame(maxWidth: 720, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 36)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
                 .frame(minHeight: viewport.size.height)
             }
         }
@@ -832,7 +1145,7 @@ struct ChatPageView: View {
             VStack(spacing: 0) {
                 ZStack(alignment: .topLeading) {
                     if store.input.isEmpty {
-                        Text("Koç'a yaz…")
+                        Text("\(CoachIdentity.dative) yaz…")
                             .font(.system(size: 13))
                             .foregroundStyle(ChatChrome.quaternary)
                             .padding(.horizontal, 14).padding(.vertical, 12)
@@ -928,26 +1241,25 @@ struct ChatPageView: View {
                 }
                 composerToolbar
             }
-            .padding(4)
-            // macOS'un yumuşak alan dili: keskin 6pt yerine sürekli-eğrili 12pt.
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(ChatChrome.panel))
+            .padding(6)
+            // Buzz composer kartı: rounded-2xl (16), border/50, gölgesiz —
+            // yükseklik hissi gölgeyle değil kenarlıkla verilir.
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(ChatChrome.background))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(
-                        dropTargeted ? ChatChrome.primary : (inputFocused ? ChatChrome.borderStrong : ChatChrome.border),
-                        lineWidth: dropTargeted ? 1 : 0.6
+                        dropTargeted ? ChatChrome.primary : (inputFocused ? ChatChrome.borderStrong : ChatChrome.borderStrong.opacity(0.5)),
+                        lineWidth: 1
                     )
             )
-            .shadow(color: .black.opacity(0.22), radius: 14, y: 7)
             .animation(.easeInOut(duration: 0.15), value: inputFocused)
             .animation(.easeInOut(duration: 0.12), value: dropTargeted)
             .onDrop(of: [.image, .fileURL], isTargeted: $dropTargeted) { providers in handleDrop(providers) }
         }
-        .frame(maxWidth: 820)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, Spacing.xl)
+        .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 16)
+        .padding(.bottom, 14)
         .background(
             LinearGradient(
                 colors: [ChatChrome.background.opacity(0), ChatChrome.background, ChatChrome.background],
@@ -968,13 +1280,7 @@ struct ChatPageView: View {
         HStack(spacing: 4) {
             quickAddButton
             photoPickerButton
-            modelChip
-            if provider.supportsIntelligence { effortChip }
             Spacer(minLength: 8)
-            Text("@ veri · ⇧↵ satır")
-                .font(.system(size: 9.5))
-                .foregroundStyle(ChatChrome.quaternary)
-                .lineLimit(1)
             sendButton
         }
         .padding(.leading, 6).padding(.trailing, 2).padding(.bottom, 2)
@@ -1052,7 +1358,7 @@ struct ChatPageView: View {
             .padding(.bottom, 12)
         }
         .frame(width: 288)
-        .presentationBackground(ChatChrome.panel)
+        .presentationBackground(ChatChrome.card)
     }
 
     private func panelHeader(_ t: String) -> some View {
@@ -1109,7 +1415,7 @@ struct ChatPageView: View {
         }
         .padding(18)
         .frame(width: 260)
-        .presentationBackground(ChatChrome.panel)
+        .presentationBackground(ChatChrome.card)
     }
 
     // Model/effort yardımcıları — hepsi AIKeyStore'a yazıp `.aiClientChanged` post eder
@@ -1122,6 +1428,9 @@ struct ChatPageView: View {
         case .codex:      return "ChatGPT"
         case .openRouter: return "OpenRouter"
         case .gateway:    return "Gateway"
+        case .claudeCode: return "Claude"
+        case .cursor:     return "Cursor"
+        case .grok:       return "Grok"
         }
     }
 
@@ -1182,7 +1491,7 @@ struct ChatPageView: View {
             )
             .frame(width: 380)
             .frame(maxHeight: 520)
-            .presentationBackground(ChatChrome.background)
+            .presentationBackground(ChatChrome.card)
         }
     }
 
@@ -1259,7 +1568,7 @@ struct ChatPageView: View {
             }
             .padding(.horizontal, 2)
         }
-        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func loadPickedImages(_ items: [PhotosPickerItem]) {
@@ -1503,6 +1812,7 @@ struct ChatPageView: View {
         case .yemekPlani: return "menucard"
         case .tarifler:   return "fork.knife"
         case .profil:     return "person.crop.circle"
+        case .tahlil:     return "drop"
         case .hepsi:      return "sparkles"
         }
     }
@@ -1550,7 +1860,7 @@ struct ChatPageView: View {
                     }
                     .padding(.horizontal, 10).padding(.vertical, 7)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(isSelected ? ChatChrome.whiteSoft : Color.clear))
                     .contentShape(Rectangle())
                 }
@@ -1576,10 +1886,8 @@ struct ChatPageView: View {
             .padding(.horizontal, 10).padding(.vertical, 7)
         }
         .padding(4)
-        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(ChatChrome.panelRaised))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.4), radius: 14, y: 5)
+        .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+            .fill(ChatChrome.whiteSoft))
         .frame(maxWidth: 340, alignment: .leading)
     }
 
@@ -1641,7 +1949,7 @@ struct ChatPageView: View {
                         }
                         .padding(.horizontal, 10).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(isSelected ? ChatChrome.whiteSoft : Color.clear))
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isSelected ? ChatChrome.whiteSoft : Color.clear))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1660,9 +1968,8 @@ struct ChatPageView: View {
                 .padding(.horizontal, 10).padding(.vertical, 6)
             }
             .padding(4)
-            .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(ChatChrome.panelRaised))
-            .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.4), radius: 14, y: 5)
+            .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(ChatChrome.whiteSoft))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -1671,15 +1978,17 @@ struct ChatPageView: View {
         Button {
             if store.isSending { store.stop() } else { sendWithContext() }
         } label: {
-            Lucide(sf: store.isSending ? "stop.fill" : "arrow.up", size: 12.5)
+            // Buzz gönder butonu: 32pt tam daire, primary dolgu (koyuda yakın-beyaz),
+            // ArrowUp 16 — ComposerSendButton ile aynı dil.
+            Lucide(sf: store.isSending ? "stop.fill" : "arrow.up", size: 14)
                 .foregroundStyle(store.isSending ? ChatChrome.primary : (canSend ? ChatChrome.ink : ChatChrome.secondary))
                 .frame(width: 32, height: 32)
                 .background(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    Circle()
                         .fill(store.isSending ? ChatChrome.panelPressed : (canSend ? ChatChrome.white : ChatChrome.whiteSoft))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    Circle()
                         .strokeBorder(store.isSending ? ChatChrome.borderStrong : Color.clear, lineWidth: 0.6)
                 )
         }
@@ -1746,13 +2055,14 @@ private struct CoachSuggestionChip: View {
             .padding(.horizontal, compact ? 10 : 12)
             .padding(.vertical, compact ? 6 : 10)
             .frame(maxWidth: compact ? nil : .infinity, alignment: .leading)
+            // Buzz outline butonu: border-input/40 + bg-background, hover bg-muted/70.
             .background(
-                RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous)
-                    .fill(hovering ? ChatChrome.panelRaised : ChatChrome.panel)
+                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
+                    .fill(hovering ? ChatChrome.panelRaised.opacity(0.7) : ChatChrome.background)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous)
-                    .strokeBorder(hovering ? ChatChrome.borderStrong : ChatChrome.border, lineWidth: 0.6)
+                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
+                    .strokeBorder(hovering ? ChatChrome.borderStrong : ChatChrome.borderStrong.opacity(0.4), lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
@@ -1811,10 +2121,10 @@ private final class CoachChatThumbCache {
         if let hit = cache.object(forKey: id as NSString) { return hit.image }
         // Disk okuma + yeniden boyutlandırma arka planda; platform görseli main'de
         // kurulur (NSImage/UIImage ve Image sınır ötesine taşınmaz).
-        guard let small = await Task.detached(priority: .userInitiated) { () -> Data? in
+        guard let small = await Task.detached(priority: .userInitiated, operation: { () -> Data? in
             guard let data = ChatImageStore.load(id) else { return nil }
             return ChatImageStore.downscaledJPEG(from: data, maxPixel: 320) ?? data
-        }.value else { return nil }
+        }).value else { return nil }
 
         #if canImport(AppKit)
         guard let platform = NSImage(data: small) else { return nil }

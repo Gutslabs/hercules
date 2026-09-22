@@ -7,26 +7,47 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
     /// Kendi OpenAI-uyumlu proxy'n (CLIProxyAPI tarzı) — abonelik havuzu:
     /// Gemini / Grok / Codex / Claude tek endpoint'te, "bare" model id'leriyle.
     case gateway
+    // Buzz tarzı agent harness'ları: yerel CLI'lar ACP (Agent Client Protocol,
+    // JSON-RPC/NDJSON stdio) üzerinden sürülür — bkz. AgentHarness.swift.
+    case claudeCode
+    case cursor
+    case grok
 
     var id: String { rawValue }
 
-    /// UI'da seçilebilir sağlayıcılar. Codex (ChatGPT hesabı) varsayılan; OpenRouter
-    /// API-key ile alternatif; Gateway kendi CLIProxy'ne bağlanır (abonelik havuzu).
-    static var selectable: [AIProvider] { [.codex, .openRouter, .gateway] }
+    /// UI'da seçilebilir sağlayıcılar — Buzz runtime dörtlüsü: Codex (ChatGPT
+    /// hesabı, native HTTP) + Claude Code / Cursor / Grok (ACP harness).
+    static var selectable: [AIProvider] { [.codex, .claudeCode, .cursor, .grok] }
+
+    /// ACP harness'ı üzerinden mi çalışır? (Codex native Responses API'de kalır.)
+    /// CLI ajanı mı (ACP üzerinden konuşulur)? Codex ikisini birden yapar:
+    /// adaptör kuruluysa ACP, değilse yerleşik `codex exec` istemcisi.
+    var isHarness: Bool {
+        switch self {
+        case .claudeCode, .cursor, .grok, .codex: return true
+        case .openRouter, .gateway: return false
+        }
+    }
 
     var label: String {
         switch self {
         case .openRouter: return "OpenRouter"
-        case .codex: return "Codex (ChatGPT)"
+        case .codex: return "Codex"
         case .gateway: return "Gateway"
+        case .claudeCode: return "Claude Code"
+        case .cursor: return "Cursor"
+        case .grok: return "Grok"
         }
     }
 
     var detail: String {
         switch self {
         case .openRouter: return "API key ile · web araması destekli"
-        case .codex: return "ChatGPT hesabıyla · ~/.codex/auth.json"
+        case .codex: return "ChatGPT hesabıyla · ACP adapter varsa streaming"
         case .gateway: return "Kendi OpenAI-uyumlu proxy'n · abonelik havuzu"
+        case .claudeCode: return "claude CLI · ACP adapter ile"
+        case .cursor: return "cursor-agent CLI · yerleşik ACP"
+        case .grok: return "grok CLI · yerleşik ACP"
         }
     }
 
@@ -35,6 +56,9 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
         case .openRouter: return "globe.americas"
         case .codex: return "person.badge.key"
         case .gateway: return "server.rack"
+        case .claudeCode: return "sparkle"
+        case .cursor: return "cursorarrow"
+        case .grok: return "bolt"
         }
     }
 
@@ -44,6 +68,11 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
         case .openRouter: return "openai/gpt-5.4-mini"
         case .codex: return "gpt-5.6-terra"
         case .gateway: return "gemini-3-flash"
+        // Harness'larda "varsayılan" = CLI'ın kendi seçili modeli; ACP
+        // set_model yalnız listeden özel bir id seçilince denenir.
+        case .claudeCode: return "varsayılan"
+        case .cursor: return "varsayılan"
+        case .grok: return "varsayılan"
         }
     }
 
@@ -62,6 +91,12 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
         case .gateway:
             // "bare" id'ler → CLIProxy abonelik havuzuna gider (proxy'nin sunduğuna göre değişir).
             return ["gemini-3-flash", "gemini-3-pro", "grok-4.3", "gpt-5.5", "gpt-5.4", "claude-sonnet-4.5"]
+        case .claudeCode:
+            return ["varsayılan", "claude-opus-4-5", "claude-sonnet-4-5"]
+        case .cursor:
+            return ["varsayılan"]
+        case .grok:
+            return ["varsayılan"]
         }
     }
 

@@ -7,6 +7,14 @@ import Foundation
 public enum LucideSF {
     public static let map: [String: String] = [
         // Oklar / navigasyon
+        // Eksik kalan eşlemeler — bunlar tabloda yokken "circle-help" (?) çiziliyordu.
+        "star": "star",
+        "ellipsis": "ellipsis",
+        "text.bubble": "message-square",
+        "lock.shield": "shield-check",
+        "arrow.up.doc": "file-up",
+        "play.rectangle": "video",
+        "video": "video",
         "arrow.clockwise": "rotate-cw",
         "arrow.triangle.2.circlepath": "refresh-cw",
         "arrow.up": "arrow-up",

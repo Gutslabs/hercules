@@ -8,24 +8,47 @@
 
 /* Begin PBXBuildFile section */
 		039B8A4EAFE2BAC1BF6129C2 /* AnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */; };
-		0C7EE31B46E6619D6DF30A70 /* SheetChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEF1DCE7BE1D7A3D6E8ED091 /* SheetChrome.swift */; };
+		098350F7A1828BC19E07B497 /* LabComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135B2BEBAE311A881768D1B7 /* LabComponents.swift */; };
+		0E97EADF7B1EAD90003F902F /* LabsRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF1981EE532F9687D1ABF9A /* LabsRing.swift */; };
+		110E13D5A708D238537CC966 /* LabPanelEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB7216964322423014C87452 /* LabPanelEditor.swift */; };
 		122548964C67C3708F322AB5 /* ProgressPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */; };
+		12CF9453DAB40154627A5AA3 /* DietEpochs.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC1B38561EDB2F3D75AEB88C /* DietEpochs.swift */; };
+		143857FF83F546C4ACD2FE30 /* ChartsWatchlist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4108B029A1C7578AA29BEB27 /* ChartsWatchlist.swift */; };
 		14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69080015CD65428F38FBE30D /* CoachEngine.swift */; };
 		14F0E98865BA017B52C041DB /* ProgressPhotosView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E389ED335EE23DC04F102A /* ProgressPhotosView.swift */; };
 		153AD86991809C6942FAD775 /* InstagramImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BC032C788C2D2EB3E167A1 /* InstagramImportView.swift */; };
+		1AE419C61EB7DD373E38E250 /* CoachIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582551457E32E1A35BCBE1B2 /* CoachIdentity.swift */; };
 		21ACCC5E562012AD95D5208D /* InstagramSavedReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF430471CD13582E9A46A802 /* InstagramSavedReader.swift */; };
 		267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35726FCF0FBDC3D66BE44300 /* CoachView.swift */; };
+		2E29ABF1F49964EF1F84F715 /* LabInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70BD2E18A7C9B18D4119624 /* LabInsights.swift */; };
+		318851F3CDDE5FAB978DCFDF /* IrohRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B6588F13CA8C0BA15DE382B /* IrohRelay.swift */; };
+		35E27014315609ABCF03355A /* LabCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC48F46645CE732C05FED32 /* LabCatalog.swift */; };
 		3B829260EF51EF2249000B6A /* InstagramPostScraper.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAA8E80E5F28F4F36E9FB459 /* InstagramPostScraper.swift */; };
 		3F064015E934098D47C4B292 /* CoachOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B52CD3B50D07842A2D8B0D3 /* CoachOrb.swift */; };
+		42E937808217A8D3D25B1939 /* IrohLib in Frameworks */ = {isa = PBXBuildFile; productRef = 4C6BD1ADFA655E5E66CBF220 /* IrohLib */; };
 		47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */; };
 		4DAB83858007EDAADF3847E0 /* FeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */; };
+		4F516078FDD552857608C997 /* LabPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC730F48B301FE26AB2E312 /* LabPanel.swift */; };
 		53811325F79FACCC79BB57BE /* AgentThinkingGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */; };
+		5F318182793E0C2711380BE7 /* ChatComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE33 /* ChatComponents.swift */; };
+		62303165216A95B656E1EAD2 /* IlerlemeEpochs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D3375BCDBD41170C130489 /* IlerlemeEpochs.swift */; };
+		727ECEFB812F8431AD19D54B /* IrohTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894C1BE6C43D6A185C4C1D7C /* IrohTransport.swift */; };
+		7362F04EE1B489AAFA9925E9 /* MobileChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C18A587950E2B4A6570D32E /* MobileChatStore.swift */; };
 		73ED73F714BD97E42AD679CB /* IlerlemeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F96D7091A3C7577FDACEA1F /* IlerlemeView.swift */; };
 		75E12D5F0E82164A8F2BD91F /* ScienceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160926E15F1C6C72BED8B379 /* ScienceEngine.swift */; };
+		76B7CBCC536BE0BAF2BB887A /* LabReportParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ACCA8939A3101586133C7E5 /* LabReportParser.swift */; };
 		7B43615900A045FA31E98D9E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 03DF8B87B93D87BB849E13ED /* AppIcon.icon */; };
+		7CFC0C96F24C717205551223 /* LabInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70BD2E18A7C9B18D4119624 /* LabInsights.swift */; };
 		7FB3E9AFB4ABE3499B22603B /* MemoryCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 394F05242FA02C2B34A51A42 /* MemoryCover.swift */; };
 		85486C8CE6B3C0505C77A9A8 /* FeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */; };
+		85DAB8DE656D4727B23743FD /* MicroNutrientStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CEC168F56BC479A9B07FE44 /* MicroNutrientStore.swift */; };
+		88CA5E2F611F24B76B83A576 /* WorkoutWeek.swift in Sources */ = {isa = PBXBuildFile; fileRef = D862679962364F00938294D3 /* WorkoutWeek.swift */; };
+		8A0652EF982DAF00BD48FA1C /* ChatStoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5B /* ChatStoreModels.swift */; };
+		8A32EED696A3B43252C95BE0 /* IrohRelayHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 174633A9EAC9D71B9C06495F /* IrohRelayHost.swift */; };
 		8C40856532782361B5BF4D39 /* CoachReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECE97950CA296909313971EE /* CoachReport.swift */; };
+		930D0A15E6B570982864DBB3 /* DashboardSade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A096BDEB7A74AFE363B968 /* DashboardSade.swift */; };
+		967EAD2BEF50373862F714C8 /* LabCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC48F46645CE732C05FED32 /* LabCatalog.swift */; };
+		970C817EAC57DC6438042175 /* IrohLib in Frameworks */ = {isa = PBXBuildFile; productRef = 32DE6E7E025D88B1A39372E5 /* IrohLib */; };
 		99562198716286A2FC976567 /* MobileAttachSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F5188C4C0F9AF02660E1C4 /* MobileAttachSurface.swift */; };
 		9CB9FDE57048C677F3E55C60 /* MemoryDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F30B6C89E0F152301D1F2D9 /* MemoryDigest.swift */; };
 		A24E00000000000000000040 /* HerculesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000021 /* HerculesApp.swift */; };
@@ -93,6 +116,7 @@
 		A24E000000000000000000B3 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A24E000000000000000000B4 /* LaunchScreen.storyboard */; };
 		A24E000000000000000000D4 /* HealthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000070 /* HealthService.swift */; };
 		A24E000000000000000000D5 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000071 /* HealthKit.framework */; };
+		A24E00000000000000000B02 /* AgentHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E00000000000000000B01 /* AgentHarness.swift */; };
 		A24E0000000000000000EE03 /* Embeddings in Frameworks */ = {isa = PBXBuildFile; productRef = A24E0000000000000000EE02 /* Embeddings */; };
 		A24E0000000000000000EE06 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = A24E0000000000000000EE05 /* Hub */; };
 		A24E0000000000000000EE10 /* AgentMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE11 /* AgentMemory.swift */; };
@@ -126,45 +150,71 @@
 		A24E0000000000000000EE5E /* MobileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE5F /* MobileComponents.swift */; };
 		A24E0000000000000000EE60 /* PersistenceSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE62 /* PersistenceSupport.swift */; };
 		A24E0000000000000000EE61 /* PersistenceSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000EE62 /* PersistenceSupport.swift */; };
+		A2E4D17ED62AC062153979FE /* LabReportParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ACCA8939A3101586133C7E5 /* LabReportParser.swift */; };
 		A9560AE426EE0116CD6FC068 /* MetricComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3C440E84561367BB0D5EEC /* MetricComponents.swift */; };
+		AEA8BE50BDB3E33B1E379CCB /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000002F /* Card.swift */; };
 		B001A0000000000000000001 /* HerculesMemoryArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A0000000000000000002 /* HerculesMemoryArchive.swift */; };
 		B001A0000000000000000003 /* HerculesMemoryArchiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A0000000000000000004 /* HerculesMemoryArchiveTests.swift */; };
+		B0056B147808BD01466BAFD5 /* CoachIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582551457E32E1A35BCBE1B2 /* CoachIdentity.swift */; };
 		C0A110000000000000000001 /* HerculesIslandBridge in Frameworks */ = {isa = PBXBuildFile; productRef = C0A110000000000000000003 /* HerculesIslandBridge */; };
 		C114BD597A36E197304F2F89 /* ProgressPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */; };
+		C218657DB3D4612BA1E1A0D2 /* MobileIrohPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AEAEAC924131ED3936DC6F0 /* MobileIrohPairing.swift */; };
+		C4549826531D8CD98EB6A4B7 /* LabImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A6C80D389E9060E4D59818E /* LabImportSheet.swift */; };
 		C54E03018F515D2A98FAEA6A /* LucideKit in Frameworks */ = {isa = PBXBuildFile; productRef = 03734D439E9978A22102DDF3 /* LucideKit */; };
 		C6F9E94FA26608AD2A38CF1E /* MetricComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3C440E84561367BB0D5EEC /* MetricComponents.swift */; };
+		CDFC1E37B770E6A502237F77 /* SadeControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689919F92B6587E70B4F6345 /* SadeControls.swift */; };
+		D0038F87D55D91491AF4E93D /* ChatChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24E0000000000000000003B /* ChatChrome.swift */; };
+		DD253E5084025AE739A7DAB7 /* LabsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638C4B74B44B7EBEA9A10B72 /* LabsView.swift */; };
+		DD288FDA7F8BC8A0FD83202E /* AnalizFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 883D9AA974BCA6E9FD5546E1 /* AnalizFlow.swift */; };
 		DF2D6EA1D9DF6D242AF0A9CE /* RecipeExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80620641D342A5C9D39D13D3 /* RecipeExtractor.swift */; };
+		DFBA1B4DB026ED344A3195CA /* DashboardRings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 563078CCBAC2747A015BC7DA /* DashboardRings.swift */; };
 		E4830F58DFD5D75A7E83AE6E /* LucideKit in Frameworks */ = {isa = PBXBuildFile; productRef = F01EAB4664D2EBD5DD701F60 /* LucideKit */; };
 		E9BF3D22FC56821C2AEDFB2C /* AgentThinkingGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */; };
+		E9F6E7DDE43D41A4D18E918A /* CoachOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B52CD3B50D07842A2D8B0D3 /* CoachOrb.swift */; };
 		F10000000000000000000001 /* HerculesCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000004 /* HerculesCoreTests.swift */; };
+		F11D02FE1C231F23EA242CAA /* SadeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DF0A180D60E40D7487ADDB7 /* SadeSheet.swift */; };
 		F20000000000000000000001 /* RemoteAITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* RemoteAITransport.swift */; };
 		F20000000000000000000002 /* RemoteAITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* RemoteAITransport.swift */; };
 		F20000000000000000000003 /* MobileAIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* MobileAIChatView.swift */; };
+		F2940E58434CBE397BCD4B43 /* LabPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC730F48B301FE26AB2E312 /* LabPanel.swift */; };
+		F2FD918399324400A3E11DEF /* MicroNutrition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B74E2C2D41D42A0B9226988 /* MicroNutrition.swift */; };
 /* End PBXBuildFile section */
-
-/* Begin PBXContainerItemProxy section */
-		F10000000000000000000014 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A24E00000000000000000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A24E0000000000000000000B;
-			remoteInfo = Hercules;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		03DF8B87B93D87BB849E13ED /* AppIcon.icon */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		05A096BDEB7A74AFE363B968 /* DashboardSade.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DashboardSade.swift; sourceTree = "<group>"; };
+		0A6C80D389E9060E4D59818E /* LabImportSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabImportSheet.swift; sourceTree = "<group>"; };
+		0DF0A180D60E40D7487ADDB7 /* SadeSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SadeSheet.swift; sourceTree = "<group>"; };
+		135B2BEBAE311A881768D1B7 /* LabComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabComponents.swift; sourceTree = "<group>"; };
 		160926E15F1C6C72BED8B379 /* ScienceEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceEngine.swift; sourceTree = "<group>"; };
+		174633A9EAC9D71B9C06495F /* IrohRelayHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrohRelayHost.swift; sourceTree = "<group>"; };
 		1B52CD3B50D07842A2D8B0D3 /* CoachOrb.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachOrb.swift; sourceTree = "<group>"; };
+		1B6588F13CA8C0BA15DE382B /* IrohRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrohRelay.swift; sourceTree = "<group>"; };
+		2AEAEAC924131ED3936DC6F0 /* MobileIrohPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileIrohPairing.swift; sourceTree = "<group>"; };
 		2F30B6C89E0F152301D1F2D9 /* MemoryDigest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryDigest.swift; sourceTree = "<group>"; };
 		35726FCF0FBDC3D66BE44300 /* CoachView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
 		394F05242FA02C2B34A51A42 /* MemoryCover.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryCover.swift; sourceTree = "<group>"; };
+		3CEC168F56BC479A9B07FE44 /* MicroNutrientStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MicroNutrientStore.swift; sourceTree = "<group>"; };
 		3F3C440E84561367BB0D5EEC /* MetricComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MetricComponents.swift; sourceTree = "<group>"; };
+		4108B029A1C7578AA29BEB27 /* ChartsWatchlist.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChartsWatchlist.swift; sourceTree = "<group>"; };
 		47BC032C788C2D2EB3E167A1 /* InstagramImportView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InstagramImportView.swift; sourceTree = "<group>"; };
 		4F9BBF3F368E0480DA9CC007 /* AnalysisView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnalysisView.swift; sourceTree = "<group>"; };
+		563078CCBAC2747A015BC7DA /* DashboardRings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DashboardRings.swift; sourceTree = "<group>"; };
+		56CAEF6A34198671EB086FD4 /* hercules-iroh-relay */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "hercules-iroh-relay"; sourceTree = BUILT_PRODUCTS_DIR; };
+		582551457E32E1A35BCBE1B2 /* CoachIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachIdentity.swift; sourceTree = "<group>"; };
+		5B74E2C2D41D42A0B9226988 /* MicroNutrition.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MicroNutrition.swift; sourceTree = "<group>"; };
+		638C4B74B44B7EBEA9A10B72 /* LabsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabsView.swift; sourceTree = "<group>"; };
+		689919F92B6587E70B4F6345 /* SadeControls.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SadeControls.swift; sourceTree = "<group>"; };
 		69080015CD65428F38FBE30D /* CoachEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachEngine.swift; sourceTree = "<group>"; };
 		6F96D7091A3C7577FDACEA1F /* IlerlemeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IlerlemeView.swift; sourceTree = "<group>"; };
+		7ACCA8939A3101586133C7E5 /* LabReportParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabReportParser.swift; sourceTree = "<group>"; };
+		7BC730F48B301FE26AB2E312 /* LabPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabPanel.swift; sourceTree = "<group>"; };
+		7C18A587950E2B4A6570D32E /* MobileChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileChatStore.swift; sourceTree = "<group>"; };
 		80620641D342A5C9D39D13D3 /* RecipeExtractor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecipeExtractor.swift; sourceTree = "<group>"; };
+		883D9AA974BCA6E9FD5546E1 /* AnalizFlow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnalizFlow.swift; sourceTree = "<group>"; };
+		894C1BE6C43D6A185C4C1D7C /* IrohTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrohTransport.swift; sourceTree = "<group>"; };
+		8DF1981EE532F9687D1ABF9A /* LabsRing.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabsRing.swift; sourceTree = "<group>"; };
+		8EC48F46645CE732C05FED32 /* LabCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabCatalog.swift; sourceTree = "<group>"; };
 		9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FeedStore.swift; sourceTree = "<group>"; };
 		A24E00000000000000000020 /* Hercules.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hercules.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A24E00000000000000000021 /* HerculesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesApp.swift; sourceTree = "<group>"; };
@@ -219,6 +269,7 @@
 		A24E00000000000000000092 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
 		A24E00000000000000000093 /* SeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedData.swift; sourceTree = "<group>"; };
 		A24E000000000000000000B4 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A24E00000000000000000B01 /* AgentHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentHarness.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE11 /* AgentMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMemory.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE13 /* MemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryManager.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE15 /* EmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingService.swift; sourceTree = "<group>"; };
@@ -248,16 +299,20 @@
 		A24E0000000000000000EE5D /* UserContextMention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserContextMention.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE5F /* MobileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileComponents.swift; sourceTree = "<group>"; };
 		A24E0000000000000000EE62 /* PersistenceSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceSupport.swift; sourceTree = "<group>"; };
+		A70BD2E18A7C9B18D4119624 /* LabInsights.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabInsights.swift; sourceTree = "<group>"; };
+		A9D3375BCDBD41170C130489 /* IlerlemeEpochs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IlerlemeEpochs.swift; sourceTree = "<group>"; };
 		AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentThinkingGlyph.swift; sourceTree = "<group>"; };
 		B001A0000000000000000002 /* HerculesMemoryArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesMemoryArchive.swift; sourceTree = "<group>"; };
 		B001A0000000000000000004 /* HerculesMemoryArchiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesMemoryArchiveTests.swift; sourceTree = "<group>"; };
 		B630C7C2DC1CB5FF1A5F4327 /* ChatPageView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatPageView.swift; sourceTree = "<group>"; };
 		BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressPhoto.swift; sourceTree = "<group>"; };
+		CB7216964322423014C87452 /* LabPanelEditor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LabPanelEditor.swift; sourceTree = "<group>"; };
 		D4F5188C4C0F9AF02660E1C4 /* MobileAttachSurface.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAttachSurface.swift; sourceTree = "<group>"; };
 		D5E389ED335EE23DC04F102A /* ProgressPhotosView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressPhotosView.swift; sourceTree = "<group>"; };
+		D862679962364F00938294D3 /* WorkoutWeek.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkoutWeek.swift; sourceTree = "<group>"; };
 		EAA8E80E5F28F4F36E9FB459 /* InstagramPostScraper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InstagramPostScraper.swift; sourceTree = "<group>"; };
+		EC1B38561EDB2F3D75AEB88C /* DietEpochs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DietEpochs.swift; sourceTree = "<group>"; };
 		ECE97950CA296909313971EE /* CoachReport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachReport.swift; sourceTree = "<group>"; };
-		EEF1DCE7BE1D7A3D6E8ED091 /* SheetChrome.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SheetChrome.swift; sourceTree = "<group>"; };
 		F10000000000000000000003 /* HerculesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HerculesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F10000000000000000000004 /* HerculesCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerculesCoreTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000020 /* HerculesMobile-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "HerculesMobile-Info.plist"; sourceTree = "<group>"; };
@@ -267,6 +322,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		64B9D6C991913763A37197D9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				970C817EAC57DC6438042175 /* IrohLib in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A24E0000000000000000000D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -282,6 +345,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				42E937808217A8D3D25B1939 /* IrohLib in Frameworks */,
 				A24E000000000000000000D5 /* HealthKit.framework in Frameworks */,
 				C54E03018F515D2A98FAEA6A /* LucideKit in Frameworks */,
 			);
@@ -302,6 +366,7 @@
 			children = (
 				A24E00000000000000000004 /* Hercules */,
 				F10000000000000000000005 /* HerculesTests */,
+				E8793872AB6F645F8915E77F /* HerculesIrohRelay */,
 				A24E00000000000000000003 /* Products */,
 				A24E000000000000000000F2 /* Frameworks */,
 			);
@@ -310,6 +375,7 @@
 		A24E00000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				56CAEF6A34198671EB086FD4 /* hercules-iroh-relay */,
 				A24E00000000000000000020 /* Hercules.app */,
 				A24E00000000000000000090 /* HerculesMobile.app */,
 				F10000000000000000000003 /* HerculesTests.xctest */,
@@ -325,6 +391,8 @@
 				A24E00000000000000000022 /* ContentView.swift */,
 				A24E00000000000000000092 /* MobileRootView.swift */,
 				F20000000000000000000005 /* MobileAIChatView.swift */,
+				2AEAEAC924131ED3936DC6F0 /* MobileIrohPairing.swift */,
+				7C18A587950E2B4A6570D32E /* MobileChatStore.swift */,
 				A24E0000000000000000EE5F /* MobileComponents.swift */,
 				A24E00000000000000000093 /* SeedData.swift */,
 				A24E000000000000000000B4 /* LaunchScreen.storyboard */,
@@ -357,6 +425,7 @@
 				A24E0000000000000000007A /* WorkoutLog.swift */,
 				ECE97950CA296909313971EE /* CoachReport.swift */,
 				BD628DAA916B430F80AEFEB4 /* ProgressPhoto.swift */,
+				7BC730F48B301FE26AB2E312 /* LabPanel.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -386,10 +455,16 @@
 				A24E00000000000000000085 /* ResearchLibrary.swift */,
 				A24E00000000000000000089 /* CoachIntelligence.swift */,
 				69080015CD65428F38FBE30D /* CoachEngine.swift */,
+				5B74E2C2D41D42A0B9226988 /* MicroNutrition.swift */,
+				3CEC168F56BC479A9B07FE44 /* MicroNutrientStore.swift */,
 				160926E15F1C6C72BED8B379 /* ScienceEngine.swift */,
 				9BDE0E83BADA11DA7E9BA42F /* FeedStore.swift */,
 				394F05242FA02C2B34A51A42 /* MemoryCover.swift */,
 				2F30B6C89E0F152301D1F2D9 /* MemoryDigest.swift */,
+				8EC48F46645CE732C05FED32 /* LabCatalog.swift */,
+				A70BD2E18A7C9B18D4119624 /* LabInsights.swift */,
+				7ACCA8939A3101586133C7E5 /* LabReportParser.swift */,
+				EC1B38561EDB2F3D75AEB88C /* DietEpochs.swift */,
 			);
 			path = Calculations;
 			sourceTree = "<group>";
@@ -398,6 +473,7 @@
 			isa = PBXGroup;
 			children = (
 				A24E00000000000000000027 /* Colors.swift */,
+				582551457E32E1A35BCBE1B2 /* CoachIdentity.swift */,
 				A24E00000000000000000028 /* Typography.swift */,
 				A24E00000000000000000029 /* Formatters.swift */,
 				AE99D7FEA752E6FB30982C82 /* AgentThinkingGlyph.swift */,
@@ -441,6 +517,17 @@
 				6F96D7091A3C7577FDACEA1F /* IlerlemeView.swift */,
 				D5E389ED335EE23DC04F102A /* ProgressPhotosView.swift */,
 				47BC032C788C2D2EB3E167A1 /* InstagramImportView.swift */,
+				638C4B74B44B7EBEA9A10B72 /* LabsView.swift */,
+				135B2BEBAE311A881768D1B7 /* LabComponents.swift */,
+				0A6C80D389E9060E4D59818E /* LabImportSheet.swift */,
+				CB7216964322423014C87452 /* LabPanelEditor.swift */,
+				A9D3375BCDBD41170C130489 /* IlerlemeEpochs.swift */,
+				563078CCBAC2747A015BC7DA /* DashboardRings.swift */,
+				883D9AA974BCA6E9FD5546E1 /* AnalizFlow.swift */,
+				05A096BDEB7A74AFE363B968 /* DashboardSade.swift */,
+				4108B029A1C7578AA29BEB27 /* ChartsWatchlist.swift */,
+				8DF1981EE532F9687D1ABF9A /* LabsRing.swift */,
+				D862679962364F00938294D3 /* WorkoutWeek.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -454,8 +541,9 @@
 				A24E0000000000000000003B /* ChatChrome.swift */,
 				A24E0000000000000000EE31 /* BottomCenterChatDock.swift */,
 				A24E0000000000000000EE33 /* ChatComponents.swift */,
-				EEF1DCE7BE1D7A3D6E8ED091 /* SheetChrome.swift */,
 				1B52CD3B50D07842A2D8B0D3 /* CoachOrb.swift */,
+				0DF0A180D60E40D7487ADDB7 /* SadeSheet.swift */,
+				689919F92B6587E70B4F6345 /* SadeControls.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -476,7 +564,10 @@
 				A24E0000000000000000003C /* AIProvider.swift */,
 				A24E0000000000000000003D /* CodexAuth.swift */,
 				A24E0000000000000000003E /* CodexClient.swift */,
+				A24E00000000000000000B01 /* AgentHarness.swift */,
 				F20000000000000000000004 /* RemoteAITransport.swift */,
+				174633A9EAC9D71B9C06495F /* IrohRelayHost.swift */,
+				894C1BE6C43D6A185C4C1D7C /* IrohTransport.swift */,
 				A24E00000000000000000070 /* HealthService.swift */,
 				EAA8E80E5F28F4F36E9FB459 /* InstagramPostScraper.swift */,
 				80620641D342A5C9D39D13D3 /* RecipeExtractor.swift */,
@@ -493,6 +584,14 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		E8793872AB6F645F8915E77F /* HerculesIrohRelay */ = {
+			isa = PBXGroup;
+			children = (
+				1B6588F13CA8C0BA15DE382B /* IrohRelay.swift */,
+			);
+			path = HerculesIrohRelay;
+			sourceTree = "<group>";
+		};
 		F10000000000000000000005 /* HerculesTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -505,6 +604,25 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		0B393AED737FDE2AC080CF28 /* hercules-iroh-relay */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E0B8E2B3E6E3954F59C16D59 /* Build configuration list for PBXNativeTarget "hercules-iroh-relay" */;
+			buildPhases = (
+				23EC0AB34D83C5FAC4734172 /* Sources */,
+				64B9D6C991913763A37197D9 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "hercules-iroh-relay";
+			packageProductDependencies = (
+				32DE6E7E025D88B1A39372E5 /* IrohLib */,
+			);
+			productName = "hercules-iroh-relay";
+			productReference = 56CAEF6A34198671EB086FD4 /* hercules-iroh-relay */;
+			productType = "com.apple.product-type.tool";
+		};
 		A24E0000000000000000000B /* Hercules */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A24E00000000000000000010 /* Build configuration list for PBXNativeTarget "Hercules" */;
@@ -543,6 +661,7 @@
 			name = HerculesMobile;
 			packageProductDependencies = (
 				03734D439E9978A22102DDF3 /* LucideKit */,
+				4C6BD1ADFA655E5E66CBF220 /* IrohLib */,
 			);
 			productName = HerculesMobile;
 			productReference = A24E00000000000000000090 /* HerculesMobile.app */;
@@ -603,11 +722,13 @@
 				A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */,
 				A24E0000000000000000EE04 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 				F66D736132D373A0F4704B4D /* XCLocalSwiftPackageReference "LucideKit" */,
+				7D6DDF206A3B7D0EEFE50D0E /* XCRemoteSwiftPackageReference "iroh-ffi" */,
 			);
 			productRefGroup = A24E00000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				0B393AED737FDE2AC080CF28 /* hercules-iroh-relay */,
 				A24E0000000000000000000B /* Hercules */,
 				A24E000000000000000000C0 /* HerculesMobile */,
 				F10000000000000000000010 /* HerculesTests */,
@@ -645,6 +766,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		23EC0AB34D83C5FAC4734172 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				318851F3CDDE5FAB978DCFDF /* IrohRelay.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A24E0000000000000000000C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -698,6 +827,7 @@
 				A24E0000000000000000005A /* AIProvider.swift in Sources */,
 				A24E0000000000000000005B /* CodexAuth.swift in Sources */,
 				A24E0000000000000000005C /* CodexClient.swift in Sources */,
+				A24E00000000000000000B02 /* AgentHarness.swift in Sources */,
 				A24E0000000000000000005D /* WorkoutSession.swift in Sources */,
 				A24E00000000000000000060 /* StepEntry.swift in Sources */,
 				A24E00000000000000000062 /* MonthlyGoal.swift in Sources */,
@@ -725,6 +855,8 @@
 				14676C1AE483419ACFB0A3E6 /* CoachEngine.swift in Sources */,
 				267D342B8F19BE89FEA21CA2 /* CoachView.swift in Sources */,
 				47CDDD18DFC6FABF4D26FB76 /* ChatPageView.swift in Sources */,
+				F2FD918399324400A3E11DEF /* MicroNutrition.swift in Sources */,
+				85DAB8DE656D4727B23743FD /* MicroNutrientStore.swift in Sources */,
 				75E12D5F0E82164A8F2BD91F /* ScienceEngine.swift in Sources */,
 				039B8A4EAFE2BAC1BF6129C2 /* AnalysisView.swift in Sources */,
 				85486C8CE6B3C0505C77A9A8 /* FeedStore.swift in Sources */,
@@ -737,11 +869,30 @@
 				DF2D6EA1D9DF6D242AF0A9CE /* RecipeExtractor.swift in Sources */,
 				21ACCC5E562012AD95D5208D /* InstagramSavedReader.swift in Sources */,
 				153AD86991809C6942FAD775 /* InstagramImportView.swift in Sources */,
-				0C7EE31B46E6619D6DF30A70 /* SheetChrome.swift in Sources */,
 				7FB3E9AFB4ABE3499B22603B /* MemoryCover.swift in Sources */,
 				9CB9FDE57048C677F3E55C60 /* MemoryDigest.swift in Sources */,
 				B001A0000000000000000001 /* HerculesMemoryArchive.swift in Sources */,
 				3F064015E934098D47C4B292 /* CoachOrb.swift in Sources */,
+				1AE419C61EB7DD373E38E250 /* CoachIdentity.swift in Sources */,
+				8A32EED696A3B43252C95BE0 /* IrohRelayHost.swift in Sources */,
+				F2940E58434CBE397BCD4B43 /* LabPanel.swift in Sources */,
+				967EAD2BEF50373862F714C8 /* LabCatalog.swift in Sources */,
+				7CFC0C96F24C717205551223 /* LabInsights.swift in Sources */,
+				76B7CBCC536BE0BAF2BB887A /* LabReportParser.swift in Sources */,
+				DD253E5084025AE739A7DAB7 /* LabsView.swift in Sources */,
+				098350F7A1828BC19E07B497 /* LabComponents.swift in Sources */,
+				C4549826531D8CD98EB6A4B7 /* LabImportSheet.swift in Sources */,
+				110E13D5A708D238537CC966 /* LabPanelEditor.swift in Sources */,
+				12CF9453DAB40154627A5AA3 /* DietEpochs.swift in Sources */,
+				62303165216A95B656E1EAD2 /* IlerlemeEpochs.swift in Sources */,
+				DFBA1B4DB026ED344A3195CA /* DashboardRings.swift in Sources */,
+				DD288FDA7F8BC8A0FD83202E /* AnalizFlow.swift in Sources */,
+				930D0A15E6B570982864DBB3 /* DashboardSade.swift in Sources */,
+				143857FF83F546C4ACD2FE30 /* ChartsWatchlist.swift in Sources */,
+				0E97EADF7B1EAD90003F902F /* LabsRing.swift in Sources */,
+				88CA5E2F611F24B76B83A576 /* WorkoutWeek.swift in Sources */,
+				F11D02FE1C231F23EA242CAA /* SadeSheet.swift in Sources */,
+				CDFC1E37B770E6A502237F77 /* SadeControls.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -776,6 +927,19 @@
 				53811325F79FACCC79BB57BE /* AgentThinkingGlyph.swift in Sources */,
 				99562198716286A2FC976567 /* MobileAttachSurface.swift in Sources */,
 				C6F9E94FA26608AD2A38CF1E /* MetricComponents.swift in Sources */,
+				B0056B147808BD01466BAFD5 /* CoachIdentity.swift in Sources */,
+				D0038F87D55D91491AF4E93D /* ChatChrome.swift in Sources */,
+				AEA8BE50BDB3E33B1E379CCB /* Card.swift in Sources */,
+				5F318182793E0C2711380BE7 /* ChatComponents.swift in Sources */,
+				8A0652EF982DAF00BD48FA1C /* ChatStoreModels.swift in Sources */,
+				E9F6E7DDE43D41A4D18E918A /* CoachOrb.swift in Sources */,
+				7362F04EE1B489AAFA9925E9 /* MobileChatStore.swift in Sources */,
+				727ECEFB812F8431AD19D54B /* IrohTransport.swift in Sources */,
+				C218657DB3D4612BA1E1A0D2 /* MobileIrohPairing.swift in Sources */,
+				4F516078FDD552857608C997 /* LabPanel.swift in Sources */,
+				35E27014315609ABCF03355A /* LabCatalog.swift in Sources */,
+				2E29ABF1F49964EF1F84F715 /* LabInsights.swift in Sources */,
+				A2E4D17ED62AC062153979FE /* LabReportParser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -794,11 +958,23 @@
 		F10000000000000000000015 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = A24E0000000000000000000B /* Hercules */;
-			targetProxy = F10000000000000000000014 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		3842B45EC51ACAD054FB4D4C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ACY2F2P77T;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.5;
+				PRODUCT_NAME = "hercules-iroh-relay";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		A24E00000000000000000011 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1004,7 +1180,7 @@
 				INFOPLIST_FILE = "Hercules/HerculesMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Yemek ve ürünlerin fotoğrafını çekip Koç'a göndererek kalori/makro hesaplatman için kamera kullanılır.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemek fotoğrafını Koç'a gönderip kalori/makro hesaplatman ve Mac bağlantı kodunu okutman için kamera kullanılır.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hercules günlük adım sayını ve yürüme mesafeni okuyup aktivite özetini günceller.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Sohbete fotoğraf eklerken son çekimlerini doğrudan yazı alanının içinde gösterebilmek için fotoğraf kütüphanen okunur.";
@@ -1012,7 +1188,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1044,7 +1220,7 @@
 				INFOPLIST_FILE = "Hercules/HerculesMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Hercules;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Yemek ve ürünlerin fotoğrafını çekip Koç'a göndererek kalori/makro hesaplatman için kamera kullanılır.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemek fotoğrafını Koç'a gönderip kalori/makro hesaplatman ve Mac bağlantı kodunu okutman için kamera kullanılır.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hercules günlük adım sayını ve yürüme mesafeni okuyup aktivite özetini günceller.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Sohbete fotoğraf eklerken son çekimlerini doğrudan yazı alanının içinde gösterebilmek için fotoğraf kütüphanen okunur.";
@@ -1052,7 +1228,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1067,6 +1243,20 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
+		};
+		E6F3DB31427FC3E811DFE35E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ACY2F2P77T;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.5;
+				PRODUCT_NAME = "hercules-iroh-relay";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
 		};
 		F10000000000000000000017 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1142,6 +1332,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		E0B8E2B3E6E3954F59C16D59 /* Build configuration list for PBXNativeTarget "hercules-iroh-relay" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E6F3DB31427FC3E811DFE35E /* Debug */,
+				3842B45EC51ACAD054FB4D4C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		F10000000000000000000016 /* Build configuration list for PBXNativeTarget "HerculesTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1165,6 +1364,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		7D6DDF206A3B7D0EEFE50D0E /* XCRemoteSwiftPackageReference "iroh-ffi" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/n0-computer/iroh-ffi";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.1.0;
+			};
+		};
 		A24E0000000000000000EE01 /* XCRemoteSwiftPackageReference "swift-embeddings" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/jkrukowski/swift-embeddings.git";
@@ -1188,6 +1395,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F66D736132D373A0F4704B4D /* XCLocalSwiftPackageReference "LucideKit" */;
 			productName = LucideKit;
+		};
+		32DE6E7E025D88B1A39372E5 /* IrohLib */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7D6DDF206A3B7D0EEFE50D0E /* XCRemoteSwiftPackageReference "iroh-ffi" */;
+			productName = IrohLib;
+		};
+		4C6BD1ADFA655E5E66CBF220 /* IrohLib */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7D6DDF206A3B7D0EEFE50D0E /* XCRemoteSwiftPackageReference "iroh-ffi" */;
+			productName = IrohLib;
 		};
 		A24E0000000000000000EE02 /* Embeddings */ = {
 			isa = XCSwiftPackageProductDependency;

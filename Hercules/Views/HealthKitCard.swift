@@ -56,7 +56,7 @@ struct HealthKitCard: View {
                 "Bugün",
                 value: Fmt.int(Double(todaysEntry?.steps ?? 0)),
                 unit: "adım",
-                sub: "\(Fmt.int(todaysCalorieBurn)) kcal · \(formatDistance(todaysEntry?.distanceMeters ?? 0))"
+                sub: "\(Fmt.int(todaysCalorieBurn)) kalori · \(formatDistance(todaysEntry?.distanceMeters ?? 0))"
             )
             metricCol(
                 "7 Gün",
@@ -73,7 +73,7 @@ struct HealthKitCard: View {
             metricCol(
                 "Yakım",
                 value: Fmt.int(monthCalories),
-                unit: "kcal",
+                unit: "kalori",
                 sub: "30 gün · 7 gün \(Fmt.int(weekCalories))"
             )
         }
@@ -91,7 +91,7 @@ struct HealthKitCard: View {
                     "Bugün",
                     value: Fmt.int(Double(todaysEntry?.steps ?? 0)),
                     unit: "adım",
-                    sub: "\(Fmt.int(todaysCalorieBurn)) kcal · \(formatDistance(todaysEntry?.distanceMeters ?? 0))"
+                    sub: "\(Fmt.int(todaysCalorieBurn)) kalori · \(formatDistance(todaysEntry?.distanceMeters ?? 0))"
                 )
                 compactMetric(
                     "7 Gün",
@@ -108,7 +108,7 @@ struct HealthKitCard: View {
                 compactMetric(
                     "Yakım",
                     value: Fmt.int(monthCalories),
-                    unit: "kcal",
+                    unit: "kalori",
                     sub: "30 gün · 7 gün \(Fmt.int(weekCalories))"
                 )
             }

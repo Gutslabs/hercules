@@ -1035,6 +1035,64 @@ final class LocalMemoryProvider {
         return restored.count
     }
 
+    /// Kilitli/bozuk kasayı kenara alıp çalışan boş bir kasa açar.
+    ///
+    /// Cihaz anahtarı kaybolduğunda AES-GCM zarfı MATEMATİKSEL olarak açılamaz;
+    /// kilit kalıcıdır ve sayfa aksi halde kalıcı bir çıkmazda kalır. Yine de
+    /// dosya SİLİNMEZ: zaman damgalı bir kopyaya taşınır, böylece anahtar ya da
+    /// bir yedek sonradan çıkarsa ciphertext hâlâ diskte durur.
+    ///
+    /// Eski düz-metin dosyaya dokunulmaz — varsa `load()` onu migrate eder ve
+    /// kayıtlar geri gelir; sıfırlama o durumda veri kaybı değil kurtarmadır.
+    @discardableResult
+    func resetLockedVault() async throws -> URL? {
+        guard !storageState.allowsMutation else { return nil }
+
+        // Sıfırlama diskteki dosyayı yerinden oynatıyor: eski nesil writer'ların
+        // taşınmış kasaya yazma yetkisini önce düşür.
+        automaticWriteGate.invalidate()
+        cancelDeferredWrite()
+        await fileWriter.invalidate(upTo: writeSequence)
+
+        var archivedURL: URL?
+        let fm = FileManager.default
+        if fm.fileExists(atPath: memoryURL.path) {
+            let target = Self.orphanedVaultURL(for: memoryURL)
+            try fm.moveItem(at: memoryURL, to: target)
+            HerculesMemoryVault.harden(target)
+            try Self.synchronizeDirectory(memoryURL.deletingLastPathComponent())
+            archivedURL = target
+        }
+
+        memories = []
+        pendingLegacyCleanup = false
+        loadedFingerprint = nil
+        storageState = .ready
+        // load() diski yeniden okur: düz-metin kalıntı varsa migrate eder,
+        // yoksa boş + .ready ile açılır ve ilk yazım yeni anahtarı üretir.
+        load()
+        postLocalMemoryChanged()
+        return archivedURL
+    }
+
+    /// `agent-memory-kilitli-20260826-0312.herculesbox` — aynı saniyede ikinci bir
+    /// sıfırlama olursa sayaçla ayrışır, var olan bir kopyanın üstüne asla yazılmaz.
+    private static func orphanedVaultURL(for url: URL) -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = formatter.string(from: .now)
+        let dir = url.deletingLastPathComponent()
+        let ext = url.pathExtension
+        var candidate = dir.appendingPathComponent("agent-memory-kilitli-\(stamp).\(ext)")
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = dir.appendingPathComponent("agent-memory-kilitli-\(stamp)-\(suffix).\(ext)")
+            suffix += 1
+        }
+        return candidate
+    }
+
     /// Coach context'ine enjekte edilecek memory seti. Küçük bir canonical çekirdek
     /// + gerçekten alakalı hybrid sonuçlar döner. `limit` KATI tavandır; çok sayıda
     /// core/pin kaydı prompt bütçesini aşamaz.

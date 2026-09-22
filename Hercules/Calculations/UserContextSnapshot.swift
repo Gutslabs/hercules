@@ -15,7 +15,7 @@ extension UserContextSnapshot {
 }
 
 enum SnapshotSection: CaseIterable, Hashable {
-    case profile, latestMeasurement, measurementLog, trend, todayIntake, foodDiary, caloriePeriods, goals, workout, workoutLogs, steps, recipes
+    case profile, latestMeasurement, measurementLog, trend, todayIntake, foodDiary, caloriePeriods, goals, workout, workoutLogs, steps, recipes, labs
 }
 
 enum UserContextSnapshot {
@@ -195,6 +195,10 @@ enum UserContextSnapshot {
            let trend = trendSection(measurements: measurements) {
             output.append(trend)
         }
+        if !requested.intersection([.trend, .goals, .measurementLog]).isEmpty,
+           let epochs = dietEpochsSection(ctx: ctx) {
+            output.append(epochs)
+        }
         if requested.contains(.measurementLog),
            let log = measurementLogSection(measurements, scope: foodScope) {
             output.append(log)
@@ -226,6 +230,10 @@ enum UserContextSnapshot {
 
         if requested.contains(.recipes), let r = recipesSection(ctx: ctx) {
             output.append(r)
+        }
+
+        if requested.contains(.labs), let labs = labsSection(ctx: ctx) {
+            output.append(labs)
         }
 
         guard !output.isEmpty else { return nil }
@@ -280,6 +288,13 @@ enum UserContextSnapshot {
             }
         }
 
+        // Kan tahlili soruları koç sorusu sayılmasa bile panel verisi olmadan
+        // cevap tahmine düşer — bu yüzden kapıdan ÖNCE bakılıyor.
+        if containsAny(lower, labSignals) {
+            sections.insert(.labs)
+            sections.insert(.profile)
+        }
+
         guard AgentQueryClassifier.isCoachQuery(query) else { return sections }
 
         sections.formUnion([.profile, .latestMeasurement, .trend, .goals])
@@ -328,6 +343,7 @@ enum UserContextSnapshot {
         if containsAny(lower, ["tarif", "recipe", "yemek tarifi"]) {
             sections.formUnion([.recipes])
         }
+
 
 
 
@@ -733,6 +749,46 @@ enum UserContextSnapshot {
             lines.append("- Ortalama hız: \(Fmt.signed(pace, digits: 2)) kg/hafta")
         }
         return lines.count > 1 ? lines.joined(separator: "\n") : nil
+    }
+
+    /// Diyet dönemleri (bkz. `DietEpoch`): koç ilerlemeyi AKTİF döneme göre yorumlasın,
+    /// aradaki kilo değişimini diyet performansı sanmasın. Dönem sınırlarındaki kilolar
+    /// için TÜM tartılar okunur — üstteki ölçüm limiti eski bir dönemin başını kesebilir.
+    private static func dietEpochsSection(ctx: ModelContext, now: Date = .now) -> String? {
+        let epochs = DietEpochArchive.load()
+        let weights = TrendAnalysis.points(fetchMeasurements(ctx: ctx), for: .weight)
+        let segments = DietTimeline.segments(epochs: epochs, weights: weights, today: now)
+        guard !segments.isEmpty else { return nil }
+
+        func weightText(_ segment: DietTimeline.Segment) -> String? {
+            guard let start = segment.startWeight else { return nil }
+            guard let end = segment.endWeight, let delta = segment.delta else {
+                return "başlangıç \(Fmt.num(start, digits: 1)) kg"
+            }
+            return "\(Fmt.num(start, digits: 1)) → \(Fmt.num(end, digits: 1)) kg (\(Fmt.signed(delta, digits: 1)) kg)"
+        }
+
+        var lines: [String] = ["[DİYET DÖNEMLERİ]"]
+        lines.append("AI talimatı: Kullanıcı diyetini dönemlere ayırıyor. İlerleme ve ritim yorumunu süren döneme göre yap; ara boyunca olan kilo değişimini diyet performansı gibi değerlendirme.")
+        for segment in segments {
+            let first = Fmt.dateLong.string(from: segment.firstDay)
+            var parts: [String]
+            switch segment.kind {
+            case .epoch(let number, let id):
+                parts = segment.isOngoing
+                    ? ["Dönem \(number) (SÜRÜYOR): \(first) başladı", "\(segment.days). gün"]
+                    : ["Dönem \(number): \(first) → \(Fmt.dateLong.string(from: segment.lastDay))", "\(segment.days) gün"]
+                if let text = weightText(segment) { parts.append(text) }
+                if let note = epochs.first(where: { $0.id == id })?.note { parts.append("not: \(note)") }
+            case .rest:
+                parts = segment.isOngoing
+                    ? ["Ara (SÜRÜYOR, diyet yok): \(first) başladı", "\(segment.days) gün"]
+                    : ["Ara (diyet yok): \(first) → \(Fmt.dateLong.string(from: segment.lastDay))", "\(segment.days) gün"]
+                if let text = weightText(segment) { parts.append(text) }
+            }
+            lines.append("- " + parts.joined(separator: " · "))
+        }
+        return lines.joined(separator: "\n")
     }
 
     private static func todayIntakeSection(ctx: ModelContext) -> String? {
@@ -1198,6 +1254,22 @@ enum UserContextSnapshot {
 
     /// Kayıtlı tarifler — başlık + kısa içerik + kategori. Çok uzarsa kategori
     /// bazlı sayım ve son 10 başlık.
+    /// Tahlil sorusunu yakalayan sinyaller (aksansız/normalize edilmiş metinde aranır).
+    private static let labSignals = [
+        "tahlil", "kan degeri", "kan degerleri", "hemogram", "lab sonuc", "kan sayimi",
+        "vitamin d", "d vitamini", "b12", "ferritin", "testosteron", "tsh", "tiroit", "tiroid",
+        "kolesterol", "ldl", "hdl", "trigliserid", "hba1c", "insulin direnci", "homa",
+        "kreatinin", "karaciger enzim", "demir eksikligi", "folat"
+    ]
+
+    /// Kan tahlili paneli — bayraklar, hesaplanan göstergeler ve tüm değerler.
+    private static func labsSection(ctx: ModelContext) -> String? {
+        var descriptor = FetchDescriptor<LabPanel>(sortBy: [SortDescriptor(\LabPanel.date, order: .reverse)])
+        descriptor.fetchLimit = 3
+        guard let panels = try? ctx.fetch(descriptor), !panels.isEmpty else { return nil }
+        return LabInsights.contextText(panels: panels)
+    }
+
     private static func recipesSection(ctx: ModelContext) -> String? {
         let totalCount = (try? ctx.fetchCount(FetchDescriptor<Recipe>())) ?? 0
         guard totalCount > 0 else { return nil }

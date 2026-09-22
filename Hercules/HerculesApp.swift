@@ -18,16 +18,31 @@ struct HerculesApp: App {
             || testEnvironment["XCTestBundlePath"] != nil
             || testEnvironment["XCInjectBundleInto"] != nil
             || NSClassFromString("XCTestCase") != nil
+        // DEBUG (Xcode) koşusu = İZOLE GELİŞTİRME MODU. İki sebep:
+        //  1. Kurulu (Release) instance arka planda hep çalışır (remote-ai sunucusu);
+        //     tek-instance koruması Debug'ı anında exit(0) ile kapatıyordu — Xcode
+        //     "Finished running" deyip pencere açmıyordu.
+        //  2. Debug canlı store'a BAĞLANMAMALI: Debug imzası CloudKit Development
+        //     ortamına gider, gerçek veri Production'dadır — karışması dup-import
+        //     üretmişti (bkz. DAMAGED store vakası). Debug bu yüzden kendi
+        //     Hercules-dev.store dosyasını kullanır, CloudKit'e hiç dokunmaz.
+        #if DEBUG
+        let isIsolatedDevRun = !isRunningTests
+        #else
+        let isIsolatedDevRun = false
+        #endif
+
         #if os(macOS)
         // TEK-INSTANCE KORUMASI: Aynı SQLite store'u iki süreç açamaz. LaunchAgent
         // (sabah 08/10) uygulama zaten açıkken ikinci bir kopya başlatırsa, store
         // çakışır → "Hercules.store couldn't be opened" + yazımlar geri alınır (veri
         // kaybı). Bu yüzden zaten çalışan bir instance varsa, bu duplicate süreç
         // store'a HİÇ DOKUNMADAN hemen çıkar; açık olan instance işi yürütür.
+        // (İzole dev koşusu ayrı store kullandığı için bu korumadan muaftır.)
         let myPID = ProcessInfo.processInfo.processIdentifier
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
             .filter { $0.processIdentifier != myPID }
-        if !isRunningTests, !others.isEmpty {
+        if !isRunningTests, !isIsolatedDevRun, !others.isEmpty {
             // ODAK ÇALMA YOK: bu duplicate süreç kullanıcıdan değil, arka plandan da
             // doğmuş olabilir (LaunchAgent / login item / `open -gj`). Çalışan
             // instance'ı buradan aktive etmek, kullanıcı başka bir uygulamadayken
@@ -49,29 +64,55 @@ struct HerculesApp: App {
             if !fm.fileExists(atPath: dir.path) {
                 try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             }
+            // İzole dev koşusu kendi store dosyasına yazar — canlı veri kirlenmez.
+            // Dev yolu #if DEBUG içinde: Release derlemesinde hiç var olmaz
+            // (yoksa "will never be executed" uyarısı üretiyordu).
+            #if DEBUG
+            let storeURL = dir.appendingPathComponent(isIsolatedDevRun ? "Hercules-dev.store" : "Hercules.store")
+            #else
             let storeURL = dir.appendingPathComponent("Hercules.store")
+            #endif
             // Entitlement kontrolü container KURULMADAN önce: `.private(...)` verilince
             // SwiftData CloudKit container'ını hemen kuruyor ve entitlement yoksa süreç
             // SIGTRAP ile ölüyor — kontrol eskiden bu satırdan SONRA çalışıyordu.
             let config: ModelConfiguration
             if isRunningTests {
                 config = ModelConfiguration(isStoredInMemoryOnly: true)
-            } else if CloudSyncMonitor.cloudKitEntitlementPresent {
-                config = ModelConfiguration(
-                    url: storeURL,
-                    cloudKitDatabase: .private("iCloud.com.samorai.hercules")
-                )
             } else {
-                config = ModelConfiguration(url: storeURL)
+                #if DEBUG
+                if isIsolatedDevRun {
+                    // CloudKit YOK: Debug, Development ortamına senkron açmasın.
+                    config = ModelConfiguration(url: storeURL)
+                } else if CloudSyncMonitor.cloudKitEntitlementPresent {
+                    config = ModelConfiguration(
+                        url: storeURL,
+                        cloudKitDatabase: .private("iCloud.com.samorai.hercules")
+                    )
+                } else {
+                    config = ModelConfiguration(url: storeURL)
+                }
+                #else
+                if CloudSyncMonitor.cloudKitEntitlementPresent {
+                    config = ModelConfiguration(
+                        url: storeURL,
+                        cloudKitDatabase: .private("iCloud.com.samorai.hercules")
+                    )
+                } else {
+                    config = ModelConfiguration(url: storeURL)
+                }
+                #endif
             }
             let models: [any PersistentModel.Type] = [
-                Measurement.self, ProgressPhoto.self, UserProfile.self, Recipe.self, RecipeVideo.self, FoodEntry.self, FoodPreset.self, WorkoutSession.self, WorkoutTemplateExercise.self, WorkoutProgramArchive.self, WorkoutPlanOverride.self, StepEntry.self, MonthlyGoal.self, WorkoutLog.self, WorkoutExerciseEntry.self, ExerciseSet.self, CoachReport.self, CoachFocusItem.self, CoachRecipe.self, FeedItem.self,
+                Measurement.self, ProgressPhoto.self, UserProfile.self, Recipe.self, RecipeVideo.self, FoodEntry.self, FoodPreset.self, WorkoutSession.self, WorkoutTemplateExercise.self, WorkoutProgramArchive.self, WorkoutPlanOverride.self, StepEntry.self, MonthlyGoal.self, WorkoutLog.self, WorkoutExerciseEntry.self, ExerciseSet.self, CoachReport.self, CoachFocusItem.self, CoachRecipe.self, FeedItem.self, LabPanel.self, LabResult.self,
             ]
             container = try ModelContainer(for: Schema(models), configurations: config)
-            if !isRunningTests {
+            if !isRunningTests, !isIsolatedDevRun {
                 CloudSyncMonitor.shared.start(container: container)
+            }
+            if !isRunningTests {
                 // 1) Önce default profil/workout seed (boşsa) — bu ucuz ve ilk
-                //    kareden önce profil gerekiyor.
+                //    kareden önce profil gerekiyor (dev koşusunda da: boş dev store
+                //    demo veriyle açılır).
                 DemoSeed.seedIfEmpty(container.mainContext)
                 DemoSeed.dedupUserProfiles(container.mainContext)
                 // 2) Geri kalanı İLK KAREDEN SONRA. Bunlar ~13 filtresiz tam-tablo
@@ -81,15 +122,21 @@ struct HerculesApp: App {
                 Task { @MainActor in
                     let ctx = bootContainer.mainContext
                     FoodPresetSeed.upsertDefaults(ctx)
-                    FeedStore.migrateLegacyFile(into: ctx)
                     SyncDataReconciler.reconcile(in: ctx)
+                    // Mikro besin turu AYLIK: zamanı geldiyse kendiliğinden koşar,
+                    // gelmediyse yalnız yeni yemek adlarını tamamlar (bkz. runIfDue).
+                    await MicroNutrientStore.runMonthlyPassIfDue(in: ctx)
                 }
             }
             #if os(macOS)
-            if !isRunningTests {
+            if !isRunningTests, !isIsolatedDevRun {
                 // iPhone'daki Hercules AI isteklerini Tailscale Serve üzerinden alan
                 // loopback-only sunucu. Kimlik/allowlist kontrolü her istekte yapılır.
+                // (Dev koşusunda kapalı: portun sahibi kurulu Release instance'ıdır.)
                 RemoteAIServer.shared.start(context: container.mainContext)
+                // Telefonu VPN profili olmadan bağlayan yardımcı süreç.
+                // Binary yoksa sessizce atlanır; Tailscale yolu çalışmaya devam eder.
+                Task { @MainActor in IrohRelayHost.shared.start() }
             }
             #endif
         } catch {
@@ -101,18 +148,16 @@ struct HerculesApp: App {
         #if os(macOS)
         WindowGroup {
             ContentView()
-                .frame(minWidth: 1100, minHeight: 720)
+                .frame(minWidth: 720, minHeight: 720)
         }
         .modelContainer(container)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(width: 1280, height: 820)
         .commands {
-            // "New" komutu — aktif view'deki ⌘N'yi zaten kullanıyoruz,
-            // burası genel bir kategori başlığı.
-            CommandGroup(replacing: .newItem) {
-                // Boş — her view kendi ⌘N'sini ToolbarItem üzerinden veriyor.
-            }
+            // Sistemin varsayılan "New" menüsü karşılıksız: uygulamada yeni
+            // pencere/belge kavramı yok, ekleme işleri sayfa butonlarından.
+            CommandGroup(replacing: .newItem) {}
         }
         #else
         WindowGroup {

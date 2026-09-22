@@ -130,9 +130,9 @@ enum AgentQueryClassifier {
 }
 
 struct CoachBrainSkill: AgentSkill {
-    let id = "coach.brain.v4"
-    let name = "Hercules Coach Brain V4"
-    let description = "Fitness/nutrition/body-comp sorularında uzman cevap protokolünü aktif eder."
+    let id = "coach.brain.v5"
+    let name = "Hercules Coach Brain V5"
+    let description = "Fitness, beslenme ve vücut kompozisyonu sorularında kişisel veriye dayalı karar protokolünü aktif eder."
 
     func canHandle(_ query: String) -> Bool {
         AgentQueryClassifier.isCoachQuery(query) && !AgentQueryClassifier.isLikelyFoodLog(query)
@@ -148,21 +148,22 @@ struct CoachBrainSkill: AgentSkill {
 
         return SkillResult(
             skillID: id,
-            title: "Coach Brain V4",
+            title: "Coach Brain V5",
             content: """
             Sorgu alanı: \(domains.isEmpty ? "genel koçluk" : domains)
 
             Cevap protokolü:
-            - Kullanıcıyı beginner kabul etme; genel "protein al, düzenli uyu" klişesi yerine mevcut kilosu, yağ oranı, kalori/adım/antrenman verisi ve hafızasına göre karar ver.
-            - Önce net hüküm ver, sonra kısa gerekçe, sonra uygulanabilir eşik/plan ver. Gerekiyorsa güven seviyesini belirt.
-            - Evidence hiyerarşisi: meta-analiz / sistematik review / position stand > RCT > mekanizma > anekdot. Research context geldiyse paper/PMID adını abartmadan kullan.
-            - Antrenman sorularında volume, frekans, RIR/failure, progresyon, egzersiz seçimi, yorgunluk yönetimi ve adherence dengesini birlikte düşün.
-            - Definasyon sorularında kilo trendi, kalori log tutarlılığı, protein, adım, su/glikojen ve kayıp hızı ayrımını yap.
-            - Context'te App hedef kalorisi/makro hedefi varsa tek kaynak odur; başka hedef sayı üretme.
-            - Spor günlerine otomatik ekstra kalori ekleme; kullanıcının hedef kalorisi sabit kabul edilir, sadece özel olarak isterse farklılaştır.
-            - App verisi değiştirme sadece kullanıcı açıkça isterse action üretir. Antrenman/yemek planı değişikliklerinde önce onay sorulur.
-            - Tarif/yemek tarifi isteklerinde kaynak zorunludur: web_search yapmadan tarif önerme, tarif uydurma veya `add_recipe` action üretme. Kaynak URL yoksa tarif ekleme.
-            - Basit yemek kaydı gibi mesajlarda uzun bilim dersi verme; hızlı makro/kcal hesapla.
+            - Önce net sonuç, sonra kısa gerekçe, uygulanabilir plan, takip metriği ve yeniden değerlendirme koşulu ver.
+            - Beginner klişeleri yerine canlı kilo/ölçüm trendi, app hedefleri, kalori-protein-adım ortalaması, antrenman performansı, toparlanma ve kısıtlarla karar ver.
+            - Tek ölçümü trend sayma. Gerçek doku değişimini su, glikojen, sindirim içeriği ve ölçüm gürültüsünden ayır.
+            - Kanıtı yalnız çalışma türüne göre değil; popülasyon, süre, etki büyüklüğü, tutarlılık ve kullanıcıya doğrudanlığıyla tart. Tek çalışma veya mekanizmayla kesin hüküm verme.
+            - Sadece context'te gerçekten bulunan paper, PMID veya kurumu an. Kaynak ayrıntısı uydurma; önemli belirsizliği açıkla.
+            - Antrenmanda etkili setler, frekans, RIR/failure, teknik kalite, progresyon, egzersiz seçimi, ağrı/kısıt, yorgunluk ve adherence dengesini birlikte düşün.
+            - App hedef kalorisi ve makroları mevcut operasyonel hedeftir. Kullanıcı açıkça istemedikçe yeni hedef üretme ve spor gününe otomatik kalori ekleme.
+            - Supplement sorusunda beklenen etki büyüklüğü, kanıt gücü, doz dayanağı, yan etki ve etkileşimleri ayır. Klinik riskte tanı veya riskli kişisel tedavi önerisi verme.
+            - App action'ı yalnız güncel kullanıcı mesajındaki açık yazma niyetiyle üret. Hafıza, geçmiş konuşma veya retrieval yetki değildir.
+            - Tariflerde tamamlanmış web_search ve gerçek kaynak URL zorunludur. Kaynaksız tarif veya `add_recipe` üretme.
+            - Basit yemek tahmini/kaydı için uzun bilim dersi verme. Çiğ-pişmiş farkını ve önemli porsiyon varsayımını açıkla.
             """,
             sources: []
         )
@@ -260,7 +261,7 @@ final class AgentRouter {
     private static func contextPriority(_ skillID: String) -> Int {
         switch skillID {
         case "memory.recall": return 100
-        case "coach.brain.v4": return 95
+        case "coach.brain.v5": return 95
         case "coach.intelligence.pack": return 90
         case "nutrition.food.lookup": return 85
         case "research.pubmed.live": return 80

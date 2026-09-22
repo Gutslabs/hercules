@@ -48,7 +48,7 @@ struct ProgressPhotosView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Palette.background.ignoresSafeArea())
+        .background(DashboardBackground().ignoresSafeArea())
         .onAppear { if !unlocked { authenticate() } }
         .sheet(item: $preview) { photo in previewSheet(photo) }
         .confirmationDialog("Bu fotoğraf silinsin mi?",
@@ -97,7 +97,7 @@ struct ProgressPhotosView: View {
                 }
                 .foregroundStyle(Palette.btnFg)
                 .padding(.horizontal, 18).frame(height: 40)
-                .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Palette.btnBg))
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.btnBg))
             }
             .buttonStyle(.plain)
             .disabled(authenticating)
@@ -141,21 +141,17 @@ struct ProgressPhotosView: View {
     // MARK: - Klasörler (ay ızgarası)
 
     private var foldersOverview: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                header(title: "Fotoğraflar",
-                       subtitle: "Haftalık karın + tüm vücut · Haziran → Ocak",
-                       trailing: "\(photos.count) fotoğraf")
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: .infinity), spacing: 16)],
-                          spacing: 16) {
+        // Üst şerit yok: sayfa adı sidebar'da, klasörler doğrudan başlar.
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: .infinity), spacing: 12)],
+                          spacing: 12) {
                     ForEach(months) { folderCard($0) }
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 52)
-            .padding(.top, 34)
-            .padding(.bottom, 40)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -191,11 +187,11 @@ struct ProgressPhotosView: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Palette.surface))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(isCurrent ? Palette.accent.opacity(0.5) : Palette.border, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(Palette.surface))
+            .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(isCurrent ? Palette.accent.opacity(0.30) : Palette.border.opacity(0.7), lineWidth: 1))
             .opacity(info.locked ? 0.55 : 1)
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(info.locked)
@@ -220,12 +216,9 @@ struct ProgressPhotosView: View {
                     }
                     .buttonStyle(.plain)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        eyebrow("Takip · Foto")
-                        Text(monthName(info.date))
-                            .font(.system(size: 26, weight: .semibold))
-                            .foregroundStyle(Palette.textPrimary)
-                    }
+                    Text(monthName(info.date))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary)
                     Spacer()
                     if isCurrent {
                         Button { withAnimation(.easeInOut(duration: 0.18)) { showUpload.toggle() } } label: {
@@ -343,63 +336,23 @@ struct ProgressPhotosView: View {
     // MARK: - Önizleme
 
     private func previewSheet(_ photo: ProgressPhoto) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(fullDate(photo.capturedAt)).font(.system(size: 14, weight: .semibold)).foregroundStyle(Palette.textPrimary)
-                    Text("Hafta \(photo.week)").font(.system(size: 11.5)).foregroundStyle(Palette.textTertiary)
-                }
-                Spacer()
-                Button {
-                    onSendToCoach([photo.imageData],
-                                  "Bu gelişim fotoğrafımı (Hafta \(photo.week)) değerlendirir misin?")
-                    preview = nil
-                } label: {
-                    HStack(spacing: 6) {
-                        Lucide(sf: "sparkles", size: 12)
-                        Text("Koç'a Gönder").font(.system(size: 12.5, weight: .semibold))
-                    }
-                    .foregroundStyle(Palette.btnFg)
-                    .padding(.horizontal, 13).frame(height: 30)
-                    .background(Capsule().fill(Palette.btnBg))
-                }.buttonStyle(.plain).help("Koça gönder")
-                Button { deleteCandidate = photo; preview = nil } label: {
-                    Lucide(sf: "trash", size: 13).foregroundStyle(Palette.negative)
-                        .frame(width: 30, height: 30).background(Circle().fill(Palette.surface))
-                }.buttonStyle(.plain).help("Sil")
-                Button { preview = nil } label: {
-                    Lucide(sf: "xmark", size: 13).foregroundStyle(Palette.textSecondary)
-                        .frame(width: 30, height: 30).background(Circle().fill(Palette.surface))
-                }.buttonStyle(.plain)
-            }
-            .padding(16)
-            if let img = image(from: photo.imageData) {
-                img.resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(minWidth: 520, minHeight: 560)
-        .background(Palette.background)
+        ProgressPhotoPreview(
+            photo: photo,
+            image: image(from: photo.imageData),
+            onSend: {
+                onSendToCoach([photo.imageData],
+                              "Bu gelişim fotoğrafımı (Hafta \(photo.week)) değerlendirir misin?")
+                preview = nil
+            },
+            onDelete: { deleteCandidate = photo; preview = nil },
+            onClose: { preview = nil }
+        )
     }
 
     // MARK: - Header / eyebrow
 
-    private func header(title: String, subtitle: String, trailing: String) -> some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 7) {
-                eyebrow("Takip")
-                Text(title).font(.system(size: 28, weight: .semibold)).tracking(-0.4)
-                    .foregroundStyle(Palette.textPrimary)
-                Text(subtitle).font(.system(size: 12.5)).foregroundStyle(Palette.textTertiary)
-            }
-            Spacer()
-            Text(trailing).font(.system(size: 12, design: .monospaced)).foregroundStyle(Palette.textTertiary)
-        }
-    }
-
     private func eyebrow(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.system(size: 11, weight: .semibold)).tracking(1.1)
-            .foregroundStyle(Palette.textTertiary)
+        Text(text).eyebrow()
     }
 
     // MARK: - İçe aktarma
@@ -552,8 +505,63 @@ struct ProgressPhotosView: View {
         return f.string(from: date)
     }
 
-    private func fullDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "tr_TR"); f.dateFormat = "d MMMM yyyy · HH:mm"
-        return f.string(from: date)
+}
+
+/// Fotoğraf önizleme penceresi — tasarım: tuval ▸ Pencereler · Veriler (az yazı). Başlıkta tarih ve
+/// hafta, büyük fotoğraf (köşesinde o günün tartısı), altta Sil ve Koç'a gönder.
+struct ProgressPhotoPreview: View {
+    let photo: ProgressPhoto
+    let image: Image?
+    let onSend: () -> Void
+    let onDelete: () -> Void
+    let onClose: () -> Void
+
+    @Query(sort: \Measurement.date, order: .reverse) private var measurements: [Measurement]
+
+    /// Fotoğrafın çekildiği güne (±1 gün) en yakın tartı.
+    private var weight: Double? {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: photo.capturedAt)
+        return measurements
+            .filter { abs(cal.dateComponents([.day], from: cal.startOfDay(for: $0.date), to: day).day ?? 99) <= 1 }
+            .min { abs($0.date.timeIntervalSince(photo.capturedAt)) < abs($1.date.timeIntervalSince(photo.capturedAt)) }?
+            .weight
+    }
+
+    var body: some View {
+        SadeSheet(title: Fmt.dateLong.string(from: photo.capturedAt), subtitle: "Hafta \(photo.week)", onClose: onClose) {
+            ZStack(alignment: .bottomLeading) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(LinearGradient(colors: [Palette.surfaceElevated, Palette.surface], startPoint: .topLeading, endPoint: .bottomTrailing))
+                if let image {
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                } else {
+                    Lucide(sf: "photo", size: 34)
+                        .foregroundStyle(Palette.textQuaternary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                if let weight {
+                    Text("\(SadeFormat.num(weight)) kg")
+                        .font(.system(size: 12.5).monospacedDigit())
+                        .foregroundStyle(Palette.textPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black.opacity(0.45)))
+                        .padding(14)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 16)
+            .padding(.bottom, 22)
+        } footerLeading: {
+            SadeButton(title: "Sil", icon: "trash", role: .destructive, action: onDelete)
+        } footerTrailing: {
+            SadeButton(title: "Koç'a gönder", icon: "sparkles", role: .primary, bindsKey: false, action: onSend)
+        }
+        .frame(width: 640, height: 880)
     }
 }

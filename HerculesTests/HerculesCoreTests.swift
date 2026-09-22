@@ -1603,6 +1603,20 @@ final class ChatActionAuthorizationTests: XCTestCase {
     }
 }
 
+#if os(macOS)
+final class AIClientRoutingTests: XCTestCase {
+    func testCodexChatAlwaysUsesStructuredHerculesClient() {
+        XCTAssertTrue(AIKeyStore.makeClient(for: .codex) is CodexFirstFallbackClient)
+    }
+
+    func testExternalHarnessProvidersStillUseACP() {
+        XCTAssertTrue(AIKeyStore.makeClient(for: .claudeCode) is AcpAgentClient)
+        XCTAssertTrue(AIKeyStore.makeClient(for: .cursor) is AcpAgentClient)
+        XCTAssertTrue(AIKeyStore.makeClient(for: .grok) is AcpAgentClient)
+    }
+}
+#endif
+
 // MARK: - WorkoutSession bounds-safe weekday accessors (decoded/corrupt veri çökmesin)
 
 final class WorkoutSessionWeekdayTests: XCTestCase {
@@ -2061,5 +2075,903 @@ final class SyncDataReconcilerDedupTests: XCTestCase {
         SyncDataReconciler.reconcile(in: ctx)
 
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Recipe>()).count, 2)
+    }
+}
+
+// MARK: - Streaming thread navigation and rendering
+
+final class ChatStreamBufferTests: XCTestCase {
+    func testBurstUsesLatestSnapshot() {
+        var buffer = ChatStreamBuffer()
+        for count in 1...1_000 {
+            buffer.update(String(repeating: "a", count: count))
+        }
+        XCTAssertEqual(buffer.visibleText, "")
+        XCTAssertEqual(buffer.latestText.count, 1_000)
+        while !buffer.isCaughtUp { buffer.advance(isComplete: true) }
+        XCTAssertEqual(buffer.visibleText, String(repeating: "a", count: 1_000))
+        XCTAssertNil(buffer.advance())
+    }
+
+    func testRetryReplacesAlreadyVisiblePrefixAtAnyLength() {
+        for replacement in ["", "xy", "wxyz", "New answer from fallback"] {
+            var buffer = ChatStreamBuffer()
+            buffer.update("abcd")
+            buffer.advance()
+            XCTAssertEqual(buffer.visibleText, "abcd")
+            buffer.update(replacement)
+            buffer.advance()
+            XCTAssertTrue(replacement.hasPrefix(buffer.visibleText))
+            while !buffer.isCaughtUp { buffer.advance(isComplete: true) }
+            XCTAssertEqual(buffer.visibleText, replacement)
+        }
+    }
+
+    func testUnicodeAndWhitespaceSurvivePartialAndFinalUpdates() {
+        var buffer = ChatStreamBuffer()
+        buffer.update("e")
+        buffer.advance()
+        let text = "e\u{301} 👨‍👩‍👧‍👦 👍🏽\n\n  İstanbul\tölçüm"
+        buffer.update(text)
+        while !buffer.isCaughtUp {
+            buffer.advance()
+            XCTAssertTrue(text.hasPrefix(buffer.visibleText))
+        }
+        XCTAssertEqual(buffer.visibleText, text)
+    }
+}
+
+@MainActor
+private final class ControlledChatClient: AIClient {
+    var started = false
+    var finalText = "Tamamlandı"
+    /// Doluysa `finalText` yerine bu sonuç döner (yemek kartı / action testleri).
+    var finalResult: AIFoodResult?
+    /// Modele giden son bağlam — host'un eklediği notları doğrulamak için.
+    var lastUserContext: String?
+    var onUpdate: (@MainActor (String) -> Void)?
+    private var continuation: AsyncThrowingStream<String, Error>.Continuation?
+
+    func send(
+        history: [ChatTurn], newUserText: String, userContext: String?, images: [Data],
+        onSearchStart: @MainActor @escaping (String) -> Void,
+        onMessageUpdate: @MainActor @escaping (String) -> Void
+    ) async throws -> (AIFoodResult, AIWebSearchEvidence?) {
+        let stream = AsyncThrowingStream<String, Error> { continuation = $0 }
+        onUpdate = onMessageUpdate
+        lastUserContext = userContext
+        started = true
+        onSearchStart("Test araması")
+        for try await text in stream { onMessageUpdate(text) }
+        try Task.checkCancellation()
+        return (finalResult ?? AIFoodResult(message: finalText), nil)
+    }
+
+    func emit(_ text: String) { continuation?.yield(text) }
+    func finish() { continuation?.finish() }
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+        throw URLError(.unsupportedURL)
+    }
+}
+
+@MainActor
+final class ChatStreamingNavigationTests: XCTestCase {
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while !condition(), Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(condition(), "Chat state did not settle before the deadline")
+    }
+
+    func testFirstThreadOpensBeforeFirstTokenAndDuringStreaming() async throws {
+        let client = ControlledChatClient()
+        let store = ChatStore(inMemory: true, client: client, agentRouter: AgentRouter(skills: []))
+        store.input = "İlk soru"
+        let id = try XCTUnwrap(store.currentConversationID)
+        store.startSend()
+        defer { store.stop(); client.finish() }
+        // The channel can be clicked before the send task has even appended its turns.
+        XCTAssertTrue(store.selectConversation(id))
+        try await waitUntil { client.started }
+        let placeholderID = try XCTUnwrap(store.messages.last?.id)
+        XCTAssertEqual(store.messages.count, 2)
+        XCTAssertEqual(store.messages.last?.text, "")
+        store.input = "Sonraki mesaj taslağı"
+        XCTAssertTrue(store.selectConversation(id))
+        XCTAssertEqual(store.messages.last?.id, placeholderID)
+        XCTAssertEqual(store.searchingFor, "Test araması")
+        XCTAssertEqual(store.input, "Sonraki mesaj taslağı")
+
+        client.emit("Kısmi yanıt")
+        try await waitUntil { store.messages.last?.text == "Kısmi yanıt" }
+        for _ in 0..<3 { XCTAssertTrue(store.selectConversation(id)) }
+        XCTAssertEqual(store.messages.last?.id, placeholderID)
+        XCTAssertEqual(store.messages.last?.text, "Kısmi yanıt")
+        XCTAssertTrue(store.isSending)
+
+        client.finish()
+        try await waitUntil { !store.isSending }
+        XCTAssertEqual(store.messages.last?.text, client.finalText)
+        XCTAssertEqual(store.messages.last?.id, placeholderID)
+        XCTAssertEqual(store.conversations.first?.messages, store.messages)
+        XCTAssertEqual(store.input, "Sonraki mesaj taslağı")
+    }
+
+    func testOtherConversationCannotReplaceLiveSendTarget() async throws {
+        let client = ControlledChatClient()
+        let store = ChatStore(inMemory: true, client: client, agentRouter: AgentRouter(skills: []))
+        let activeID = try XCTUnwrap(store.currentConversationID)
+        let other = ChatConversation(title: "Önceki sohbet", messages: [ChatTurn(role: .user, text: "Eski soru")])
+        store.conversations.append(other)
+        store.input = "Yeni soru"
+        store.startSend()
+        defer { store.stop(); client.finish() }
+        try await waitUntil { client.started }
+        XCTAssertFalse(store.selectConversation(other.id))
+        XCTAssertFalse(store.selectConversation(UUID()))
+        XCTAssertEqual(store.currentConversationID, activeID)
+        client.finish()
+        try await waitUntil { !store.isSending }
+        XCTAssertTrue(store.selectConversation(other.id))
+        XCTAssertEqual(store.messages, other.messages)
+        XCTAssertEqual(store.conversations.first { $0.id == activeID }?.messages.last?.text, client.finalText)
+    }
+
+    func testStopPreservesBufferedTextAndIgnoresLateCallback() async throws {
+        let client = ControlledChatClient()
+        let store = ChatStore(inMemory: true, client: client, agentRouter: AgentRouter(skills: []))
+        store.input = "Soru"
+        store.startSend()
+        defer { store.stop(); client.finish() }
+        try await waitUntil { client.started }
+        client.onUpdate?("Henüz gösterilmemiş tam kısmi yanıt")
+        store.stop()
+        try await waitUntil { !store.isSending }
+        XCTAssertEqual(store.messages.last?.text, "Henüz gösterilmemiş tam kısmi yanıt")
+        client.onUpdate?("Geç gelen eski yanıt")
+        XCTAssertEqual(store.messages.last?.text, "Henüz gösterilmemiş tam kısmi yanıt")
+        XCTAssertNil(store.lastError)
+    }
+
+    func testReopeningCurrentThreadPreservesUnsentDraft() throws {
+        let store = ChatStore(inMemory: true, client: ControlledChatClient(), agentRouter: AgentRouter(skills: []))
+        let id = try XCTUnwrap(store.currentConversationID)
+        store.input = "Gönderilmemiş taslak"
+        store.pendingImages = [Data([1, 2, 3])]
+        XCTAssertTrue(store.selectConversation(id))
+        XCTAssertEqual(store.input, "Gönderilmemiş taslak")
+        XCTAssertEqual(store.pendingImages, [Data([1, 2, 3])])
+    }
+}
+
+@MainActor
+final class ChatDailyThreadTests: XCTestCase {
+    private func makeStore() -> ChatStore {
+        ChatStore(inMemory: true, client: ControlledChatClient(), agentRouter: AgentRouter(skills: []))
+    }
+
+    private func local(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    }
+
+    func testDailyThreadIdentityIsStablePerCalendarDay() {
+        let earlyMorning = local(2026, 9, 7, 0, 5)
+        let lateNight = local(2026, 9, 7, 23, 50)
+        let nextDay = local(2026, 9, 8, 0, 1)
+
+        XCTAssertEqual(ChatDailyThread.dayKey(for: earlyMorning), "2026-09-07")
+        XCTAssertEqual(ChatDailyThread.id(for: earlyMorning), ChatDailyThread.id(for: lateNight))
+        XCTAssertNotEqual(ChatDailyThread.id(for: earlyMorning), ChatDailyThread.id(for: nextDay))
+        // RFC 4122: ad-tabanlı sürüm nibble'ı 5, varyant 10xx.
+        let text = ChatDailyThread.id(for: earlyMorning).uuidString
+        XCTAssertEqual(text[text.index(text.startIndex, offsetBy: 14)], "5")
+        XCTAssertTrue("89AB".contains(text[text.index(text.startIndex, offsetBy: 19)]))
+
+        let thread = ChatDailyThread.makeConversation(for: earlyMorning)
+        XCTAssertTrue(ChatDailyThread.isDaily(thread))
+        XCTAssertEqual(thread.title, "7 Eylül")
+        XCTAssertEqual(thread.messages.map(\.role), [.assistant])
+        XCTAssertEqual(thread.messages.first?.text, "7 Eylül Pazartesi")
+        XCTAssertFalse(ChatDailyThread.isDaily(ChatConversation(title: "7 Eylül", createdAt: earlyMorning)))
+    }
+
+    func testEnsureDailyThreadOpensOncePerDayAndSurvivesDeletionUntilTomorrow() throws {
+        let store = makeStore()
+        // Gerçek saate göreli: geçmiş 7 günden eski turları budar, sabit bir takvim
+        // günü (eskiden 7 Eylül 2026) o pencereden çıkınca test kendiliğinden kırılıyordu.
+        let midnight = Calendar.current.startOfDay(for: .now)
+        let id = ChatDailyThread.id(for: midnight)
+
+        XCTAssertTrue(store.ensureDailyThread(now: midnight, trigger: .dayChange))
+        XCTAssertEqual(store.currentConversationID, id)
+        XCTAssertEqual(store.currentConversationTitle, ChatDailyThread.title(for: midnight))
+        XCTAssertEqual(store.messages.map(\.role), [.assistant])
+        XCTAssertEqual(store.conversations.filter { ChatDailyThread.isDaily($0) }.count, 1)
+
+        // Aynı gün tekrar tetiklenince ikinci thread açılmaz.
+        XCTAssertFalse(store.ensureDailyThread(now: midnight.addingTimeInterval(3_600), trigger: .activation))
+        XCTAssertFalse(store.ensureDailyThread(now: midnight.addingTimeInterval(7_200), trigger: .launch))
+        XCTAssertEqual(store.conversations.filter { ChatDailyThread.isDaily($0) }.count, 1)
+
+        // Kullanıcı silerse o gün geri gelmez; ertesi gün yenisi açılır.
+        store.deleteConversation(id)
+        XCTAssertFalse(store.ensureDailyThread(now: midnight.addingTimeInterval(10_800), trigger: .launch))
+        XCTAssertFalse(store.conversations.contains { $0.id == id })
+
+        let tomorrow = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: midnight))
+        XCTAssertTrue(store.ensureDailyThread(now: tomorrow, trigger: .dayChange))
+        XCTAssertEqual(store.currentConversationID, ChatDailyThread.id(for: tomorrow))
+        XCTAssertEqual(store.currentConversationTitle, ChatDailyThread.title(for: tomorrow))
+    }
+
+    func testDayChangeKeepsRecentlyActiveThreadAndHandsOffOnceIdle() throws {
+        let store = makeStore()
+        // Gerçek saate göreli (bkz. yukarıdaki not): 7 günlük saklama penceresinin içinde kalır.
+        let midnight = Calendar.current.startOfDay(for: .now)
+        let activeID = try XCTUnwrap(store.currentConversationID)
+        store.messages = [
+            ChatTurn(role: .user, text: "gece atıştırması", createdAt: midnight.addingTimeInterval(-5 * 60)),
+            ChatTurn(role: .assistant, text: "Kaydettim.", createdAt: midnight.addingTimeInterval(-4 * 60)),
+        ]
+
+        // Kullanıcı 5 dakika önce yazıyordu: thread açılır ama pencere yerinde kalır.
+        XCTAssertTrue(store.ensureDailyThread(now: midnight, trigger: .dayChange))
+        XCTAssertEqual(store.currentConversationID, activeID)
+        XCTAssertEqual(store.conversations.first { $0.id == activeID }?.messages.count, 2)
+        XCTAssertTrue(store.conversations.contains { $0.id == ChatDailyThread.id(for: midnight) })
+
+        // Yarım saat sessizlikten sonra açılış günün thread'ine geçer.
+        XCTAssertFalse(store.ensureDailyThread(now: midnight.addingTimeInterval(31 * 60), trigger: .launch))
+        XCTAssertEqual(store.currentConversationID, ChatDailyThread.id(for: midnight))
+        XCTAssertEqual(store.messages.first?.text, ChatDailyThread.openerText(for: midnight))
+    }
+
+    func testUnsentDraftAndDeliberateNavigationAreNotHijacked() throws {
+        let store = makeStore()
+        let midnight = local(2026, 9, 7, 0, 0)
+        let draftID = try XCTUnwrap(store.currentConversationID)
+        store.input = "yarım kalan mesaj"
+
+        XCTAssertTrue(store.ensureDailyThread(now: midnight, trigger: .dayChange))
+        XCTAssertEqual(store.currentConversationID, draftID)
+        XCTAssertEqual(store.input, "yarım kalan mesaj")
+
+        store.input = ""
+        XCTAssertFalse(store.ensureDailyThread(now: midnight, trigger: .launch))
+        XCTAssertEqual(store.currentConversationID, ChatDailyThread.id(for: midnight))
+
+        // Eski bir thread'i okurken pencereye dönmek ya da bir gönderimin bitmesi geçiş yaptırmaz.
+        let older = ChatConversation(
+            title: "3 eylül",
+            messages: [ChatTurn(role: .user, text: "3 eylül", createdAt: local(2026, 9, 3, 9, 0))],
+            createdAt: local(2026, 9, 3, 9, 0),
+            updatedAt: local(2026, 9, 3, 9, 0)
+        )
+        store.conversations.append(older)
+        XCTAssertTrue(store.selectConversation(older.id))
+        XCTAssertFalse(store.ensureDailyThread(now: midnight.addingTimeInterval(4 * 3_600), trigger: .activation))
+        XCTAssertFalse(store.ensureDailyThread(now: midnight.addingTimeInterval(4 * 3_600), trigger: .sendFinished))
+        XCTAssertEqual(store.currentConversationID, older.id)
+    }
+
+    // MARK: Kayıt günü — geçmiş bir günün thread'i o güne yazar
+
+    func testLogDayFollowsTheDailyThreadNotToday() {
+        let cal = Calendar.current
+        let now = local(2026, 9, 22, 14, 30)
+        let sunday = ChatDailyThread.makeConversation(for: local(2026, 9, 20, 0, 0))
+        let today = ChatDailyThread.makeConversation(for: local(2026, 9, 22, 0, 5))
+        // Aynı güne elle açılmış, tarih başlıklı ama günün thread'i OLMAYAN sohbet.
+        let freeform = ChatConversation(title: "20 eylül", createdAt: local(2026, 9, 20, 9, 0))
+
+        XCTAssertEqual(ChatDailyThread.logDayOffset(for: sunday, now: now), -2)
+        XCTAssertEqual(ChatDailyThread.logDayOffset(for: today, now: now), 0)
+        XCTAssertEqual(ChatDailyThread.logDayOffset(for: freeform, now: now), 0)
+        XCTAssertEqual(ChatDailyThread.logDayOffset(for: nil, now: now), 0)
+
+        // Gün thread'den, saat şimdiden: öğün o günün akışında makul bir yerde durur.
+        let logged = ChatDailyThread.logDate(for: sunday, now: now)
+        XCTAssertEqual(cal.dateComponents([.year, .month, .day, .hour, .minute], from: logged),
+                       DateComponents(year: 2026, month: 9, day: 20, hour: 14, minute: 30))
+        XCTAssertEqual(ChatDailyThread.logDate(for: today, now: now), now)
+        XCTAssertEqual(ChatDailyThread.logDate(for: freeform, now: now), now)
+
+        // Saat ileri alınmış/bozuk bir cihazda "gelecek günün thread'i" geleceğe yazdırmaz.
+        let future = ChatDailyThread.makeConversation(for: local(2026, 9, 25, 0, 0))
+        XCTAssertEqual(ChatDailyThread.logDayOffset(for: future, now: now), 0)
+
+        // Kök mesaj 7 günlük saklamayla silinse de gün `createdAt`'ten okunur.
+        var pruned = sunday
+        pruned.messages = []
+        XCTAssertEqual(ChatDailyThread.logDayOffset(for: pruned, now: now), -2)
+
+        XCTAssertEqual(ChatDailyThread.loggedPhrase(on: logged, now: now), "20 Eylül gününe eklendi")
+        XCTAssertEqual(ChatDailyThread.loggedPhrase(on: now, now: now), "bugüne eklendi")
+        XCTAssertEqual(ChatDailyThread.loggedPhrase(on: now, sentenceStart: true, now: now), "Bugüne eklendi")
+
+        XCTAssertNil(ChatDailyThread.contextNote(for: today, now: now))
+        XCTAssertNil(ChatDailyThread.contextNote(for: freeform, now: now))
+        XCTAssertTrue(ChatDailyThread.contextNote(for: sunday, now: now)?.contains("20 Eylül Pazar") == true)
+    }
+
+    func testFoodLoggedFromPastDailyThreadLandsOnThatDay() async throws {
+        let container = try ModelContainer(for: FoodEntry.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let ctx = container.mainContext
+        let client = ControlledChatClient()
+        var action = AIAppAction(tool: .logFood)
+        action.name = "Tavuk pilav"
+        action.grams = 300
+        action.calories = 520
+        client.finalResult = AIFoodResult(name: "Tavuk pilav", grams: 300, calories: 520,
+                                          message: "Ekledim.", actions: [action])
+        let store = ChatStore(inMemory: true, client: client, agentRouter: AgentRouter(skills: []))
+
+        let cal = Calendar.current
+        let twoDaysAgo = try XCTUnwrap(cal.date(byAdding: .day, value: -2, to: .now))
+        let thread = ChatDailyThread.makeConversation(for: twoDaysAgo)
+        store.conversations.append(thread)
+        XCTAssertTrue(store.selectConversation(thread.id))
+        XCTAssertEqual(store.currentLogDayOffset, -2)
+
+        store.input = "300 g tavuk pilav yedim, ekle"
+        store.startSend(ctx: ctx)
+        defer { store.stop(); client.finish() }
+        let settle = Date().addingTimeInterval(3)
+        while !client.started, Date() < settle { try await Task.sleep(nanoseconds: 10_000_000) }
+        client.finish()
+        while store.isSending, Date() < settle { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertFalse(store.isSending)
+
+        // Otomatik `log_food` bugüne değil, thread'in gününe yazıldı.
+        let entries = try ctx.fetch(FetchDescriptor<FoodEntry>())
+        XCTAssertEqual(entries.count, 1)
+        let entry = try XCTUnwrap(entries.first)
+        XCTAssertTrue(cal.isDate(entry.date, inSameDayAs: twoDaysAgo))
+        XCTAssertFalse(cal.isDateInToday(entry.date))
+
+        // Kartın "eklendi" şeridi ve action sonucu da aynı günü gösterir.
+        let turn = try XCTUnwrap(store.messages.last)
+        XCTAssertTrue(turn.saved)
+        XCTAssertEqual(turn.savedFoodDate, entry.date)
+        XCTAssertEqual(turn.actions.first?.status, .applied)
+        XCTAssertEqual(turn.actions.first?.resultMessage,
+                       "Tavuk pilav \(Fmt.dayMonth.string(from: twoDaysAgo)) gününe eklendi")
+        // Model kaydı doğru günle anabilsin diye thread günü bağlamda gitti.
+        XCTAssertTrue(client.lastUserContext?.contains("[THREAD GÜNÜ]") == true)
+    }
+
+    func testFoodLoggedFromTodaysThreadStillLandsOnToday() async throws {
+        let container = try ModelContainer(for: FoodEntry.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let ctx = container.mainContext
+        let client = ControlledChatClient()
+        var action = AIAppAction(tool: .logFood)
+        action.name = "Yulaf"
+        action.grams = 80
+        action.calories = 300
+        client.finalResult = AIFoodResult(message: "Ekledim.", actions: [action])
+        let store = ChatStore(inMemory: true, client: client, agentRouter: AgentRouter(skills: []))
+        store.ensureDailyThread(trigger: .launch)
+        XCTAssertEqual(store.currentConversationID, ChatDailyThread.id(for: .now))
+        XCTAssertEqual(store.currentLogDayOffset, 0)
+
+        store.input = "80 g yulaf yedim, ekle"
+        store.startSend(ctx: ctx)
+        defer { store.stop(); client.finish() }
+        let settle = Date().addingTimeInterval(3)
+        while !client.started, Date() < settle { try await Task.sleep(nanoseconds: 10_000_000) }
+        client.finish()
+        while store.isSending, Date() < settle { try await Task.sleep(nanoseconds: 10_000_000) }
+
+        let entry = try XCTUnwrap(try ctx.fetch(FetchDescriptor<FoodEntry>()).first)
+        XCTAssertTrue(Calendar.current.isDateInToday(entry.date))
+        XCTAssertEqual(store.messages.last?.actions.first?.resultMessage, "Yulaf bugüne eklendi")
+        XCTAssertFalse(client.lastUserContext?.contains("[THREAD GÜNÜ]") == true)
+    }
+}
+
+final class ChatPaneLayoutTests: XCTestCase {
+    func testPortraitUsesEntireAvailableColumnEvenWithWideSavedPreference() {
+        for width in [0.0, 360, 492, 720, 792, 859] {
+            let layout = ChatPaneLayout(availableWidth: width, preferredThreadWidth: 1_400)
+            XCTAssertTrue(layout.isCompact)
+            XCTAssertEqual(layout.threadWidth, width)
+        }
+    }
+
+    func testWideLayoutKeepsBothColumnsWithinAvailableSpace() {
+        for width in [860.0, 992, 1_400] {
+            for preference in [200.0, 380, 2_000] {
+                let layout = ChatPaneLayout(availableWidth: width, preferredThreadWidth: preference)
+                XCTAssertFalse(layout.isCompact)
+                XCTAssertGreaterThanOrEqual(layout.threadWidth, 340)
+                XCTAssertGreaterThanOrEqual(width - layout.threadWidth - 1, 300)
+            }
+        }
+    }
+}
+
+@MainActor
+final class ChatInteractionTests: XCTestCase {
+    private func makeStore(_ client: ControlledChatClient? = nil) -> ChatStore {
+        ChatStore(inMemory: true, client: client ?? ControlledChatClient(), agentRouter: AgentRouter(skills: []))
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(condition())
+    }
+
+    func testRepeatedFoodSaveUsesLiveStateAndPreservesChosenDate() throws {
+        let container = try ModelContainer(for: FoodEntry.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let ctx = container.mainContext
+        let store = makeStore()
+        let food = AIFoodResult(name: "Test öğünü", grams: 200, calories: 450,
+                               protein_g: 30, carbs_g: 40, fat_g: 10, message: "Öğün")
+        let turn = ChatTurn(role: .assistant, text: food.message, food: food)
+        store.messages = [turn]
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        for _ in 0..<100 { store.saveFood(in: turn, ctx: ctx, on: yesterday) }
+        let entries = try ctx.fetch(FetchDescriptor<FoodEntry>())
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.date, yesterday)
+        XCTAssertEqual(entries.first?.calories, 450)
+        XCTAssertTrue(store.messages[0].saved)
+        XCTAssertEqual(store.messages[0].savedFoodDate, yesterday)
+
+        // A stale card from a deleted or previously selected thread cannot save.
+        store.messages = []
+        store.saveFood(in: turn, ctx: ctx)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<FoodEntry>()), 1)
+    }
+
+    func testDeletingSelectedThreadMovesToRemainingThreadAndDoesNotReappear() throws {
+        let store = makeStore()
+        let removedID = try XCTUnwrap(store.currentConversationID)
+        store.messages = [ChatTurn(role: .user, text: "Silinecek")]
+        let kept = ChatConversation(title: "Kalacak", messages: [ChatTurn(role: .user, text: "Kalan mesaj")])
+        store.conversations.append(kept)
+        store.pendingImages = [Data([1])]
+        XCTAssertTrue(store.deleteConversation(removedID))
+        XCTAssertEqual(store.currentConversationID, kept.id)
+        XCTAssertEqual(store.messages, kept.messages)
+        XCTAssertTrue(store.pendingImages.isEmpty)
+        XCTAssertFalse(store.remoteHistorySnapshot().conversations.contains { $0.id == removedID })
+        XCTAssertFalse(store.deleteConversation(removedID))
+    }
+
+    func testDeletingOtherThreadWhileSendingDoesNotStopCurrentReply() async throws {
+        let client = ControlledChatClient()
+        let store = makeStore(client)
+        let activeID = store.currentConversationID
+        let removed = ChatConversation(title: "Silinecek", messages: [ChatTurn(role: .user, text: "Eski mesaj")])
+        store.conversations.append(removed)
+        store.input = "Yeni soru"
+        store.startSend()
+        defer { store.stop(); client.finish() }
+        try await waitUntil { client.started }
+        XCTAssertTrue(store.deleteConversation(removed.id))
+        XCTAssertFalse(store.conversations.contains { $0.id == removed.id })
+        XCTAssertEqual(store.currentConversationID, activeID)
+        XCTAssertTrue(store.isSending)
+        client.finish()
+        try await waitUntil { !store.isSending }
+        XCTAssertEqual(store.messages.last?.text, client.finalText)
+    }
+
+    func testDeletingStreamingThreadCancelsBeforeSwitchAndRejectsLateCallbacks() async throws {
+        let client = ControlledChatClient()
+        let store = makeStore(client)
+        let removedID = try XCTUnwrap(store.currentConversationID)
+        let kept = ChatConversation(title: "Kalacak", messages: [ChatTurn(role: .user, text: "Kalan mesaj")])
+        store.conversations.append(kept)
+        store.input = "Yeni soru"
+        store.startSend()
+        defer { store.stop(); client.finish() }
+        try await waitUntil { client.started }
+        client.onUpdate?("Kısmi yanıt")
+        XCTAssertTrue(store.deleteConversation(removedID))
+        try await waitUntil { !store.isSending }
+        client.onUpdate?("Geç gelen yanıt")
+        XCTAssertEqual(store.currentConversationID, kept.id)
+        XCTAssertEqual(store.messages, kept.messages)
+        XCTAssertFalse(store.remoteHistorySnapshot().conversations.contains { $0.id == removedID })
+    }
+
+    func testDeletingRestoredDailyThreadMarksTodayAsDismissed() {
+        let store = makeStore()
+        let daily = ChatDailyThread.makeConversation(for: .now)
+        store.conversations = [daily]
+        store.currentConversationID = daily.id
+        store.messages = daily.messages
+        XCTAssertTrue(store.deleteConversation(daily.id))
+        XCTAssertFalse(store.ensureDailyThread(trigger: .activation))
+        XCTAssertFalse(store.conversations.contains { $0.id == daily.id })
+    }
+}
+
+// MARK: - Diyet dönemleri (epoch)
+
+final class DietTimelineTests: XCTestCase {
+    private let cal = Calendar.current
+
+    private func day(_ month: Int, _ day: Int, hour: Int = 0) -> Date {
+        cal.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour))!
+    }
+
+    private func weight(_ month: Int, _ d: Int, _ value: Double) -> TrendPoint {
+        TrendPoint(date: day(month, d, hour: 8), value: value)
+    }
+
+    func testEpochsAndBreakTileTheCalendarWithoutGaps() {
+        let first = DietEpoch(start: day(5, 18), lastDay: day(8, 3))
+        let second = DietEpoch(start: day(9, 22), startWeight: 86)
+        let segments = DietTimeline.segments(epochs: [first, second], weights: [], today: day(9, 22, hour: 15))
+
+        XCTAssertEqual(segments.map(\.isEpoch), [true, false, true])
+        XCTAssertEqual(segments.map(\.days), [78, 49, 1])          // 18 May–3 Ağu · 4 Ağu–21 Eyl · 22 Eyl
+        XCTAssertEqual(segments.map(\.isOngoing), [false, false, true])
+        XCTAssertEqual(segments[1].firstDay, day(8, 4))
+        XCTAssertEqual(segments[1].lastDay, day(9, 21))
+        // Parçalar boşluksuz döşenir: toplam = ilk başlangıçtan bugüne (dahil) gün sayısı.
+        XCTAssertEqual(segments.map(\.days).reduce(0, +),
+                       DietTimeline.inclusiveDays(from: day(5, 18), to: day(9, 22)))
+        if case .epoch(let number, let id) = segments[2].kind {
+            XCTAssertEqual(number, 2)
+            XCTAssertEqual(id, second.id)
+        } else {
+            XCTFail("üçüncü parça Dönem 2 olmalı")
+        }
+    }
+
+    func testBackToBackEpochsHaveNoBreakAndFinishedLastEpochLeavesAnOngoingBreak() {
+        let adjacent = DietTimeline.segments(
+            epochs: [DietEpoch(start: day(5, 18), lastDay: day(8, 3)), DietEpoch(start: day(8, 4))],
+            weights: [], today: day(8, 10)
+        )
+        XCTAssertEqual(adjacent.map(\.isEpoch), [true, true])
+        XCTAssertEqual(adjacent.map(\.days), [78, 7])
+
+        // Dönem kapatıldı, yenisi açılmadı → ara bugüne kadar sürüyor.
+        let resting = DietTimeline.segments(
+            epochs: [DietEpoch(start: day(5, 18), lastDay: day(8, 3))], weights: [], today: day(9, 22)
+        )
+        XCTAssertEqual(resting.map(\.isEpoch), [true, false])
+        XCTAssertEqual(resting[1].days, 50)                        // 4 Ağu–22 Eyl
+        XCTAssertTrue(resting[1].isOngoing)
+        // Dönemin son günü bugünse henüz ara yok.
+        XCTAssertEqual(DietTimeline.segments(
+            epochs: [DietEpoch(start: day(5, 18), lastDay: day(9, 22))], weights: [], today: day(9, 22)
+        ).count, 1)
+    }
+
+    func testWeightsAreAttributedToTheSegmentTheyFallIn() {
+        let weights = [
+            weight(4, 23, 92.0),   // dönemden önce
+            weight(5, 18, 93.0), weight(6, 20, 89.0), weight(8, 3, 85.0),
+            weight(8, 20, 85.6), weight(9, 18, 86.4),  // arada
+        ]
+        let first = DietEpoch(start: day(5, 18), lastDay: day(8, 3))
+        let second = DietEpoch(start: day(9, 22), startWeight: 86)
+        let segments = DietTimeline.segments(epochs: [first, second], weights: weights, today: day(9, 22))
+
+        // Dönem 1: başlangıç = dönemin İLK tartısı (dönem öncesi 92,0 değil), son günün tartısı dahil.
+        XCTAssertEqual(segments[0].startWeight, 93.0)
+        XCTAssertEqual(segments[0].endWeight, 85.0)
+        XCTAssertEqual(segments[0].delta ?? 0, -8.0, accuracy: 0.0001)
+        // Ara: önceki dönemin bıraktığı kilodan sonraki dönemin başlangıç kilosuna.
+        XCTAssertEqual(segments[1].startWeight, 85.0)
+        XCTAssertEqual(segments[1].endWeight, 86.0)
+        XCTAssertEqual(segments[1].delta ?? 0, 1.0, accuracy: 0.0001)
+        // Dönem 2: sabitlenen kilodan başlar; içinde tartı yokken sonuç uydurulmaz.
+        XCTAssertEqual(segments[2].startWeight, 86.0)
+        XCTAssertNil(segments[2].endWeight)
+        XCTAssertNil(segments[2].delta)
+
+        // Sabitlenmemiş yeni dönem: içinde tartı yoksa başlangıçtan önceki son tartı.
+        XCTAssertEqual(DietTimeline.startWeight(of: DietEpoch(start: day(9, 22)), weights: weights), 86.4)
+        // Ritim yalnız dönemin kendi tartılarından hesaplanır.
+        XCTAssertEqual(DietTimeline.weights(in: first, from: weights).map(\.value), [93.0, 89.0, 85.0])
+        XCTAssertTrue(DietTimeline.weights(in: second, from: weights).isEmpty)
+    }
+
+    func testNormalizationRepairsOverlapsOrderAndOpenEnds() {
+        let messy = [
+            DietEpoch(start: day(9, 22, hour: 14)),                        // saatli → gün başına
+            DietEpoch(start: day(5, 18), lastDay: nil),                     // ortada açık dönem olamaz
+            DietEpoch(start: day(7, 1), lastDay: day(10, 5), startWeight: -3, note: "  "),   // sonrakinin içine taşıyor
+            DietEpoch(start: day(7, 1), lastDay: day(7, 2)),                // aynı gün başlayan kopya
+        ]
+        let fixed = DietTimeline.normalized(messy)
+
+        XCTAssertEqual(fixed.map(\.start), [day(5, 18), day(7, 1), day(9, 22)])
+        XCTAssertEqual(fixed[0].lastDay, day(6, 30))     // sonraki başlangıçtan bir gün önce kapandı
+        XCTAssertEqual(fixed[1].lastDay, day(9, 21))     // taşan bitiş kırpıldı
+        XCTAssertNil(fixed[1].startWeight)               // geçersiz kilo atıldı
+        XCTAssertNil(fixed[1].note)                      // boş not atıldı
+        XCTAssertNil(fixed[2].lastDay)                   // yalnız SON dönem sürebilir
+        XCTAssertEqual(DietTimeline.normalized(fixed), fixed)   // idempotent
+
+        // Bitiş başlangıçtan önce olamaz.
+        let inverted = DietTimeline.normalized([DietEpoch(start: day(5, 18), lastDay: day(5, 1))])
+        XCTAssertEqual(inverted[0].lastDay, day(5, 18))
+        XCTAssertEqual(DietTimeline.current(in: messy)?.number, 3)
+    }
+
+    func testTurkishSuffixHelpers() {
+        let expected = [
+            (1, "Ocak'tan"), (2, "Şubat'tan"), (3, "Mart'tan"), (4, "Nisan'dan"),
+            (5, "Mayıs'tan"), (6, "Haziran'dan"), (7, "Temmuz'dan"), (8, "Ağustos'tan"),
+            (9, "Eylül'den"), (10, "Ekim'den"), (11, "Kasım'dan"), (12, "Aralık'tan"),
+        ]
+        for (month, suffixed) in expected {
+            XCTAssertEqual(Fmt.since(day(month, 7)), "7 \(suffixed) beri")
+        }
+        XCTAssertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 12, 26]
+            .map(EpochStartSheet.dativeSuffix),
+            ["e", "ye", "e", "e", "e", "ya", "ye", "e", "a", "a", "ye", "a", "a", "ye", "a", "e", "e", "a", "ye", "ya"])
+    }
+}
+
+@MainActor
+final class DietEpochStoreTests: XCTestCase {
+    private let cal = Calendar.current
+
+    private func day(_ month: Int, _ day: Int) -> Date {
+        cal.date(from: DateComponents(year: 2026, month: month, day: day))!
+    }
+
+    func testStartingANewEpochClosesTheRunningOneAndDerivesTheBreak() {
+        let store = DietEpochStore(fileURL: nil)
+        // Dosya yokken Dönem 1, dönem özelliğinden önceki koda gömülü başlangıçtan doğar.
+        XCTAssertEqual(store.epochs.map(\.start), [DietEpochArchive.legacyStart])
+        XCTAssertNotNil(store.active)
+
+        store.startNewEpoch(on: day(9, 22), startWeight: 86, note: " ikinci tur ", previousLastDay: day(8, 3))
+
+        XCTAssertEqual(store.epochs.count, 2)
+        XCTAssertEqual(store.epochs[0].lastDay, day(8, 3))
+        XCTAssertEqual(store.epochs[1].start, day(9, 22))
+        XCTAssertEqual(store.epochs[1].startWeight, 86)
+        XCTAssertEqual(store.epochs[1].note, "ikinci tur")
+        XCTAssertEqual(store.active?.id, store.epochs[1].id)
+        let segments = DietTimeline.segments(epochs: store.epochs, weights: [], today: day(9, 22))
+        XCTAssertEqual(segments.map(\.days), [78, 49, 1])
+    }
+
+    func testPreviousLastDayCannotReachIntoTheNewEpoch() {
+        let store = DietEpochStore(fileURL: nil, epochs: [DietEpoch(start: day(5, 18))])
+        // Son gün verilmezse / yeni başlangıcı aşarsa: yeni başlangıçtan bir gün önce.
+        store.startNewEpoch(on: day(9, 22), startWeight: nil, previousLastDay: day(9, 30))
+        XCTAssertEqual(store.epochs[0].lastDay, day(9, 21))
+
+        let other = DietEpochStore(fileURL: nil, epochs: [DietEpoch(start: day(5, 18))])
+        other.startNewEpoch(on: day(9, 22), startWeight: nil)
+        XCTAssertEqual(other.epochs[0].lastDay, day(9, 21))
+        XCTAssertEqual(DietTimeline.segments(epochs: other.epochs, weights: [], today: day(9, 22)).map(\.isEpoch),
+                       [true, true])
+    }
+
+    func testEndEditAndDeleteKeepTheTimelineConsistent() {
+        let store = DietEpochStore(fileURL: nil, epochs: [DietEpoch(start: day(5, 18))])
+        store.endActiveEpoch(lastDay: day(8, 3))
+        XCTAssertNil(store.active)                               // arada
+        store.endActiveEpoch(lastDay: day(8, 10))                // süren dönem yok → etkisiz
+        XCTAssertEqual(store.epochs[0].lastDay, day(8, 3))
+
+        store.startNewEpoch(on: day(9, 22), startWeight: 86)
+        XCTAssertEqual(store.epochs[0].lastDay, day(8, 3))       // zaten kapalı dönemin bitişi korunur
+
+        // Düzenleme normalize edilir: Dönem 1'in bitişi Dönem 2'nin içine taşınamaz.
+        var first = store.epochs[0]
+        first.lastDay = day(10, 1)
+        store.update(first)
+        XCTAssertEqual(store.epochs[0].lastDay, day(9, 21))
+
+        // Silinince komşu yeniden "son dönem" olur; tek kalan dönem silinemez.
+        store.delete(id: store.epochs[1].id)
+        XCTAssertEqual(store.epochs.count, 1)
+        store.delete(id: store.epochs[0].id)
+        XCTAssertEqual(store.epochs.count, 1)
+    }
+
+    func testEpochsSurviveARoundTripThroughDisk() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hercules-epochs-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("diet-epochs.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        // Dosya yok / bozuk → tohum; asla boş değil.
+        XCTAssertEqual(DietEpochArchive.load(from: url).map(\.start), [DietEpochArchive.legacyStart])
+
+        let store = DietEpochStore(fileURL: url)
+        store.startNewEpoch(on: day(9, 22), startWeight: 86.2, note: "yeniden", previousLastDay: day(8, 3))
+        XCTAssertNil(store.lastError)
+
+        let reloaded = DietEpochStore(fileURL: url)
+        XCTAssertEqual(reloaded.epochs, store.epochs)
+        XCTAssertEqual(reloaded.epochs[1].startWeight, 86.2)
+
+        try Data("not json".utf8).write(to: url)
+        XCTAssertEqual(DietEpochArchive.load(from: url).map(\.start), [DietEpochArchive.legacyStart])
+    }
+}
+
+// MARK: - Chart aggregation regressions
+
+@MainActor
+final class GraphAggregationTests: XCTestCase {
+    private func calendar(_ zone: String = "Europe/Istanbul") -> Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: zone)!
+        return cal
+    }
+
+    private func assertPoints(_ actual: [TrendPoint], _ expected: [TrendPoint],
+                              file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(actual.map(\.date), expected.map(\.date), file: file, line: line)
+        for (a, e) in zip(actual, expected) {
+            XCTAssertEqual(a.value, e.value, accuracy: 1e-8, file: file, line: line)
+        }
+    }
+
+    private func referenceAverage(_ points: [TrendPoint], calendar: Calendar? = nil) -> [TrendPoint] {
+        points.map { point in
+            let window = points.filter {
+                if let calendar {
+                    let gap = calendar.dateComponents([.day], from: $0.date, to: point.date).day ?? 99
+                    return (0..<7).contains(gap)
+                }
+                return $0.date <= point.date && point.date.timeIntervalSince($0.date) < 7 * 86_400
+            }
+            return TrendPoint(date: point.date, value: window.reduce(0) { $0 + $1.value } / Double(window.count))
+        }
+    }
+
+    private func thin(_ points: [TrendPoint], step: Int) -> [TrendPoint] {
+        var result = stride(from: 0, to: points.count, by: step).map { points[$0] }
+        if result.last?.date != points.last?.date, let last = points.last { result.append(last) }
+        return result
+    }
+
+    func testTrailingAveragePreservesExclusiveBoundaryDuplicateDatesAndGaps() {
+        let origin = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let offsets: [Double] = [0, 0, 1, 6 * 86_400, 7 * 86_400 - 1, 7 * 86_400, 7 * 86_400, 30 * 86_400]
+        let points = offsets.enumerated().map {
+            TrendPoint(date: origin.addingTimeInterval($0.element), value: 80 + Double($0.offset) * 0.3)
+        }
+        assertPoints(TrendAnalysis.trailingAverage(points, windowDays: 7), referenceAverage(points))
+        XCTAssertEqual(TrendAnalysis.trailingAverage([], windowDays: 7), [])
+        XCTAssertEqual(TrendAnalysis.trailingAverage([points[0]], windowDays: 7), [points[0]])
+    }
+
+    func testDailyAveragePreservesMissingDaysAndBothDSTTransitions() {
+        for zone in ["Europe/Istanbul", "America/New_York", "Europe/Berlin"] {
+            let cal = calendar(zone)
+            for month in [3, 10, 11] {
+                let origin = cal.date(from: DateComponents(year: 2026, month: month, day: 1))!
+                let points = (0..<45).filter { $0 % 5 != 2 }.map { i in
+                    TrendPoint(date: cal.date(byAdding: .day, value: i, to: origin)!, value: Double(1000 + i * 19))
+                }
+                assertPoints(TrendAnalysis.dailyAverage(points, windowDays: 7, calendar: cal),
+                             referenceAverage(points, calendar: cal))
+            }
+        }
+        XCTAssertEqual(TrendAnalysis.dailyAverage([], windowDays: 7), [])
+    }
+
+    func testAllMetricsAndSpansPreserveReadingsCurvesAndDailyTotals() throws {
+        let cal = calendar("America/New_York")
+        let origin = cal.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        var measurements: [Hercules.Measurement] = []
+        var foods: [FoodEntry] = []
+        var steps: [StepEntry] = []
+        for i in 0..<210 where i % 9 != 2 {
+            let day = cal.date(byAdding: .day, value: i, to: origin)!
+            measurements.append(Measurement(date: day, weight: 93 - Double(i) * 0.04,
+                bodyFat: i % 3 == 0 ? 25 - Double(i) * 0.02 : nil, waist: 100, chest: 130, neck: 40))
+            foods.append(FoodEntry(date: day, name: "A", calories: Double(1000 + i), protein: 75))
+            foods.append(FoodEntry(date: day.addingTimeInterval(3600), name: "B", calories: 900, protein: nil))
+            steps.append(StepEntry(date: day, steps: 4000 + i))
+        }
+        // Input order must not affect the sorted chart series.
+        let sources = GraphSources(measurements: measurements.reversed(), foods: foods.reversed(),
+                                   steps: steps.reversed(), calendar: cal)
+        for span in GraphSpan.allCases {
+            for metric in GraphMetric.bodyMetrics + GraphMetric.dailyMetrics {
+                let series = try XCTUnwrap(sources.series(metric, span: span, weightLowerIsBetter: true, calendar: cal))
+                let all: [TrendPoint]
+                let rolling: [TrendPoint]
+                switch metric {
+                case .body(let kind):
+                    all = TrendAnalysis.points(measurements, for: kind)
+                    rolling = kind == .weight ? referenceAverage(all) : all
+                case .calories, .protein, .steps:
+                    all = metric == .calories ? sources.calories : (metric == .protein ? sources.protein : sources.steps)
+                    rolling = referenceAverage(all, calendar: cal)
+                }
+                let usable = metric.isDaily && rolling.count > 8 ? Array(rolling.dropFirst(6)) : rolling
+                let last = try XCTUnwrap(usable.last)
+                let start = span.days.flatMap { cal.date(byAdding: .day, value: -$0, to: cal.startOfDay(for: last.date)) } ?? .distantPast
+                let readings = (metric.isDaily ? usable : all).filter { $0.date >= start }
+                let average = usable.filter { $0.date >= start }
+                let expectedCurve: [TrendPoint]
+                if metric == .body(.weight) {
+                    expectedCurve = thin(average, step: max(1, Int((Double(average.count) / 26).rounded())))
+                } else if metric.isDaily {
+                    expectedCurve = thin(average, step: average.count >= 60 ? 7 : 4)
+                } else {
+                    expectedCurve = readings
+                }
+                assertPoints(series.readings, readings)
+                assertPoints(series.curve, expectedCurve)
+                assertPoints(series.dayTotals, metric.isDaily ? all.filter { $0.date >= start } : [])
+                XCTAssertEqual(series.goodSign, metric.goodSign(weightLowerIsBetter: true))
+                XCTAssertEqual(series.current, readings.last!.value, accuracy: 1e-8)
+            }
+        }
+    }
+
+    func testShortDailyHistoryAndInsufficientData() throws {
+        let cal = calendar()
+        let start = cal.startOfDay(for: Date(timeIntervalSinceReferenceDate: 800_000_000))
+        for count in [0, 1, 2, 8, 9] {
+            let foods = (0..<count).map { i in
+                FoodEntry(date: cal.date(byAdding: .day, value: i, to: start)!, name: "A", calories: 1000)
+            }
+            let sources = GraphSources(measurements: [], foods: foods, steps: [], calendar: cal)
+            let series = sources.series(.calories, span: .all, weightLowerIsBetter: true, calendar: cal)
+            if count < 2 {
+                XCTAssertNil(series)
+            } else {
+                XCTAssertEqual(try XCTUnwrap(series).readings.count, count > 8 ? count - 6 : count)
+            }
+            XCTAssertNil(sources.series(.body(.weight), span: .all, weightLowerIsBetter: true))
+        }
+    }
+
+    func testSourceRebuildPreservesEditsAndStepSourcePreference() throws {
+        let cal = calendar()
+        let day = cal.startOfDay(for: Date(timeIntervalSinceReferenceDate: 800_000_000))
+        let before = cal.date(byAdding: .day, value: -1, to: day)!
+        let old = Measurement(date: before, weight: 90, bodyFat: 20)
+        let latest = Measurement(date: day, weight: 89, bodyFat: 19)
+        let food = FoodEntry(date: day, name: "A", calories: 1000, protein: 50)
+        let health = StepEntry(date: day, steps: 6000)
+        let manual = StepEntry(date: day, steps: 9999, source: "manual")
+        func snapshot() -> GraphSources {
+            GraphSources(measurements: [old, latest], foods: [food], steps: [manual, health], calendar: cal)
+        }
+        XCTAssertEqual(snapshot().steps.first?.value, 6000)
+        // Edit an older row without relying on updatedAt/count cache keys.
+        old.weight = 87
+        latest.bodyFat = 18
+        food.calories = 1500
+        food.protein = 80
+        health.steps = 6500
+        let updated = snapshot()
+        XCTAssertEqual(updated.body[.weight]?.first?.value, 87)
+        XCTAssertEqual(updated.body[.bodyFat]?.last?.value, 18)
+        XCTAssertEqual(updated.calories.first?.value, 1500)
+        XCTAssertEqual(updated.protein.first?.value, 80)
+        XCTAssertEqual(updated.steps.first?.value, 6500)
+        XCTAssertEqual(updated.series(.body(.weight), span: .all, weightLowerIsBetter: false)?.goodSign, 1)
+    }
+
+    func testLongDailyHistoryPerformance() {
+        let cal = calendar()
+        let start = cal.startOfDay(for: Date(timeIntervalSinceReferenceDate: 700_000_000))
+        let steps = (0..<3000).map { i in
+            StepEntry(date: cal.date(byAdding: .day, value: i, to: start)!, steps: 5000 + i)
+        }
+        let sources = GraphSources(measurements: [], foods: [], steps: steps, calendar: cal)
+        measure {
+            let series = sources.series(.steps, span: .all, weightLowerIsBetter: true, calendar: cal)
+            XCTAssertEqual(series?.readings.count, 2994)
+        }
     }
 }

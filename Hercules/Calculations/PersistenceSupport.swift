@@ -107,6 +107,8 @@ extension ModelContext {
             case let x as ExerciseSet: x.entry?.log?.updatedAt = now
             case let x as FoodPreset: x.updatedAt = now
             case let x as RecipeVideo: x.updatedAt = now
+            case let x as LabPanel: x.updatedAt = now
+            case let x as LabResult: x.panel?.updatedAt = now
             default: break
             }
         }
@@ -159,7 +161,7 @@ final class CloudSyncMonitor {
         switch state {
         case .unavailable(let message), .error(let message): return message
         default:
-            return "Ölçümler, yemekler, antrenmanlar, tarifler, profil, adımlar ve Akış Mac ile iPhone arasında CloudKit ile senkronlanır."
+            return "Ölçümler, yemekler, antrenmanlar, tarifler, profil ve adımlar Mac ile iPhone arasında CloudKit ile senkronlanır."
         }
     }
 
@@ -385,9 +387,6 @@ enum SyncDataReconciler {
             preferring: { $0.createdAt > $1.createdAt },
             from: context
         ) || changed
-
-        let feedItems = (try? context.fetch(FetchDescriptor<FeedItem>())) ?? []
-        changed = FeedStore.deduplicate(feedItems, in: context, save: false) || changed
 
         #if os(macOS)
         let reports = (try? context.fetch(FetchDescriptor<CoachReport>())) ?? []

@@ -1,7 +1,7 @@
 import Foundation
 
 enum MentionTag: String, CaseIterable, Identifiable, Hashable {
-    case genelBakis, olcumler, grafikler, antrenman, takvim, kalori, yemekPlani, tarifler, profil, hepsi
+    case genelBakis, olcumler, grafikler, antrenman, takvim, kalori, yemekPlani, tarifler, profil, tahlil, hepsi
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         .genelBakis,
         .kalori,
         .olcumler,
+        .tahlil,
         .grafikler,
         .takvim,
         .tarifler,
@@ -39,6 +40,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .yemekPlani: return "Yemek Planı"
         case .tarifler:   return "Tarifler"
         case .profil:     return "Profil"
+        case .tahlil:     return "Tahliller"
         case .hepsi:      return "Hepsi"
         }
     }
@@ -55,6 +57,9 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .yemekPlani: return ["yemek planı", "yemek plani", "meal plan", "meal", "yemek", "diyet", "plan"]
         case .tarifler:   return ["tarifler", "tarif", "recipe", "recipes", "yemek tarif"]
         case .profil:     return ["profil", "profile", "ayar", "settings"]
+        case .tahlil:     return ["tahliller", "tahlil", "kan tahlili", "kan tahlilleri", "kan değerleri",
+                                  "kan degerleri", "lab", "labs", "hemogram", "kan sayımı", "kan sayimi",
+                                  "tahlil sonuçları", "tahlil sonuclari"]
         case .hepsi:      return ["hepsi", "tümü", "tumu", "all", "everything", "her şey", "her sey"]
         }
     }
@@ -71,6 +76,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .yemekPlani: return "meal, diyet"
         case .tarifler:   return "kayıtlı tarifler"
         case .profil:     return "kimlik, aktivite, hedef"
+        case .tahlil:     return "kan değerleri, referans dışı"
         case .hepsi:      return "all — tüm veri"
         }
     }
@@ -95,6 +101,7 @@ enum MentionTag: String, CaseIterable, Identifiable, Hashable {
         case .yemekPlani: return [.todayIntake, .foodDiary, .goals, .recipes]
         case .tarifler:   return [.recipes]
         case .profil:     return [.profile, .workout]
+        case .tahlil:     return [.labs, .profile]
         case .hepsi:      return SnapshotSection.allCases
         }
     }
@@ -221,7 +228,9 @@ extension MentionTag {
         switch self {
         case .takvim, .olcumler, .grafikler, .antrenman, .kalori, .yemekPlani, .hepsi:
             return true
-        case .genelBakis, .tarifler, .profil:
+        // Tahliller tarih taşır ama snapshot her zaman son panelleri verir —
+        // hiçbir şeye yaramayan bir aralık adımı göstermiyoruz.
+        case .genelBakis, .tarifler, .profil, .tahlil:
             return false
         }
     }

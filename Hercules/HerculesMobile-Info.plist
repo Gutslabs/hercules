@@ -27,7 +27,7 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Yemek ve ürünlerin fotoğrafını çekip Koç'a göndererek kalori/makro hesaplatman için kamera kullanılır.</string>
+	<string>Yemek fotoğrafını Koç'a gönderip kalori/makro hesaplatman ve Mac bağlantı kodunu okutman için kamera kullanılır.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Hercules günlük adım sayını ve yürüme mesafeni okuyup aktivite özetini günceller.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

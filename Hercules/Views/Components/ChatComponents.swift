@@ -14,11 +14,24 @@ struct AssistantMark: View {
     var seed: Double = 0
     var state: CoachOrbState = .idle
 
+    /// Koç fotoğrafı dosyası değişince yüzü tazeleyen sayaç.
+    @State private var avatarEpoch = 0
+
     var body: some View {
-        CoachOrb(state: state, seed: seed)
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-            .overlay(Circle().strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
+        Group {
+            // Ayarlardan koç fotoğrafı seçilmişse yüz odur; seçilmemişse orb kalır.
+            if avatarEpoch >= 0, let img = CoachAvatarStore.image() {
+                Image(platform: img).resizable().scaledToFill()
+            } else {
+                CoachOrb(state: state, seed: seed)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(ChatChrome.borderStrong, lineWidth: 0.5))
+        .onReceive(NotificationCenter.default.publisher(for: CoachAvatarStore.changed)) { _ in
+            avatarEpoch += 1
+        }
     }
 }
 
@@ -166,7 +179,7 @@ struct FoodPresetRow: View {
                     Text(Fmt.int(preset.calories(for: defaultServings)))
                         .font(.system(size: 15, weight: .regular, design: .monospaced))
                         .foregroundStyle(ChatChrome.primary)
-                    Text("kcal")
+                    Text("kalori")
                         .font(.system(size: 9.5, weight: .regular, design: .monospaced))
                         .foregroundStyle(ChatChrome.quaternary)
                 }
@@ -340,12 +353,13 @@ struct QuickAddPanel: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(ChatChrome.panelRaised.opacity(0.55))
+                // Buzz input dolgusu: el yapımı yüzey tonu yerine kromun field-fill tülü.
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(ChatChrome.whiteSoft)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(ChatChrome.border, lineWidth: 0.55)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(ChatChrome.borderStrong.opacity(0.7), lineWidth: 1)
             )
         }
         .padding(EdgeInsets(top: 13, leading: 14, bottom: 11, trailing: 14))
@@ -487,7 +501,7 @@ struct QuickAddPanel: View {
                 Text(Fmt.int(kcal))
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
                     .foregroundStyle(ChatChrome.secondary)
-                Text("kcal")
+                Text("kalori")
                     .font(.system(size: 9.5, design: .monospaced))
                     .foregroundStyle(ChatChrome.quaternary)
             }
@@ -619,187 +633,421 @@ struct ChatHintWrappingHStack: Layout {
     }
 }
 
+/// Buzz kullanıcı avatarı: ada göre deterministik renk (hash*31+codePoint mod 7)
+/// üstünde yarı-kalın baş harf — UserAvatar.tsx fallback paleti.
+struct ChatUserAvatar: View {
+    let name: String
+    var size: CGFloat = 32
+
+    private static let palette: [(bg: UInt32, fg: Color)] = [
+        (0x3B82F6, .white), (0x10B981, .white), (0xFBBF24, Color(hex: 0x451A03)),
+        (0xF43F5E, .white), (0x22D3EE, Color(hex: 0x083344)), (0x8B5CF6, .white),
+        (0xF97316, .white),
+    ]
+
+    private var colors: (bg: UInt32, fg: Color) {
+        var hash = 0
+        for scalar in name.lowercased().unicodeScalars { hash = hash &* 31 &+ Int(scalar.value) }
+        let n = Self.palette.count
+        return Self.palette[((hash % n) + n) % n]
+    }
+
+    var body: some View {
+        Group {
+            if avatarEpoch >= 0, let img = ProfileAvatarStore.image() {
+                Image(platform: img).resizable().scaledToFill()
+            } else {
+                initialFace
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .onReceive(NotificationCenter.default.publisher(for: ProfileAvatarStore.changed)) { _ in
+            avatarEpoch += 1
+        }
+    }
+
+    @State private var avatarEpoch = 0
+
+    private var initialFace: some View {
+        ZStack {
+            Circle().fill(Color(hex: colors.bg))
+            Text(name.first.map(String.init)?.uppercased(with: Locale(identifier: "tr_TR")) ?? "S")
+                .font(.system(size: size * 0.41, weight: .semibold))
+                .foregroundStyle(colors.fg)
+        }
+    }
+}
+
 struct MessageBubble: View {
     let turn: ChatTurn
     let isStreaming: Bool
-    var onSave: () -> Void
+    var userName: String = "Sen"
+    /// Kartın açılış günü, bugüne göre fark: geçmiş bir günün thread'inde o gün
+    /// (bkz. `ChatDailyThread.logDayOffset`), aksi halde 0 = bugün.
+    var defaultDayOffset: Int = 0
+    /// Öğünü günlüğe yaz — parametre kartta seçilen gün.
+    var onSave: (Date) -> Void
     var onConfirmAction: (AIAppAction) -> Void
     var onRejectAction: (AIAppAction) -> Void
 
-    /// Tek akış: yalnız kullanıcı balonda; asistan düz belge metni + monokrom koç işareti.
+    /// Kullanıcının kartta elle seçtiği gün; dokunulmadıysa thread'in günü geçerli.
+    @State private var pickedDayOffset: Int? = nil
+    @State private var pickingDate = false
+
+    /// Kartta seçili günün bugüne göre farkı (0 = bugün, -1 = dün).
+    private var dayOffset: Int {
+        get { pickedDayOffset ?? defaultDayOffset }
+        nonmutating set { pickedDayOffset = newValue }
+    }
+    @State private var zoomingAvatar = false
+
+    /// Buzz kanal satırı: iki rol de aynı anatomide — avatar solda, yazar +
+    /// saat başlığı, altında gövde. Balon yok; sahiplik avatar ve isimle okunur
+    /// (MessageRow.tsx / MessageHeader.tsx dili).
     var body: some View {
-        if turn.role == .user {
-            userRow
-        } else {
-            assistantRow
-        }
-    }
-
-    private var userRow: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Spacer(minLength: 32)
-            Text(turn.text)
-                .font(ChatChrome.messageBody)
-                .foregroundStyle(ChatChrome.primary)
-                .lineSpacing(4)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 8)
-                .background(userBubbleShape.fill(ChatChrome.userBubble))
-                .overlay(userBubbleShape.strokeBorder(ChatChrome.border, lineWidth: 0.5))
-                .frame(maxWidth: 520, alignment: .trailing)
-        }
-    }
-
-    private var assistantRow: some View {
         HStack(alignment: .top, spacing: 10) {
-            ChatAssistantAvatar(state: isStreaming ? .talking : .idle, seed: orbSeed)
-                .padding(.top, 1)
-
-            VStack(alignment: .leading, spacing: 6) {
-                if let q = turn.searchedFor {
-                    HStack(spacing: 5) {
-                        Lucide(sf: "globe", size: 9)
-                        Text("Web'de arandı: \"\(q)\"")
-                            .font(Typography.caption)
+            // Yüze tıklayınca fotoğraf büyür (sidebar kimlik satırlarıyla aynı davranış).
+            Button { zoomingAvatar = true } label: {
+                Group {
+                    if turn.role == .user {
+                        ChatUserAvatar(name: userName)
+                    } else {
+                        ChatAssistantAvatar(state: isStreaming ? .talking : .idle, seed: orbSeed)
                     }
-                    .foregroundStyle(ChatChrome.tertiary)
-                    .padding(.bottom, 2)
                 }
-                // Streaming: daktilo-imleç yerine TextEffect — kelime kelime blur+fade açılır
-                // (ham metin, token başına markdown parse etmemek için). Bitince markdown render.
-                if isStreaming && !turn.text.isEmpty {
-                    StreamingRevealText(text: turn.text)
-                } else if !turn.text.isEmpty {
-                    MarkdownText(text: turn.text)
-                        .textSelection(.enabled)
-                }
-
-                if let food = turn.food {
-                    foodCard(food)
-                }
-                if !turn.actions.isEmpty {
-                    ForEach(turn.actions) { action in
-                        actionCard(action)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .padding(.top, 1)
+            .popover(isPresented: $zoomingAvatar, arrowEdge: .trailing) {
+                AvatarZoomCard(
+                    name: turn.role == .user ? userName : CoachIdentity.name,
+                    subtitle: turn.role == .user ? "Profil" : "AI koç",
+                    // Fotoğraf seçimi Mac'te panelden, telefonda Profil sekmesinden.
+                    onPickPhoto: pickAvatarAction
+                ) {
+                    if turn.role == .user {
+                        ChatUserAvatar(name: userName, size: 168)
+                    } else {
+                        AssistantMark(size: 168, cornerRadius: 84)
                     }
                 }
             }
-            .lineSpacing(4)
-            .frame(maxWidth: 720, alignment: .leading)
 
-            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(turn.role == .user ? userName : CoachIdentity.name)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(ChatChrome.primary)
+                        .lineLimit(1)
+                    Text(Fmt.timeShort.string(from: turn.createdAt))
+                        .font(.system(size: 11, weight: .regular).monospacedDigit())
+                        .foregroundStyle(ChatChrome.quaternary)
+                }
+
+                if turn.role == .user {
+                    Text(turn.text)
+                        .font(ChatChrome.messageBody)
+                        .foregroundStyle(ChatChrome.primary)
+                        .lineSpacing(4)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else {
+                    assistantBody
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+
+    @ViewBuilder
+    private var assistantBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let q = turn.searchedFor {
+                HStack(spacing: 5) {
+                    Lucide(sf: "globe", size: 9)
+                    Text("Web'de arandı: \"\(q)\"")
+                        .font(Typography.caption)
+                }
+                .foregroundStyle(ChatChrome.tertiary)
+                .padding(.bottom, 2)
+            }
+            // Stream plain text; parse Markdown once the reply is complete.
+            if isStreaming && !turn.text.isEmpty {
+                StreamingRevealText(text: turn.text)
+            } else if !turn.text.isEmpty {
+                MarkdownText(text: turn.text)
+                    .textSelection(.enabled)
+            }
+
+            if let food = turn.food {
+                foodCard(food)
+            }
+            if !turn.actions.isEmpty {
+                ForEach(turn.actions) { action in
+                    actionCard(action)
+                }
+            }
+        }
+        .lineSpacing(4)
+    }
+
+    #if os(macOS)
+    private var pickAvatarAction: (() -> Void)? {
+        { turn.role == .user ? ProfileAvatarStore.pickImage() : CoachAvatarStore.pickImage() }
+    }
+    #else
+    private var pickAvatarAction: (() -> Void)? { nil }
+    #endif
 
     /// Eski orb API'siyle uyum için mesajdan türetilen sabit tohum.
     private var orbSeed: Double { Double(abs(turn.id.hashValue) % 628) / 100.0 }
 
-    /// Kullanıcı balonu — sahibine yakın köşe (sağ alt) sivri.
-    private var userBubbleShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: 7,
-            bottomLeadingRadius: 7,
-            bottomTrailingRadius: 4,
-            topTrailingRadius: 7,
-            style: .continuous
-        )
+    // MARK: Öğün kartı
+
+    /// Seçili gün — bugüne göre `dayOffset` gün geride. Saat korunur ki dünkü
+    /// öğün dünün akışında makul bir saatte dursun.
+    private var targetDate: Date {
+        Calendar.current.date(byAdding: .day, value: dayOffset, to: .now) ?? .now
     }
 
-    /// V1 öğün kartı: isim + gram + makro noktaları · mono kcal · altta "Günlüğe eklendi" şeridi.
+    /// Öğün kartı: başlık + mono kalori · makro stat şeridi (sayfa geneliyle aynı
+    /// hücre dili) · altta gün seçici + eylem.
     private func foodCard(_ food: AIFoodResult) -> some View {
         VStack(spacing: 0) {
-            // Dar yüzeylerde (chat sidebar/dock) makrolar isim kolonuna sıkışıp karakter
-            // bazında kırılmasın: makro satırı kartın TAM genişliğini kullanır, her makro
-            // bölünmez birimdir ve gerekirse satır olarak sarar.
-            VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(food.name ?? "Yemek")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(ChatChrome.primary)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let g = food.grams {
-                            Text("\(Fmt.int(g)) g")
-                                .font(Typography.caption)
-                                .foregroundStyle(ChatChrome.quaternary)
-                        }
-                    }
-                    Spacer(minLength: 8)
-                    HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text(Fmt.int(food.calories ?? 0))
-                            .font(.system(size: 19, weight: .regular, design: .monospaced))
-                            .foregroundStyle(ChatChrome.primary)
-                        Text("kcal")
-                            .font(.system(size: 10.5, weight: .regular, design: .monospaced))
-                            .foregroundStyle(ChatChrome.quaternary)
-                    }
-                    .fixedSize()
+                    foodTitle(food).frame(minWidth: 170, maxWidth: .infinity, alignment: .leading)
+                    foodCalories(food)
                 }
-                if food.protein_g != nil || food.carbs_g != nil || food.fat_g != nil {
-                    ChatHintFlow(spacing: 14) {
-                        macroDot("P", food.protein_g, Palette.macroProtein)
-                        macroDot("K", food.carbs_g, Palette.macroCarbs)
-                        macroDot("Y", food.fat_g, Palette.macroFat)
-                    }
-                    .padding(.top, 9)
+                VStack(alignment: .leading, spacing: 10) {
+                    foodTitle(food)
+                    foodCalories(food)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.init(top: 14, leading: 18, bottom: 12, trailing: 18))
+            .padding(14)
 
-            Hairline()
-
-            if turn.saved {
-                HStack(spacing: 7) {
-                    Lucide(sf: "checkmark", size: 9.5)
-                        .foregroundStyle(ChatChrome.positive)
-                    Text("Günlüğe eklendi")
-                        .font(Typography.captionBold)
-                        .foregroundStyle(ChatChrome.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
-                    Spacer(minLength: 8)
-                    Text("\(Fmt.dayMonth.string(from: turn.createdAt)) · Takvim'de")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(ChatChrome.quaternary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+            if food.protein_g != nil || food.carbs_g != nil || food.fat_g != nil {
+                chatRule
+                // Nokta+harf satırı yerine sayfa genelindeki stat hücreleri:
+                // etiket üstte soluk, değer altta mono — dikey çizgiyle ayrık.
+                HStack(spacing: 8) {
+                    macroCell("Protein", food.protein_g, Palette.macroProtein)
+                    macroRule
+                    macroCell("Karb", food.carbs_g, Palette.macroCarbs)
+                    macroRule
+                    macroCell("Yağ", food.fat_g, Palette.macroFat)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 8)
-            } else {
-                Button(action: onSave) {
-                    HStack(spacing: 7) {
-                        Lucide(sf: "plus", size: 9.5)
-                            .foregroundStyle(ChatChrome.accent)
-                        Text("Günlüğe ekle")
-                            .font(Typography.captionBold)
-                            .foregroundStyle(ChatChrome.primary)
-                            .lineLimit(1)
-                            .fixedSize()
-                        Spacer(minLength: 8)
-                        Text("\(Fmt.dayMonth.string(from: turn.createdAt)) · Takvim'e")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(ChatChrome.quaternary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
             }
+
+            chatRule
+            foodCardFooter
         }
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(ChatChrome.card))
-        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.6))
+        // Site geneliyle aynı düz dil: kart zemini + kenarlık yerine tek peçe
+        // yüzey; bölmeler ince çizgiyle ayrışır.
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(ChatChrome.whiteSoft))
         .frame(maxWidth: 560, alignment: .leading)
         .padding(.top, 6)
     }
 
-    /// Uygulama aksiyonu — öğün kartıyla aynı V1 kart kabında.
+    private func foodTitle(_ food: AIFoodResult) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(food.name ?? "Yemek")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(ChatChrome.primary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let grams = food.grams {
+                Text("\(Fmt.int(grams)) g")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(ChatChrome.quaternary)
+            }
+        }
+    }
+
+    private func foodCalories(_ food: AIFoodResult) -> some View {
+        HStack(alignment: .lastTextBaseline, spacing: 4) {
+            Text(Fmt.int(food.calories ?? 0))
+                .font(.system(size: 22, weight: .regular, design: .monospaced))
+                .foregroundStyle(ChatChrome.primary)
+            Text("kalori")
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(ChatChrome.quaternary)
+        }
+        .fixedSize()
+    }
+
+    /// Koç yüzeyi temadan bağımsız kömür — ayraç da kendi kromundan gelir.
+    private var chatRule: some View {
+        Rectangle().fill(ChatChrome.border).frame(height: 0.5)
+    }
+
+    private var macroRule: some View {
+        Rectangle().fill(ChatChrome.border).frame(width: 1, height: 24)
+    }
+
+    private func macroCell(_ label: String, _ value: Double?, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Circle().fill(tint).frame(width: 6, height: 6)
+                Text(label)
+                    .font(.system(size: 10))
+                    .foregroundStyle(ChatChrome.quaternary)
+                    .lineLimit(1)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value.map(Fmt.int) ?? "—")
+                    .font(.system(size: 13.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(ChatChrome.primary)
+                Text("g")
+                    .font(.system(size: 10))
+                    .foregroundStyle(ChatChrome.quaternary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Alt şerit: kaydedilmemişse gün seçici + ekle butonu, kaydedilmişse
+    /// hangi güne yazıldığının onayı.
+    @ViewBuilder
+    private var foodCardFooter: some View {
+        if turn.saved {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    foodSavedLabel
+                    Spacer(minLength: 0)
+                    foodSavedDate
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    foodSavedLabel
+                    foodSavedDate
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(14)
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    dayStepper.fixedSize()
+                    Spacer(minLength: 0)
+                    saveFoodButton.fixedSize(horizontal: true, vertical: false)
+                }
+                VStack(spacing: 10) {
+                    dayStepper
+                    saveFoodButton
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private var foodSavedLabel: some View {
+        Label {
+            Text("Günlüğe eklendi")
+                .font(Typography.captionBold)
+                .foregroundStyle(ChatChrome.secondary)
+        } icon: {
+            Lucide(sf: "checkmark", size: 11)
+                .foregroundStyle(ChatChrome.positive)
+        }
+        .fixedSize()
+    }
+
+    private var foodSavedDate: some View {
+        Text("\(Fmt.dayMonth.string(from: turn.savedFoodDate ?? turn.createdAt)) · Takvim'de")
+            .font(.system(size: 10.5))
+            .foregroundStyle(ChatChrome.quaternary)
+            .fixedSize()
+    }
+
+    private var saveFoodButton: some View {
+        Button { onSave(targetDate) } label: {
+            HStack(spacing: 7) {
+                Lucide(sf: "plus", size: 12)
+                Text("Günlüğe ekle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .fixedSize()
+            }
+            .foregroundStyle(ChatChrome.ink)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 10).fill(ChatChrome.white))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("chat-save-food-\(turn.id.uuidString)")
+    }
+
+    /// ‹ Bugün › — bir tık bir gün. Etikete tıklayınca takvimden gün seçilir.
+    /// İleri yön bugünde durur: geçmişe yemek yazılır, geleceğe değil.
+    private var dayStepper: some View {
+        HStack(spacing: 2) {
+            stepButton("chevron.left", enabled: dayOffset > -180) { dayOffset -= 1 }
+
+            Button { pickingDate = true } label: {
+                Text(dayLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(dayOffset == 0 ? ChatChrome.secondary : ChatChrome.primary)
+                    .lineLimit(1)
+                    .frame(minWidth: 112, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Takvimden gün seç")
+            .popover(isPresented: $pickingDate, arrowEdge: .bottom) {
+                DatePicker(
+                    "",
+                    selection: Binding(
+                        get: { targetDate },
+                        set: { picked in
+                            let cal = Calendar.current
+                            dayOffset = min(0, cal.dateComponents(
+                                [.day],
+                                from: cal.startOfDay(for: .now),
+                                to: cal.startOfDay(for: picked)
+                            ).day ?? 0)
+                        }
+                    ),
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .padding(12)
+            }
+
+            stepButton("chevron.right", enabled: dayOffset < 0) { dayOffset += 1 }
+        }
+    }
+
+    private func stepButton(_ icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Lucide(sf: icon, size: 9)
+                .foregroundStyle(enabled ? ChatChrome.secondary : ChatChrome.quaternary)
+                .frame(width: 36, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    private var dayLabel: String {
+        let date = Fmt.dayMonth.string(from: targetDate)
+        switch dayOffset {
+        case 0:  return "Bugün · \(date)"
+        case -1: return "Dün · \(date)"
+        default: return date
+        }
+    }
+
+    /// Uygulama aksiyonu — öğün kartıyla aynı düz kabuk.
     private func actionCard(_ action: AIAppAction) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
@@ -858,8 +1106,7 @@ struct MessageBubble: View {
             }
         }
         .padding(.init(top: 12, leading: 18, bottom: 12, trailing: 18))
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(ChatChrome.card))
-        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.6))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(ChatChrome.whiteSoft))
         .frame(maxWidth: 560, alignment: .leading)
         .padding(.top, 6)
     }
@@ -906,16 +1153,6 @@ struct MessageBubble: View {
     }
 
     /// V1 makro noktası: renkli 5px nokta + harf + mono değer.
-    private func macroDot(_ letter: String, _ value: Double?, _ color: Color) -> some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 5, height: 5)
-            Text(letter).font(Typography.caption).foregroundStyle(ChatChrome.tertiary)
-            Text(value.map { "\(Fmt.int($0))g" } ?? "—")
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundStyle(ChatChrome.primary)
-        }
-        .fixedSize()   // makro birimi asla içinden kırılmaz; dar kartta satır olarak sarar
-    }
 }
 
 // MARK: - Orb (ElevenLabs "Orb" native SwiftUI karşılığı)
@@ -1049,41 +1286,19 @@ struct RevealTransition: Transition {
     }
 }
 
-/// ElevenLabs/motion-primitives "TextEffect" (per='word'): daktilo-imleç yerine akan cevabı
-/// KELİME KELİME blur+fade ile açar. Store'un daktilo saati kelimeleri sırayla tamamlar → her
-/// tamamlanan kelime yumuşak belirir; satır sonları paragraf korunur; bitince markdown'a döner.
+/// One text layout for the live reply. Per-word views and blur transitions made
+/// every typewriter tick remeasure hundreds of subviews in long answers.
 struct StreamingRevealText: View {
     let text: String
     var font: Font = ChatChrome.messageBody
     var color: Color = ChatChrome.primary
 
     var body: some View {
-        // Tokenizasyon gövde başına BİR kez. Eskiden `paragraphs` depolamasız computed
-        // property'ydi ve gövdede iki kez okunuyordu; daktilo `text`i 16 ms'de bir
-        // güncellediği için uzun cevaplarda saniyede binlerce String parçalama
-        // (mesaj başına O(n²)) anlamına geliyordu.
-        let blocks = paragraphs
-        return VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, words in
-                ChatHintWrappingHStack(spacing: 4) {
-                    ForEach(Array(words.enumerated()), id: \.offset) { _, w in
-                        Text(w)
-                            .font(font)
-                            .foregroundStyle(color)
-                            .fixedSize()
-                            .transition(RevealTransition())
-                    }
-                }
-                .animation(.easeOut(duration: 0.3), value: words.count)
-            }
-        }
-        .animation(.easeOut(duration: 0.3), value: blocks.count)
-    }
-
-    private var paragraphs: [[String]] {
-        text.components(separatedBy: "\n").map {
-            $0.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        }
+        Text(verbatim: text)
+            .font(font)
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -1133,7 +1348,7 @@ struct ChatAssistantAvatar: View {
     var body: some View {
         // Orb, avatarın kendi durumunu taşısın: yanıt akarken canlansın, boştayken donuk
         // tek kare kalsın (sohbette onlarca avatar var, hepsini sürekli çizmek kasar).
-        AssistantMark(size: 28, cornerRadius: 7,
+        AssistantMark(size: 32, cornerRadius: 8,
                       seed: seed,
                       state: isActive ? .talking : .idle)
             .overlay(alignment: .bottomTrailing) {
@@ -1172,155 +1387,6 @@ struct TypingIndicator: View {
         .padding(.vertical, 2)
     }
 }
-
-#if os(macOS)
-/// Yüzen aksiyon dock'u — birincil "Koç'a Sor" pill'i (sade metin) + tartı ekle çipi.
-/// Kart diliyle aynı çift gölge + ışık rim; tepsi = surface, birincil = dolgulu btnBg.
-struct FloatingActionDock: View {
-    var onAskCoach: () -> Void
-    var onAddWeight: (Double) -> Void
-
-    @State private var showWeight = false
-    @State private var hoveredIcon: String? = nil
-
-    var body: some View {
-        HStack(spacing: 7) {
-            // Birincil: Koç'a Sor — sade metin pill (ikon/yeşil nokta yok).
-            Button(action: onAskCoach) {
-                Text("Koç'a Sor")
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .fixedSize()
-                    .foregroundStyle(Palette.btnFg)
-                    .padding(.horizontal, 18)
-                    .frame(height: 42)
-                    .background(Capsule(style: .continuous).fill(Palette.btnBg))
-            }
-            .buttonStyle(.plain)
-            .help("Koç'a sor")
-
-            // Tartı ekle → bulunduğun yerde popover
-            dockIcon("scalemass.fill", tint: Palette.textSecondary, help: "Tartı ekle") {
-                showWeight.toggle()
-            }
-            .popover(isPresented: $showWeight, arrowEdge: .top) {
-                QuickWeightPopover(
-                    onSave: { kg in
-                        onAddWeight(kg)
-                        showWeight = false
-                    },
-                    onCancel: { showWeight = false }
-                )
-            }
-        }
-        .padding(6)
-        .background(Capsule(style: .continuous).fill(Palette.surface))
-        .overlay(Capsule(style: .continuous).strokeBorder(Palette.cardRim, lineWidth: 0.75))
-        .shadow(color: Palette.cardShadow, radius: 16, x: 0, y: 8)
-        .shadow(color: Palette.cardShadowTight, radius: 3, x: 0, y: 1.5)
-    }
-
-    // Minimal: çıplak ikon (kenarlık/dolu daire yok), yalnız hover'da fısıltı zemin.
-    private func dockIcon(_ symbol: String, tint: Color, help: String,
-                          action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Lucide(sf: symbol, size: 17)
-                .foregroundStyle(tint)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(hoveredIcon == symbol ? Palette.surfaceElevated : .clear))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .onHover { hoveredIcon = $0 ? symbol : nil }
-    }
-}
-
-/// "Tartı ekle" hızlı popover'ı — tek alanlı (kg) kompakt giriş; bulunduğun yerde açılır,
-/// kaydedince doğrudan ölçüm olarak eklenir (tarih = şimdi).
-struct QuickWeightPopover: View {
-    var onSave: (Double) -> Void
-    var onCancel: () -> Void
-
-    @State private var text = ""
-    @FocusState private var focused: Bool
-
-    private var parsed: Double? {
-        let cleaned = text.replacingOccurrences(of: ",", with: ".")
-            .trimmingCharacters(in: .whitespaces)
-        guard let v = Double(cleaned), v > 0, v < 600 else { return nil }
-        return v
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Lucide(sf: "scalemass.fill", size: 12.5)
-                    .foregroundStyle(Palette.textSecondary)
-                Text("Tartı ekle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                Spacer(minLength: 12)
-                Text(Self.todayLabel())
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                TextField("0,0", text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Palette.textPrimary)
-                    .focused($focused)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .onSubmit { if let v = parsed { onSave(v) } }
-                Text("kg")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Palette.textSecondary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.fieldFill))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
-
-            HStack(spacing: 8) {
-                Button(action: onCancel) {
-                    Text("İptal")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Palette.textSecondary)
-                        .padding(.horizontal, 14)
-                        .frame(height: 34)
-                        .background(Capsule().fill(Palette.surfaceElevated))
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 0)
-
-                Button { if let v = parsed { onSave(v) } } label: {
-                    Text("Kaydet")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Palette.btnFg)
-                        .padding(.horizontal, 18)
-                        .frame(height: 34)
-                        .background(Capsule().fill(Palette.btnBg.opacity(parsed == nil ? 0.4 : 1)))
-                }
-                .buttonStyle(.plain)
-                .disabled(parsed == nil)
-            }
-        }
-        .padding(16)
-        .frame(width: 248)
-        .background(Palette.surface)
-        .onAppear { focused = true }
-    }
-
-    private static func todayLabel() -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR")
-        f.dateFormat = "d MMM · HH:mm"
-        return f.string(from: Date())
-    }
-}
-#endif
 
 // MARK: - Markdown rendering (AI cevapları için)
 
@@ -1398,8 +1464,9 @@ struct MarkdownText: View {
                     .textSelection(.enabled)
                     .padding(10)
             }
-            .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(ChatChrome.background))
-            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(ChatChrome.border, lineWidth: 0.5))
+            // Buzz kod bloğu: bg muted/60 + border/70 — zeminden kartla ayrılır.
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(ChatChrome.panelRaised.opacity(0.6)))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(ChatChrome.borderStrong.opacity(0.7), lineWidth: 1))
         case .quote(let text):
             HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 1).fill(ChatChrome.accent.opacity(0.55)).frame(width: 2.5)

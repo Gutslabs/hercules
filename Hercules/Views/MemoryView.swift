@@ -37,6 +37,7 @@ struct ProfileMemoryPane: View {
     @State private var memoryArchiveBanner: MemoryArchiveBanner?
     @State private var pendingMemoryRestore: HerculesMemoryArchive.DecodedArchive?
     @State private var confirmingMemoryRestore = false
+    @State private var confirmingVaultReset = false
 
     private static let memoriesPerPage = 10
 
@@ -115,8 +116,10 @@ struct ProfileMemoryPane: View {
     var body: some View {
         Group {
             if compact {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
+                // Düz zemin: kart kabukları kalktı, bölümler ince çizgiyle ayrışır.
+                VStack(alignment: .leading, spacing: 26) {
                     memoriesCard
+                    Hairline()
                     researchCard
                 }
             } else {
@@ -146,12 +149,12 @@ struct ProfileMemoryPane: View {
         }
         .sheet(isPresented: $showingEditor) {
             memoryEditor
-                .frame(width: 520)
         }
         #if os(macOS)
         .sheet(item: $memoryArchiveSheet) { mode in
             MemoryArchivePassphraseSheet(
-                mode: mode,
+                isExport: mode.requiresConfirmation,
+                fileName: mode.fileName,
                 busy: memoryArchiveBusy,
                 error: memoryArchiveError,
                 onSubmit: { passphrase in
@@ -168,7 +171,6 @@ struct ProfileMemoryPane: View {
                     memoryArchiveError = nil
                 }
             )
-            .frame(width: 460, height: mode.requiresConfirmation ? 315 : 270)
         }
         .confirmationDialog(
             "Hafıza yedeğini geri yükle",
@@ -190,6 +192,22 @@ struct ProfileMemoryPane: View {
                     + "Bu işlem geri alınamaz."
                 )
             }
+        }
+        .confirmationDialog(
+            "Kasayı sıfırla",
+            isPresented: $confirmingVaultReset,
+            titleVisibility: .visible
+        ) {
+            Button("Sıfırla ve yeni kasa aç", role: .destructive) {
+                resetLockedMemoryVault()
+            }
+            Button("Vazgeç", role: .cancel) {}
+        } message: {
+            Text(
+                "Cihaz anahtarı olmadan mevcut kasa şifresi çözülemez; içerik "
+                + "okunamaz durumda kalır. Dosya SİLİNMEZ — zaman damgalı bir "
+                + "kopyaya taşınır ve hafıza boş bir kasayla yeniden çalışmaya başlar."
+            )
         }
         #endif
     }
@@ -269,8 +287,6 @@ struct ProfileMemoryPane: View {
             }
             .padding(.top, 11)
         }
-        .padding(.init(top: 20, leading: 26, bottom: 16, trailing: 26))
-        .dashboardCard()
         .onChange(of: searchText) { _, _ in memoryPage = 0 }
     }
 
@@ -339,7 +355,7 @@ struct ProfileMemoryPane: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Palette.border, lineWidth: 1)
         )
     }
@@ -363,6 +379,15 @@ struct ProfileMemoryPane: View {
                     chooseMemoryArchiveSource()
                 }
                 .disabled(memoryArchiveBusy)
+                // Kilitli kasa kalıcı bir çıkmaz: anahtar yoksa zarf açılamaz.
+                // Tek çıkış ya yedekten geri yükleme ya da kasayı sıfırlama.
+                if !memoryStorageAllowsMutation {
+                    archiveButton("Kasayı sıfırla", systemImage: "arrow.counterclockwise") {
+                        confirmingVaultReset = true
+                    }
+                    .disabled(memoryArchiveBusy)
+                    .help("Açılamayan kasa dosyasını kenarda saklar ve çalışan yeni bir kasa açar. Dosya silinmez.")
+                }
             }
 
             if let banner = memoryArchiveBanner {
@@ -567,8 +592,6 @@ struct ProfileMemoryPane: View {
                 .foregroundStyle(Palette.textTertiary)
                 .padding(.top, 11)
         }
-        .padding(.init(top: 20, leading: 26, bottom: 16, trailing: 26))
-        .dashboardCard()
     }
 
     private var researchTitleBlock: some View {
@@ -627,7 +650,7 @@ struct ProfileMemoryPane: View {
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(researchUpdating ? Palette.fieldFill : Palette.accent)
+                    .fill(researchUpdating ? Palette.fieldFill : Palette.btnBg)
             )
             .contentShape(Rectangle())
         }
@@ -700,71 +723,16 @@ struct ProfileMemoryPane: View {
     // MARK: Editör sheet'i
 
     private var memoryEditor: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack {
-                Text(editingMemory == nil ? "Yeni Memory" : "Memory Düzenle")
-                    .font(Typography.titleSmall)
-                    .foregroundStyle(Palette.textPrimary)
-                Spacer()
-                Button {
-                    showingEditor = false
-                } label: {
-                    Lucide(sf: "xmark", size: 12)
-                        .foregroundStyle(Palette.textSecondary)
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Palette.surfaceElevated))
-                }
-                .buttonStyle(.plain)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("İçerik").eyebrow()
-                TextEditor(text: $draftContent)
-                    .scrollContentBackground(.hidden)
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.textPrimary)
-                    .frame(minHeight: 130)
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Etiketler").eyebrow()
-                TextField("nutrition, training, preference", text: $draftTags)
-                    .textFieldStyle(.plain)
-                    .font(Typography.body)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.surfaceElevated))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Palette.border, lineWidth: 0.5))
-            }
-
-            Toggle("Pinli", isOn: $draftPinned)
-                .toggleStyle(.switch)
-                .font(Typography.bodyBold)
-
-            HStack {
-                Spacer()
-                Button {
-                    saveDraft()
-                } label: {
-                    Label { Text("Kaydet") } icon: { Lucide(sf: "checkmark") }
-                        .font(Typography.bodyBold)
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(Palette.accent))
-                }
-                .buttonStyle(.plain)
-                .disabled(
-                    !memoryStorageAllowsMutation
-                        || draftContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
-            }
-        }
-        .padding(Spacing.xl)
-        .background(Palette.background)
+        MemoryEditorSheet(
+            isNew: editingMemory == nil,
+            content: $draftContent,
+            tags: $draftTags,
+            pinned: $draftPinned,
+            canSave: memoryStorageAllowsMutation
+                && !draftContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            onSave: saveDraft,
+            onCancel: { showingEditor = false }
+        )
     }
 
     // MARK: Actions
@@ -881,6 +849,32 @@ struct ProfileMemoryPane: View {
         }
     }
 
+    /// Kilitli kasadan çıkış: dosya kenara alınır, hafıza tekrar yazılabilir olur.
+    private func resetLockedMemoryVault() {
+        memoryArchiveBusy = true
+        memoryArchiveBanner = nil
+        Task {
+            do {
+                let archived = try await LocalMemoryProvider.shared.resetLockedVault()
+                memoryArchiveBusy = false
+                reload()
+                memoryArchiveBanner = MemoryArchiveBanner(
+                    succeeded: true,
+                    message: archived.map {
+                        "Kasa sıfırlandı · açılamayan dosya \($0.lastPathComponent) olarak saklandı."
+                    } ?? "Kasa sıfırlandı."
+                )
+            } catch {
+                memoryArchiveBusy = false
+                reload()
+                memoryArchiveBanner = MemoryArchiveBanner(
+                    succeeded: false,
+                    message: "Kasa sıfırlanamadı: \(Self.archiveErrorText(error))"
+                )
+            }
+        }
+    }
+
     private static func defaultMemoryArchiveFilename() -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -983,26 +977,10 @@ private enum MemoryArchiveSheet: Identifiable {
         return false
     }
 
-    var title: String {
+    /// Uzantısız dosya adı (pencerenin alt satırı).
+    var fileName: String {
         switch self {
-        case .export: return "Hafıza yedeğini şifrele"
-        case .import: return "Hafıza yedeğini aç"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .export:
-            return "Bu parola başka bir cihazda yedeği açmanın tek yoludur. HERCULES parolayı saklamaz."
-        case .import:
-            return "Yedek oluşturulurken belirlenen parolayı gir. İçerik doğrulandıktan sonra değiştirme onayı istenecek."
-        }
-    }
-
-    var actionTitle: String {
-        switch self {
-        case .export: return "Şifrele ve kaydet"
-        case .import: return "Yedeği aç"
+        case .export(let url), .import(let url): return url.deletingPathExtension().lastPathComponent
         }
     }
 }
@@ -1012,8 +990,11 @@ private struct MemoryArchiveBanner {
     var message: String
 }
 
-private struct MemoryArchivePassphraseSheet: View {
-    var mode: MemoryArchiveSheet
+/// Hafıza yedeği parolası — tasarım: tuval ▸ Pencereler · İlerleme · Profil (az yazı). Yedeklerken
+/// parola + güç çubuğu + tekrar (eşleşince ✓); açarken tek parola.
+struct MemoryArchivePassphraseSheet: View {
+    var isExport: Bool
+    var fileName: String
     var busy: Bool
     var error: String?
     var onSubmit: (String) -> Void
@@ -1023,110 +1004,92 @@ private struct MemoryArchivePassphraseSheet: View {
     @State private var confirmation = ""
 
     private var mismatch: Bool {
-        mode.requiresConfirmation
-            && !confirmation.isEmpty
-            && passphrase != confirmation
+        isExport && !confirmation.isEmpty && passphrase != confirmation
     }
 
     private var valid: Bool {
-        passphrase.count >= 8
-            && (!mode.requiresConfirmation || passphrase == confirmation)
+        passphrase.count >= 8 && (!isExport || passphrase == confirmation)
+    }
+
+    /// 0…4: uzunluk ve çeşitlilik (küçük/büyük harf, rakam, sembol).
+    private var strength: Int {
+        guard passphrase.count >= 8 else { return passphrase.isEmpty ? 0 : 1 }
+        let kinds = [passphrase.contains(where: \.isLowercase), passphrase.contains(where: \.isUppercase),
+                     passphrase.contains(where: \.isNumber),
+                     passphrase.contains { !$0.isLetter && !$0.isNumber }].filter { $0 }.count
+        var score = 2
+        if passphrase.count >= 12 { score += 1 }
+        if kinds >= 3 { score += 1 }
+        return min(4, score)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(mode.title)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                Text(mode.subtitle)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+        SadeSheet(title: isExport ? "Yedeği şifrele" : "Yedeği aç", subtitle: fileName, onClose: onCancel) {
+            VStack(alignment: .leading, spacing: 0) {
+                SadeField(label: "Parola") {
+                    SecureField("", text: $passphrase, prompt: Text("en az 8 karakter").foregroundStyle(Palette.textTertiary))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 15))
+                }
+                if isExport {
+                    HStack(spacing: 4) {
+                        ForEach(0..<4, id: \.self) { i in
+                            Capsule()
+                                .fill(i < strength ? (strength >= 3 ? Palette.positive : Palette.warning) : Palette.textPrimary.opacity(0.08))
+                                .frame(height: 4)
+                        }
+                    }
+                    .padding(.top, 8)
+                    .help("Parola gücü")
+                    SadeField(label: "Tekrar") {
+                        SecureField("", text: $confirmation)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 15))
+                        if !confirmation.isEmpty && confirmation == passphrase {
+                            Lucide(sf: "checkmark", size: 13)
+                                .foregroundStyle(Palette.positive)
+                        }
+                    }
+                    .padding(.top, 14)
+                }
+                Group {
+                    if mismatch {
+                        SadeNote(text: "Parolalar eşleşmiyor", color: Palette.negative)
+                    } else if let error {
+                        SadeNote(text: error, color: Palette.negative)
+                    } else if isExport {
+                        SadeNote(text: "Parola kaybolursa yedek açılamaz")
+                    }
+                }
+                .padding(.top, 18)
             }
-
-            secureField("Parola · en az 8 karakter", text: $passphrase)
-            if mode.requiresConfirmation {
-                secureField("Parola (tekrar)", text: $confirmation)
-            }
-
-            if mismatch {
-                Text("Parolalar eşleşmiyor.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.negative)
-            } else if let error {
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.negative)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if mode.requiresConfirmation {
-                Text("Parolanı kaybedersen yedek açılamaz; kurtarma anahtarı yoktur.")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Palette.textQuaternary)
-            }
-
-            Spacer(minLength: 0)
-
-            HStack {
-                Button("Vazgeç", action: onCancel)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.textTertiary)
-                    .disabled(busy)
-                Spacer()
-                Button {
+            .padding(.horizontal, 28)
+            .padding(.top, 20)
+            .padding(.bottom, 24)
+        } footerLeading: {
+            EmptyView()
+        } footerTrailing: {
+            SadeButton(title: "Vazgeç", enabled: !busy, action: onCancel)
+            if busy {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(minWidth: 90)
+            } else {
+                SadeButton(title: isExport ? "Şifrele" : "Yedeği aç", icon: isExport ? "lock" : nil, role: .primary, enabled: valid) {
                     let submitted = passphrase
                     // SwiftUI state keeps no passphrase after submission. The task
                     // receives only the short-lived value needed for this operation.
                     passphrase.removeAll(keepingCapacity: false)
                     confirmation.removeAll(keepingCapacity: false)
                     onSubmit(submitted)
-                } label: {
-                    Group {
-                        if busy {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text(mode.actionTitle)
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                    }
-                    .frame(minWidth: 112)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(valid && !busy ? Palette.btnFg : Palette.textQuaternary)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(valid && !busy ? Palette.accent : Palette.fieldFill)
-                    )
                 }
-                .buttonStyle(.plain)
-                .disabled(!valid || busy)
             }
         }
-        .padding(22)
-        .background(Palette.background.ignoresSafeArea())
+        .frame(width: 500)
         .onDisappear {
             passphrase.removeAll(keepingCapacity: false)
             confirmation.removeAll(keepingCapacity: false)
         }
-    }
-
-    private func secureField(_ title: String, text: Binding<String>) -> some View {
-        SecureField(title, text: text)
-            .textFieldStyle(.plain)
-            .font(.system(size: 12.5, design: .monospaced))
-            .foregroundStyle(Palette.textPrimary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Palette.fieldFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: 1)
-            )
     }
 }
 #endif
@@ -1169,15 +1132,21 @@ struct ProfilePromptsPane: View {
     var body: some View {
         Group {
             if compact {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
+                VStack(alignment: .leading, spacing: 26) {
                     listCard
+                    Hairline()
                     editorCard
                         .frame(maxHeight: .infinity)
                 }
             } else {
-                HStack(alignment: .top, spacing: Spacing.lg) {
+                // Düz zeminde iki kolon: kart kabuğu yerine dikey ince çizgi.
+                HStack(alignment: .top, spacing: 26) {
                     listCard
                         .frame(width: 320)
+                        .frame(maxHeight: .infinity)
+                    Rectangle()
+                        .fill(Palette.border.opacity(0.6))
+                        .frame(width: 1)
                         .frame(maxHeight: .infinity)
                     editorCard
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1199,11 +1168,6 @@ struct ProfilePromptsPane: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Palette.textQuaternary)
             }
-            Text("Düzenle, kaydet; istediğinde varsayılana dön.")
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.top, 4)
-
             ForEach(groups, id: \.0) { group, keys in
                 Text(group.uppercased(with: Locale(identifier: "tr_TR")))
                     .font(.system(size: 10, weight: .semibold))
@@ -1217,18 +1181,8 @@ struct ProfilePromptsPane: View {
             }
 
             Spacer(minLength: 16)
-
-            Hairline()
-            Text("Promptlar bu cihazda saklanır; \"Varsayılana dön\" orijinal metni geri yükler.")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Palette.textTertiary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 12)
         }
-        .padding(.init(top: 20, leading: 22, bottom: 16, trailing: 22))
-        .frame(maxHeight: .infinity, alignment: .top)   // geniş yerleşimde editörle aynı boy
-        .dashboardCard()
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func listRow(_ key: PromptKey) -> some View {
@@ -1249,14 +1203,7 @@ struct ProfilePromptsPane: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(active ? Palette.accent.opacity(0.07) : Palette.fieldFill.opacity(0.55))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(active ? Palette.accent.opacity(0.4) : Palette.border, lineWidth: 1)
-            )
+            .selectionRing(active, cornerRadius: 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1270,46 +1217,28 @@ struct ProfilePromptsPane: View {
                 Text(selected.title)
                     .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(Palette.textPrimary)
-                Text(selected.locationNote)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                if let note = selected.dynamicNote {
+                    Lucide(sf: "info.circle", size: 11)
+                        .foregroundStyle(Palette.textTertiary)
+                        .help(note)
+                }
                 Spacer(minLength: Spacing.md)
                 Text("\(Fmt.int(Double(draft.count))) karakter")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Palette.textQuaternary)
             }
 
-            if let note = selected.dynamicNote {
-                HStack(spacing: 9) {
-                    Lucide(sf: "info.circle", size: 11)
-                        .foregroundStyle(Palette.warning)
-                    Text(note)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.warning.opacity(0.06)))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.warning.opacity(0.3), lineWidth: 1))
-                .padding(.top, 12)
-            }
+            // Uyarı kutusu yok: nötr gri ünlem, metin üzerine gelince tooltip'te.
 
             // Sabit kutu: metin uzadıkça sayfa değil editörün kendisi kayar.
+            // "Hakkımda" alanıyla aynı dil: kutu yok, metin doğrudan yüzeyde.
             TextEditor(text: $draft)
                 .scrollContentBackground(.hidden)
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(.system(size: 12.5, design: .monospaced))
                 .lineSpacing(5)
                 .foregroundStyle(Palette.textSecondary)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
                 .frame(maxWidth: .infinity, minHeight: 280, maxHeight: .infinity)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.fieldFill))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
-                .padding(.top, 14)
+                .padding(.top, 10)
 
             HStack(spacing: 10) {
                 Button { save() } label: {
@@ -1319,8 +1248,8 @@ struct ProfilePromptsPane: View {
                         .padding(.horizontal, 18)
                         .padding(.vertical, 6)
                         .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(isDirty ? Palette.accent : (savedFlash ? Palette.positive.opacity(0.5) : Palette.fieldFill))
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(isDirty ? Palette.btnBg : (savedFlash ? Palette.positive.opacity(0.5) : Palette.fieldFill))
                         )
                         .contentShape(Rectangle())
                 }
@@ -1336,7 +1265,7 @@ struct ProfilePromptsPane: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 5.5)
                         .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .strokeBorder(Palette.border, lineWidth: 1)
                         )
                         .contentShape(Rectangle())
@@ -1358,8 +1287,6 @@ struct ProfilePromptsPane: View {
             }
             .padding(.top, 14)
         }
-        .padding(.init(top: 22, leading: 28, bottom: 18, trailing: 28))
-        .dashboardCard()
     }
 
     private func promptGhostButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -1370,7 +1297,7 @@ struct ProfilePromptsPane: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 5.5)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(Palette.border, lineWidth: 1)
                 )
                 .contentShape(Rectangle())
@@ -1397,5 +1324,54 @@ struct ProfilePromptsPane: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(draft, forType: .string)
         #endif
+    }
+}
+
+// MARK: - Hafıza notu penceresi
+
+/// Hafıza notu — tasarım: tuval ▸ Pencereler · İlerleme · Profil (az yazı): içerik, virgülle ayrılmış
+/// etiketler ve sabitle anahtarı.
+struct MemoryEditorSheet: View {
+    let isNew: Bool
+    @Binding var content: String
+    @Binding var tags: String
+    @Binding var pinned: Bool
+    let canSave: Bool
+    let onSave: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        SadeSheet(title: isNew ? "Yeni hafıza" : "Hafızayı düzenle", onClose: onCancel) {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("İçerik")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.textTertiary)
+                    TextEditor(text: $content)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Palette.textPrimary)
+                        .scrollContentBackground(.hidden)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 8)
+                        .frame(height: 120)
+                        .sadeBox(radius: 10)
+                }
+                SadeField(label: "Etiketler") {
+                    TextField("", text: $tags, prompt: Text("beslenme, antrenman").foregroundStyle(Palette.textTertiary))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13.5))
+                }
+                SadeToggleRow(title: "Sabitle", isOn: $pinned)
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
+        } footerLeading: {
+            EmptyView()
+        } footerTrailing: {
+            SadeButton(title: "İptal", action: onCancel)
+            SadeButton(title: "Kaydet", role: .primary, enabled: canSave, action: onSave)
+        }
+        .frame(width: 560)
     }
 }

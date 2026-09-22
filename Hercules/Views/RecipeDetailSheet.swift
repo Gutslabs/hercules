@@ -2,8 +2,9 @@ import SwiftUI
 import LucideKit
 import SwiftData
 
-/// V1 tarif detayı — plan şeridi + makro satırı + malzeme/yapılış iki kolonda,
-/// altta "Bugüne logla" (tarifi bugünün öğünlerine FoodEntry olarak ekler).
+/// Tarif penceresi — tasarım: tuval ▸ Pencereler · Beslenme (az yazı). Başlıkta ad + kategori/süre/
+/// porsiyon, sağda favori kalbi; kalori + makro çubuğu, kısa özet, malzeme/yapılış iki kolonda;
+/// altta kaynak linki ve "Bugüne logla" (tarifi bugünün öğünlerine FoodEntry olarak ekler).
 struct RecipeDetailSheet: View {
     let recipe: Recipe
     @Environment(\.modelContext) private var ctx
@@ -11,206 +12,169 @@ struct RecipeDetailSheet: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Kategori + aksiyonlar
-            HStack(spacing: 8) {
-                Circle().fill(recipe.category.displayTint).frame(width: 5, height: 5)
-                Text(recipe.category.label).eyebrow()
-                Spacer()
-                Button {
-                    recipe.isFavorite.toggle()
-                    ctx.saveOrReport()
-                } label: {
-                    Lucide(sf: recipe.isFavorite ? "heart.fill" : "heart", size: 12)
-                        .foregroundStyle(recipe.isFavorite ? Palette.warning : Palette.textTertiary)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
-                Button {
-                    dismiss()
-                } label: {
-                    Lucide(sf: "xmark", size: 11)
-                        .foregroundStyle(Palette.textTertiary)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
-                .help("Kapat")
-            }
-
-            // Başlık + kcal/makro
-            HStack(alignment: .top, spacing: 32) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(recipe.title)
-                        .font(.system(size: 21, weight: .bold))
-                        .tracking(-0.2)
-                        .foregroundStyle(Palette.textPrimary)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let summary = cleanText(recipe.summary) {
-                        Text(summary)
-                            .font(.system(size: 12.5, weight: .regular))
-                            .foregroundStyle(Palette.textTertiary)
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .trailing, spacing: 0) {
+        SadeSheet(title: recipe.title, subtitle: metaLine, onClose: { dismiss() }, accessory: AnyView(favoriteButton)) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 30) {
                     if let kcal = recipe.calories {
-                        Text(Fmt.int(kcal))
-                            .font(.system(size: 36, weight: .bold))
-                            .monospacedDigit()
-                            .tracking(-0.5)
-                            .foregroundStyle(Palette.textPrimary)
-                        Text("kcal / porsiyon")
-                            .font(.system(size: 10.5, weight: .regular))
-                            .foregroundStyle(Palette.textQuaternary)
-                    }
-                    RecipeMacroDots(recipe: recipe, fontSize: 12)
-                        .padding(.top, 10)
-                }
-                .fixedSize()
-            }
-            .padding(.top, 12)
-
-            // Plan meta satırı
-            Hairline().padding(.top, 14)
-            HStack(spacing: 0) {
-                Text(metaLine)
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(Palette.textSecondary)
-                if let host = recipe.sourceHost, let url = recipe.url {
-                    Text(" · ")
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(Palette.textSecondary)
-                    Button {
-                        openURL(url)
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text(host)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            Lucide(sf: "arrow.up.right", size: 8)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(Fmt.int(kcal))
+                                .font(.system(size: 38, weight: .semibold).monospacedDigit())
+                                .tracking(-0.5)
+                                .foregroundStyle(Palette.textPrimary)
+                            Text("kcal")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Palette.textTertiary)
                         }
-                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize()
                     }
-                    .buttonStyle(.plain)
-                    .help("Kaynağı aç")
+                    if recipe.protein != nil || recipe.carbs != nil || recipe.fat != nil {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SadeMacroBar(protein: recipe.protein, carbs: recipe.carbs, fat: recipe.fat)
+                            SadeMacroLegend(protein: recipe.protein, carbs: recipe.carbs, fat: recipe.fat)
+                        }
+                    } else if recipe.calories == nil {
+                        Text("Makro yok")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.textTertiary)
+                    }
                 }
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 12)
+                .padding(.top, 18)
 
-            // Malzemeler + Yapılış — popup içeriğe sarılır, sabit boşluk yok
+                if let summary = cleanText(recipe.summary) {
+                    Text(summary)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 14)
+                }
+            }
+            .padding(.horizontal, 28)
+
+            SadeRule()
+                .padding(.top, 18)
+
             if recipe.hasDetail {
-                HStack(alignment: .top, spacing: 36) {
-                    ingredientsColumn
-                        .frame(width: 300, alignment: .topLeading)
-                    stepsColumn
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                ScrollView {
+                    HStack(alignment: .top, spacing: 36) {
+                        ingredientsColumn
+                            .frame(width: 280, alignment: .topLeading)
+                        stepsColumn
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 20)
+                    .padding(.bottom, 24)
                 }
-                .padding(.top, 20)
+                .scrollBounceBehavior(.basedOnSize)
             } else {
-                Text("Bu tarif eski link formatında kayıtlı. AI ile yeniden ekletirsen malzeme, yapılış ve makrolar da burada görünür.")
-                    .font(Typography.body)
+                Text("Eski link kaydı — malzeme ve yapılış yok")
+                    .font(.system(size: 13))
                     .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 18)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 22)
             }
-
-            // Footer
-            Hairline().padding(.top, 22)
-            HStack(spacing: 12) {
-                Button {
-                    logToToday()
-                } label: {
-                    Text("Bugüne logla")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Palette.btnFg)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(recipe.calories == nil ? Palette.accent.opacity(0.35) : Palette.accent)
-                        )
+        } footerLeading: {
+            if let host = recipe.sourceHost, let url = recipe.url {
+                Button { openURL(url) } label: {
+                    HStack(spacing: 4) {
+                        Text(host)
+                            .font(.system(size: 13))
+                        Lucide(sf: "arrow.up.right", size: 11)
+                    }
+                    .foregroundStyle(Palette.textSecondary)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(recipe.calories == nil)
-                .help(recipe.calories == nil ? "Kalori bilgisi olmadan loglanamaz" : "Bu tarifi bugünün öğünlerine ekle")
-                Spacer()
-                Text("eklendi \(Fmt.dateLong.string(from: recipe.createdAt))")
-                    .font(.system(size: 10.5, weight: .regular))
-                    .foregroundStyle(Palette.textQuaternary)
+                .help("Kaynağı aç")
             }
-            .padding(.top, 16)
+        } footerTrailing: {
+            SadeButton(title: "Bugüne logla", icon: "plus", role: .primary, enabled: recipe.calories != nil, bindsKey: false) {
+                logToToday()
+            }
+            .help(recipe.calories == nil ? "Kalori bilgisi olmadan loglanamaz" : "Bu tarifi bugünün öğünlerine ekle")
         }
-        .padding(.horizontal, 36)
-        .padding(.top, 28)
-        .padding(.bottom, 24)
-        .frame(width: 780)
-        .background(Palette.background)
+        .frame(width: 840, height: recipe.hasDetail ? 600 : nil)
+    }
+
+    private var favoriteButton: some View {
+        Button {
+            recipe.isFavorite.toggle()
+            ctx.saveOrReport()
+        } label: {
+            Lucide(sf: recipe.isFavorite ? "heart.fill" : "heart", size: 13)
+                .foregroundStyle(recipe.isFavorite ? Palette.negative : Palette.textSecondary)
+                .frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.textPrimary.opacity(0.05)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(recipe.isFavorite ? "Favoriden çıkar" : "Favoriye ekle")
     }
 
     // MARK: - Kolonlar
 
     private var ingredientsColumn: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Malzemeler").eyebrow()
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(recipe.ingredientLines.enumerated()), id: \.offset) { _, line in
-                    let parts = Self.splitIngredient(line)
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(parts.name)
-                            .font(.system(size: 13.5, weight: .regular))
-                            .foregroundStyle(Palette.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if let qty = parts.qty {
-                            Text(qty)
-                                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                .foregroundStyle(Palette.textQuaternary)
-                                .fixedSize()
-                        }
+        VStack(alignment: .leading, spacing: 0) {
+            columnTitle("Malzemeler")
+            ForEach(Array(recipe.ingredientLines.enumerated()), id: \.offset) { _, line in
+                let parts = Self.splitIngredient(line)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(parts.name)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let qty = parts.qty {
+                        Text(qty)
+                            .font(.system(size: 13).monospacedDigit())
+                            .foregroundStyle(Palette.textTertiary)
+                            .fixedSize()
                     }
                 }
+                .padding(.vertical, 10)
+                .overlay(alignment: .top) { SadeRule().opacity(0.8) }
             }
         }
     }
 
     private var stepsColumn: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Yapılış").eyebrow()
-            VStack(alignment: .leading, spacing: 11) {
-                ForEach(Array(recipe.instructionLines.enumerated()), id: \.offset) { idx, step in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("\(idx + 1)")
-                            .font(.system(size: 11.5, weight: .regular, design: .monospaced))
-                            .foregroundStyle(Palette.accent)
-                            .frame(width: 15, alignment: .leading)
-                        Text(step)
-                            .font(.system(size: 13.5, weight: .regular))
-                            .foregroundStyle(Palette.textSecondary)
-                            .lineSpacing(4)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            columnTitle("Yapılış")
+            ForEach(Array(recipe.instructionLines.enumerated()), id: \.offset) { idx, step in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("\(idx + 1)")
+                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .overlay(Circle().strokeBorder(Palette.textPrimary.opacity(0.16), lineWidth: 1.5))
+                        .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
+                    Text(step)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.vertical, 8)
             }
         }
     }
 
+    private func columnTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.bottom, 8)
+    }
+
     // MARK: - Derived
 
+    /// "Akşam · 35 dk · 2 porsiyon"
     private var metaLine: String {
-        var parts: [String] = []
-        if let s = recipe.servings { parts.append("\(s) porsiyon") }
+        var parts = [recipe.category == .dinner ? "Akşam" : recipe.category.label]
         if let m = recipe.prepMinutes { parts.append("\(m) dk") }
-        let ing = recipe.ingredientLines.count
-        if ing > 0 { parts.append("\(ing) malzeme") }
-        let steps = recipe.instructionLines.count
-        if steps > 0 { parts.append("\(steps) adım") }
+        if let s = recipe.servings { parts.append("\(s) porsiyon") }
         return parts.joined(separator: " · ")
     }
 

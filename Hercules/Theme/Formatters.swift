@@ -95,6 +95,14 @@ enum Fmt {
         return f
     }()
 
+    /// "7 Eylül Pazartesi" — günün thread'inin kök mesajı (bkz. `ChatDailyThread`).
+    static let dayMonthWeekday: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMMM EEEE"
+        return f
+    }()
+
     static let dateMonthAxis: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "tr_TR")
@@ -102,7 +110,7 @@ enum Fmt {
         return f
     }()
 
-    /// Shared formatters used by per-row cell views (DayCell/WorkoutDayCell/etc).
+    /// Shared formatters used by per-row cell views (DayCell etc.).
     /// Hoisted here so a 42-cell calendar grid doesn't allocate 42 formatters per render.
     static let dayNumber: DateFormatter = {
         let f = DateFormatter()
@@ -117,6 +125,18 @@ enum Fmt {
         f.dateFormat = "HH:mm"
         return f
     }()
+
+    private static let weekdayShortFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "EEE"
+        return f
+    }()
+
+    /// "Sal" — kısa gün adı.
+    static func weekdayShort(_ date: Date) -> String {
+        weekdayShortFormatter.string(from: date)
+    }
 
     static let monthShort: DateFormatter = {
         let f = DateFormatter()
@@ -134,6 +154,16 @@ enum Fmt {
 
     static func relative(_ date: Date) -> String {
         relativeFormatter.localizedString(for: date, relativeTo: .now)
+    }
+
+    /// "18 Mayıs'tan beri" / "22 Eylül'den beri" — ayrılma eki ay adına göre çekilir:
+    /// son ünlü kalınsa -an, inceyse -en; sert ünsüzle bitiyorsa t-, yoksa d-.
+    static func since(_ date: Date) -> String {
+        let text = dayMonth.string(from: date)
+        let lower = text.lowercased(with: Locale(identifier: "tr_TR"))
+        let back = lower.last(where: { "aeıioöuü".contains($0) }).map { "aıou".contains($0) } ?? true
+        let voiceless = lower.last.map { "fstkçşhp".contains($0) } ?? false
+        return "\(text)'\(voiceless ? "t" : "d")\(back ? "a" : "e")n beri"
     }
 
     static func signed(_ v: Double, digits: Int = 1) -> String {

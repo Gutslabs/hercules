@@ -8,6 +8,9 @@ struct RemoteAIChatRequest: Codable, Sendable {
     var newUserText: String
     var userContext: String?
     var images: [Data]
+    /// Telefonun yazdığı konuşma. Verilirse Mac turu O kanala ekler; boşsa yeni
+    /// konuşma açar. Eski istemciler bu alanı göndermez (opsiyonel → uyumlu).
+    var conversationID: UUID?
 }
 
 struct RemoteAIChatResponse: Codable, Sendable {
@@ -16,6 +19,32 @@ struct RemoteAIChatResponse: Codable, Sendable {
     var searchEvidence: AIWebSearchEvidence?
     var provider: String
     var model: String
+    /// Turun yazıldığı konuşma — telefon bir sonraki mesajı buraya ekler.
+    var conversationID: UUID?
+}
+
+/// Mac'in kimliği: koç adı, profil ve koç fotoğrafları. Telefonda ayrı bir
+/// özelleştirme YOK — ne Mac'te seçildiyse telefon onu gösterir.
+struct RemoteAIIdentityResponse: Codable, Sendable {
+    var coachName: String
+    var profileAvatar: Data?
+    var coachAvatar: Data?
+    /// İçeriğin parmak izi; değişmediyse telefon diske tekrar yazmaz.
+    var signature: String
+}
+
+/// Eşleştirme durumu — onaysız telefonun görebildiği tek cevap.
+struct RemoteAIIrohPairResponse: Codable, Sendable {
+    var endpointId: String
+    var paired: Bool
+    var pending: Bool
+}
+
+/// Mac'in kanalının tam aynası. Telefon kendi kopyasını tutmaz; bunu aynalar.
+struct RemoteAIChatHistoryResponse: Codable, Sendable {
+    var conversations: [ChatConversation]
+    var currentConversationID: UUID?
+    var savedAt: Date
 }
 
 struct RemoteAICompletionRequest: Codable, Sendable {
@@ -141,6 +170,55 @@ final class RemoteAIClient: AIClient {
         return (result, evidence)
     }
 
+    /// Kanal senkronlu gönderim: Mac turu KENDİ kanalına yazar ve konuşma
+    /// id'sini geri verir. Telefon böylece Mac'in geçmişini aynalar, ayrı bir
+    /// kopya biriktirmez. `nil` dönerse Mac o an akıştaydı ve yazamadı.
+    func sendInChannel(
+        conversationID: UUID?,
+        history: [ChatTurn],
+        newUserText: String,
+        userContext: String?,
+        images: [Data]
+    ) async throws -> (AIFoodResult, AIWebSearchEvidence?, UUID?) {
+        let payload = RemoteAIChatRequest(
+            history: history,
+            newUserText: newUserText,
+            userContext: userContext,
+            images: images,
+            conversationID: conversationID
+        )
+        let body = try JSONEncoder.remoteAI.encode(payload)
+        let (data, response) = try await request(path: "v1/chat", method: "POST", body: body)
+        try Self.validate(response: response, data: data)
+        let decoded = try JSONDecoder.remoteAI.decode(RemoteAIChatResponse.self, from: data)
+        let evidence = decoded.searchEvidence ?? decoded.searchQuery.map {
+            AIWebSearchEvidence(query: $0, completedSuccessfully: false, sourceURLs: [])
+        }
+        let result = AIModelIngress.sanitized(decoded.result, searchEvidence: evidence)
+        return (result, evidence, decoded.conversationID)
+    }
+
+    /// Eşleştirme durumu. Onaysızken çalışan TEK uç budur.
+    func irohPairStatus() async throws -> RemoteAIIrohPairResponse {
+        let (data, response) = try await request(path: "v1/iroh/pair", method: "GET", body: nil)
+        try Self.validate(response: response, data: data)
+        return try JSONDecoder.remoteAI.decode(RemoteAIIrohPairResponse.self, from: data)
+    }
+
+    /// Mac'in koç adı + avatarları.
+    func identity() async throws -> RemoteAIIdentityResponse {
+        let (data, response) = try await request(path: "v1/identity", method: "GET", body: nil)
+        try Self.validate(response: response, data: data)
+        return try JSONDecoder.remoteAI.decode(RemoteAIIdentityResponse.self, from: data)
+    }
+
+    /// Mac'in kanalının tam aynası.
+    func chatHistory() async throws -> RemoteAIChatHistoryResponse {
+        let (data, response) = try await request(path: "v1/chat/history", method: "GET", body: nil)
+        try Self.validate(response: response, data: data)
+        return try JSONDecoder.remoteAI.decode(RemoteAIChatHistoryResponse.self, from: data)
+    }
+
     func complete(systemPrompt: String, userPrompt: String) async throws -> String {
         try await complete(systemPrompt: systemPrompt, userPrompt: userPrompt, images: [])
     }
@@ -179,14 +257,31 @@ final class RemoteAIClient: AIClient {
     }
 
     private func request(path: String, method: String, body: Data?) async throws -> (Data, HTTPURLResponse) {
-        guard let baseURL else { throw RemoteAIClientError.invalidBaseURL }
-        let url = baseURL.appendingPathComponent(path)
+        let timeout: TimeInterval = method == "GET" ? 6 : 150
+        // baseURL yoksa bile iroh yolu çalışabilir: eşleştirme QR'dan gelir,
+        // Tailscale adresine hiç ihtiyaç duymaz.
+        let url = (baseURL ?? URL(string: "http://hercules.local")!).appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
-        request.timeoutInterval = method == "GET" ? 6 : 150
+        request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+
+        #if os(iOS)
+        // ÖNCE IROH: telefonda VPN profili gerektirmeyen doğrudan QUIC yolu.
+        // Tutmazsa sessizce Tailscale'e düşeriz — kullanıcı fark etmez, ama
+        // `lastPathWasIroh` göstergesi hangi yoldan gidildiğini söyler.
+        if HerculesIrohTransport.isAvailable {
+            do {
+                return try await HerculesIrohTransport.shared.perform(request, timeout: timeout)
+            } catch {
+                HerculesIrohTransport.noteFallback()
+            }
+        }
+        #endif
+
+        guard baseURL != nil else { throw RemoteAIClientError.invalidBaseURL }
         let (data, rawResponse) = try await session.data(for: request)
         guard let response = rawResponse as? HTTPURLResponse else {
             throw RemoteAIClientError.invalidResponse
@@ -264,6 +359,84 @@ struct RemoteAIConfiguration: Equatable, Sendable {
     }
 }
 
+/// Iroh ile eşleştirilmiş telefon anahtarları. Relay ve uygulama AYNI dosyayı
+/// okur; uygulama yazar, relay ve yetki katmanı yalnız okur.
+enum IrohPairedPeers {
+    struct Payload: Codable {
+        var paired: [String] = []
+        /// Bağlanmayı deneyen ama henüz onaylanmamış uçlar (relay yazar).
+        var pending: [String] = []
+    }
+
+    static var url: URL {
+        let base = (try? FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )) ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        return base
+            .appendingPathComponent("Hercules", isDirectory: true)
+            .appendingPathComponent("iroh-peers.json")
+    }
+
+    /// Her istekte diskten okunur: uygulamadan bir telefon onaylanınca relay'i
+    /// yeniden başlatmak gerekmesin.
+    static func load() -> Payload {
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data)
+        else { return Payload() }
+        return payload
+    }
+
+    static func contains(_ endpointID: String) -> Bool {
+        load().paired.contains(endpointID)
+    }
+
+    static func save(_ payload: Payload) {
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    static func pair(_ endpointID: String) {
+        let clean = endpointID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard clean.count == 64, clean.allSatisfy(\.isHexDigit) else { return }
+        var payload = load()
+        payload.pending.removeAll { $0 == clean }
+        guard !payload.paired.contains(clean) else { save(payload); return }
+        payload.paired.append(clean)
+        save(payload)
+    }
+
+    static func reject(_ endpointID: String) {
+        var payload = load()
+        payload.pending.removeAll { $0 == endpointID }
+        save(payload)
+    }
+
+    static func revoke(_ endpointID: String) {
+        var payload = load()
+        payload.paired.removeAll { $0 == endpointID }
+        payload.pending.removeAll { $0 == endpointID }
+        save(payload)
+    }
+
+    /// Relay'in yayınladığı Mac kimliği + ticket (QR bunu taşır).
+    struct Published: Codable {
+        var endpointId: String
+        var ticket: String
+        var updatedAt: String
+    }
+
+    static var publishedURL: URL {
+        url.deletingLastPathComponent().appendingPathComponent("iroh-endpoint.json")
+    }
+
+    static func published() -> Published? {
+        guard let data = try? Data(contentsOf: publishedURL) else { return nil }
+        return try? JSONDecoder().decode(Published.self, from: data)
+    }
+}
+
 enum RemoteAIRequestAccess: Equatable {
     case local
     case remote(user: String)
@@ -275,6 +448,23 @@ enum RemoteAIRequestAccess: Equatable {
     ) -> RemoteAIRequestAccess {
         let headers = Dictionary(uniqueKeysWithValues: rawHeaders.map { ($0.key.lowercased(), $0.value) })
         let host = headers["host"]?.lowercased() ?? ""
+
+        // IROH YOLU: kimlik bir e-posta değil kriptografik anahtardır ve bu
+        // başlığı isteğe RELAY yazar — QUIC handshake'inde doğruladıktan sonra.
+        // Relay, istemcinin gönderdiği aynı adlı başlığı atar, yani buraya gelen
+        // değer taklit edilemez. Yetkiyi `allowedUsers` değil eşleştirme listesi
+        // (iroh-peers.json) verir; oraya yazma yetkisi yalnız uygulamadadır.
+        if let peer = headers["x-hercules-iroh-endpoint"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !peer.isEmpty {
+            guard configuration.enabled else {
+                return .denied("Hercules uzaktan AI erişimi kapalı.")
+            }
+            guard IrohPairedPeers.contains(peer) else {
+                return .denied("Bu telefon bu Mac ile eşleşmemiş.")
+            }
+            return .remote(user: "iroh:\(peer)")
+        }
+
         let identity = headers["tailscale-user-login"]
             ?? headers["tailscale-user-name"]
             ?? headers["x-tailscale-user-login"]
@@ -493,6 +683,48 @@ final class RemoteAIServer {
             return
         }
 
+        // Eşleştirme yolu: relay onaysız uçların YALNIZ buraya gelmesine izin
+        // verir. Burada hiçbir veri yoktur — telefon "beni gördün mü, onaylandım
+        // mı" diye sorar; onay Mac'te elle verilir.
+        if request.method == "GET", path == "/v1/iroh/pair" {
+            let peer = request.headers.first { $0.key.lowercased() == "x-hercules-iroh-endpoint" }?.value ?? ""
+            let clean = peer.trimmingCharacters(in: .whitespacesAndNewlines)
+            let state = IrohPairedPeers.load()
+            sendJSON(
+                RemoteAIIrohPairResponse(
+                    endpointId: clean,
+                    paired: state.paired.contains(clean),
+                    pending: state.pending.contains(clean)
+                ),
+                on: connection
+            )
+            return
+        }
+
+        if request.method == "GET", path == "/v1/identity" {
+            Task { @MainActor [weak self] in
+                guard let self else { connection.cancel(); return }
+                self.sendJSON(Self.identityPayload(), on: connection)
+            }
+            return
+        }
+
+        if request.method == "GET", path == "/v1/chat/history" {
+            Task { @MainActor [weak self] in
+                guard let self else { connection.cancel(); return }
+                let snapshot = ChatStore.shared.remoteHistorySnapshot()
+                self.sendJSON(
+                    RemoteAIChatHistoryResponse(
+                        conversations: snapshot.conversations,
+                        currentConversationID: snapshot.currentID,
+                        savedAt: .now
+                    ),
+                    on: connection
+                )
+            }
+            return
+        }
+
         if request.method == "GET", path == "/v1/island/status" {
             Task { @MainActor [weak self] in
                 guard let self else { connection.cancel(); return }
@@ -629,6 +861,30 @@ final class RemoteAIServer {
     }
 
     @MainActor
+    /// Avatarlar tam çözünürlük gönderilmez: telefon 256px'te gösteriyor,
+    /// dosya megabaytlarca olabiliyor.
+    private static func identityPayload() -> RemoteAIIdentityResponse {
+        func compact(_ raw: Data?) -> Data? {
+            guard let raw else { return nil }
+            return ChatImageStore.downscaledJPEG(from: raw, maxPixel: 512, quality: 0.85) ?? raw
+        }
+        let profile = compact(ProfileAvatarStore.data())
+        let coach = compact(CoachAvatarStore.data())
+        let name = CoachIdentity.name
+        var hasher = Hasher()
+        hasher.combine(name)
+        hasher.combine(profile?.count ?? 0)
+        hasher.combine(coach?.count ?? 0)
+        hasher.combine(profile?.prefix(64))
+        hasher.combine(coach?.prefix(64))
+        return RemoteAIIdentityResponse(
+            coachName: name,
+            profileAvatar: profile,
+            coachAvatar: coach,
+            signature: String(hasher.finalize())
+        )
+    }
+
     private func processChat(_ request: RemoteAIChatRequest) async throws -> RemoteAIChatResponse {
         try Task.checkCancellation()
         guard let context else { throw RemoteAIClientError.server(503, "Veri katmanı hazır değil.") }
@@ -648,7 +904,18 @@ final class RemoteAIServer {
             dataSnapshot: data
         )
         try Task.checkCancellation()
-        let effectiveContext = Self.joinContext(request.userContext, appContext, skillContext)
+        // Telefon geçmiş bir günün thread'ine yazıyorsa model kaydı o günle ansın
+        // (pencerede `ChatStore.send` ile aynı not; günü yine host seçer).
+        let threadNote = await MainActor.run {
+            ChatDailyThread.contextNote(
+                for: ChatStore.shared.conversations.first { $0.id == request.conversationID }
+            )
+        }
+        let effectiveContext = Self.joinContext(
+            request.userContext,
+            [threadNote, appContext].compactMap { $0 }.joined(separator: "\n\n"),
+            skillContext
+        )
         let store = AIKeyStore.shared
         var searchQuery: String?
         let (result, searchEvidence) = try await store.makeClient().send(
@@ -661,12 +928,34 @@ final class RemoteAIServer {
         )
         try Task.checkCancellation()
         searchQuery = searchEvidence?.query ?? searchQuery
+
+        // Tur Mac'in kanalına yazılır: telefon ve pencere AYNI geçmişi görsün.
+        // Pencerede akış sürüyorsa yazım atlanır (nil döner) — o an yazılan tur
+        // bozulmasın; telefon böyle bir durumda turu yalnız kendinde gösterir.
+        let answer = result.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let assistantTurn = ChatTurn(
+            role: .assistant,
+            text: answer.isEmpty ? (result.name ?? "Yanıt boş geldi.") : answer,
+            food: result.isFood ? result : nil,
+            actions: result.actionList,
+            searchedFor: (
+                searchEvidence?.completedSuccessfully == true
+                && searchEvidence?.sourceURLs.isEmpty == false
+            ) ? searchEvidence?.query : nil
+        )
+        let conversationID = await ChatStore.shared.appendRemoteExchange(
+            conversationID: request.conversationID,
+            userTurn: ChatTurn(role: .user, text: request.newUserText),
+            assistantTurn: assistantTurn
+        )
+
         return RemoteAIChatResponse(
             result: result,
             searchQuery: searchQuery,
             searchEvidence: searchEvidence,
             provider: store.provider.label,
-            model: store.model
+            model: store.model,
+            conversationID: conversationID
         )
     }
 
@@ -939,6 +1228,19 @@ final class RemoteAIServer {
                 temperature: isConversation ? 0.45 : 0.3,
                 maxTokens: isConversation ? 6_000 : nil,
                 images: request.images
+            )
+        case .claudeCode, .cursor, .grok:
+            // ACP harness'ları web araması/görsel taşımıyor; zorunlu arama isteği
+            // dürüstçe reddedilir, düz completion harness üzerinden akar.
+            if policy == .required {
+                throw RemoteAIClientError.server(
+                    503,
+                    "Seçili harness zorunlu kaynaklı web aramasını desteklemiyor."
+                )
+            }
+            text = try await AcpAgentClient(provider: store.provider).complete(
+                systemPrompt: request.systemPrompt,
+                userPrompt: request.userPrompt
             )
         }
         try Task.checkCancellation()

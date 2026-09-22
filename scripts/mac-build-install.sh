@@ -41,6 +41,49 @@ xcodebuild -project Hercules.xcodeproj -scheme "$SCHEME" \
 APP_SRC="$DERIVED/Build/Products/$CONFIG/Hercules.app"
 [ -d "$APP_SRC" ] || { echo "✗ Derlenen app bulunamadı: $APP_SRC"; exit 1; }
 
+# 1b) Iroh relay — telefonu VPN profili olmadan bağlayan yardımcı süreç.
+#
+# AYRI derived data ŞART: relay'in `Iroh.xcframework`'ü ile uygulamanın
+# `sentencepiece.xcframework`'ü aynı `include/module.modulemap` yoluna yazıyor.
+# Aynı ürün klasöründe derlenirlerse Xcode "Multiple commands produce" veriyor.
+# Ayrı klasörde derleyip binary'yi app bundle'ına elle kopyalıyoruz.
+RELAY_DERIVED="build/DD-relay-install"
+echo "▸ Iroh relay derleniyor…"
+xcodebuild -project Hercules.xcodeproj -scheme "hercules-iroh-relay" \
+  -configuration "$CONFIG" -destination 'platform=macOS' \
+  -derivedDataPath "$RELAY_DERIVED" \
+  CODE_SIGN_STYLE=Automatic \
+  build >/dev/null
+
+RELAY_SRC="$RELAY_DERIVED/Build/Products/$CONFIG/hercules-iroh-relay"
+[ -f "$RELAY_SRC" ] || { echo "✗ Relay binary bulunamadı: $RELAY_SRC"; exit 1; }
+
+# Bundle'a sonradan dosya koymak imzayı geçersiz kılar → app'i yeniden imzalamalıyız.
+# Entitlement'ları KAYNAK plist'ten alamayız: orada $(ICLOUD_CONTAINER_ENVIRONMENT)
+# gibi build değişkenleri var ve codesign onları GENİŞLETMEZ — bundle'a düz metin
+# olarak yazar, CloudKit senkronu sessizce ölür. Bu yüzden değerleri Xcode'un zaten
+# genişlettiği İMZALI app'ten çekiyoruz.
+SIGNED_ENTS="$(mktemp)"
+trap 'rm -f "$ENTITLEMENTS" "$SIGNED_ENTS"' EXIT
+codesign -d --entitlements "$SIGNED_ENTS" --xml "$APP_SRC" 2>/dev/null \
+  || codesign -d --entitlements :- "$APP_SRC" >"$SIGNED_ENTS" 2>/dev/null
+grep -q 'ICLOUD_CONTAINER_ENVIRONMENT' "$SIGNED_ENTS" && {
+  echo "✗ İmzalı app'in entitlement'larında genişletilmemiş değişken var — imzalama bozuk."
+  exit 1
+}
+
+IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)"/\1/')"
+[ -n "$IDENTITY" ] || { echo "✗ İmza kimliği bulunamadı."; exit 1; }
+
+cp "$RELAY_SRC" "$APP_SRC/Contents/MacOS/hercules-iroh-relay"
+# Yardımcı sürecin iCloud/APS entitlement'ına ihtiyacı yok — yalnız ağ açar.
+codesign --force --options runtime --sign "$IDENTITY" \
+  "$APP_SRC/Contents/MacOS/hercules-iroh-relay" >/dev/null
+# `--deep` YOK: iç imzalar zaten geçerli, deep onları app'in entitlement'larıyla
+# ezerdi (Apple da deep'i imzalama için önermiyor).
+codesign --force --options runtime --sign "$IDENTITY" \
+  --entitlements "$SIGNED_ENTS" "$APP_SRC" >/dev/null
+
 # 2) İmza ad-hoc DEĞİL mi? (kararlılığın ön şartı)
 if codesign -dv "$APP_SRC" 2>&1 | grep -q "adhoc"; then
   echo "✗ App hâlâ ad-hoc imzalı — imzalama düzgün çalışmadı."
@@ -51,7 +94,6 @@ fi
 # CloudKit entitlement'ları gerçekten imzaya girdi mi? Kaynak plist'in doğru olması
 # yetmez; kurulan binary'de container + ortam yoksa cihaz senkronu çalışmaz.
 ENTITLEMENTS="$(mktemp)"
-trap 'rm -f "$ENTITLEMENTS"' EXIT
 codesign -d --entitlements :- "$APP_SRC" >"$ENTITLEMENTS" 2>/dev/null
 /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers' "$ENTITLEMENTS" \
   | grep -q "iCloud.com.samorai.hercules" || {

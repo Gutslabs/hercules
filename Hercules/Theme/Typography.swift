@@ -28,12 +28,12 @@ enum Typography {
 }
 
 extension Text {
-    /// Quieter eyebrow label — smaller, lower contrast, less tracking.
-    /// Use sparingly; section titles can stand alone in most places.
+    /// Buzz alt-bölüm etiketi (SubsectionLabel): 10pt semibold, uppercase,
+    /// geniş izleme, muted — bölüm başlıklarının sessiz üst satırı.
     func eyebrow() -> some View {
-        self.font(Typography.label)
-            .tracking(0.9)
+        self.font(.system(size: 10, weight: .semibold))
+            .tracking(1.2)
             .textCase(.uppercase)
-            .foregroundStyle(Palette.textQuaternary)
+            .foregroundStyle(Palette.textTertiary)
     }
 }
